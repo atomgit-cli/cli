@@ -211,7 +211,6 @@ func detailRunJSON() string {
 func TestFormatTime(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		tt := tt
 		name string
 		in   int64
 		want string
@@ -219,6 +218,7 @@ func TestFormatTime(t *testing.T) {
 		{name: "zero", in: 0, want: "-"},
 		{name: "negative", in: -1, want: "-"},
 	} {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := formatTime(tt.in); got != tt.want {

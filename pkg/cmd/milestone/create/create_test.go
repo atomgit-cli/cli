@@ -56,7 +56,6 @@ func TestNewCmdCreate(t *testing.T) {
 }
 
 func TestCreateRun_InvalidDueDateReturnsUsageExitCode(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()

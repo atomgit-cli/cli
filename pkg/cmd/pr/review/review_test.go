@@ -13,7 +13,6 @@ import (
 )
 
 func TestReviewRun_Approve(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -57,7 +56,6 @@ func TestReviewRun_Approve(t *testing.T) {
 }
 
 func TestReviewRun_ApproveWithComment(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -96,7 +94,6 @@ func TestReviewRun_ApproveWithComment(t *testing.T) {
 }
 
 func TestReviewRun_RequestChanges(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -137,7 +134,6 @@ func TestReviewRun_RequestChanges(t *testing.T) {
 }
 
 func TestReviewRun_RequestChangesWithComment(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -179,7 +175,6 @@ func TestReviewRun_RequestChangesWithComment(t *testing.T) {
 }
 
 func TestReviewRun_RequestChangesJSON(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -215,7 +210,6 @@ func TestReviewRun_RequestChangesJSON(t *testing.T) {
 }
 
 func TestReviewRun_NoActionReturnsUsageExitCode(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -312,7 +306,6 @@ func TestNewCmdReview(t *testing.T) {
 }
 
 func TestReviewRun_RequestChangesNoCommentJSON(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -344,7 +337,6 @@ func TestReviewRun_RequestChangesNoCommentJSON(t *testing.T) {
 }
 
 func TestReviewRun_ApproveAndRequestMutuallyExclusive(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -377,7 +369,6 @@ func TestReviewRun_ApproveAndRequestMutuallyExclusive(t *testing.T) {
 }
 
 func TestReviewRun_RequestChangesAPIError(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -405,7 +396,6 @@ func TestReviewRun_RequestChangesAPIError(t *testing.T) {
 }
 
 func TestReviewRun_RequestChangesWithCommentFile(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -454,7 +444,6 @@ func TestReviewRun_RequestChangesWithCommentFile(t *testing.T) {
 }
 
 func TestReviewRun_ForceWithRequestReturnsError(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -484,7 +473,6 @@ func TestReviewRun_ForceWithRequestReturnsError(t *testing.T) {
 }
 
 func TestReviewRun_ApproveWithCommentFile(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -533,7 +521,6 @@ func TestReviewRun_ApproveWithCommentFile(t *testing.T) {
 }
 
 func TestReviewRun_ForceApproveJSON(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -567,7 +554,6 @@ func TestReviewRun_ForceApproveJSON(t *testing.T) {
 }
 
 func TestReviewRun_ApproveJSON(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -595,7 +581,6 @@ func TestReviewRun_ApproveJSON(t *testing.T) {
 }
 
 func TestReviewRun_CommentOnlyJSON(t *testing.T) {
-	t.Parallel()
 	io, _, out, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -624,7 +609,6 @@ func TestReviewRun_CommentOnlyJSON(t *testing.T) {
 }
 
 func TestReviewRun_ApproveAPIError(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
@@ -651,7 +635,6 @@ func TestReviewRun_ApproveAPIError(t *testing.T) {
 }
 
 func TestReviewRun_CommentAndCommentFileMutuallyExclusive(t *testing.T) {
-	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	restoreToken := testutil.SetTestToken()
 	defer restoreToken()
