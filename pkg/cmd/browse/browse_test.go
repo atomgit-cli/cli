@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdBrowse(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -23,7 +24,9 @@ func TestNewCmdBrowse(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdBrowse(f, func(opts *BrowseOptions) error {
 				return nil
@@ -39,10 +42,12 @@ func TestNewCmdBrowse(t *testing.T) {
 }
 
 func TestNewCmdBrowseFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdBrowse(cmdutil.TestFactory(), func(opts *BrowseOptions) error {
 		return nil
 	})
 	for _, flag := range []string{"repo", "branch", "commit", "pr", "no-browser"} {
+		flag := flag
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)
@@ -51,6 +56,7 @@ func TestNewCmdBrowseFlagsExist(t *testing.T) {
 }
 
 func TestBuildURLRepoHome(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo"
@@ -60,6 +66,7 @@ func TestBuildURLRepoHome(t *testing.T) {
 }
 
 func TestBuildURLIssue(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Arg: "42"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/issues/42"
@@ -69,6 +76,7 @@ func TestBuildURLIssue(t *testing.T) {
 }
 
 func TestBuildURLPullRequest(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Arg: "42", PR: true}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/pulls/42"
@@ -78,6 +86,7 @@ func TestBuildURLPullRequest(t *testing.T) {
 }
 
 func TestBuildURLPath(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Arg: "releases"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/releases"
@@ -87,6 +96,7 @@ func TestBuildURLPath(t *testing.T) {
 }
 
 func TestBuildURLBranch(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Branch: "feature/test"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/tree/feature/test"
@@ -96,6 +106,7 @@ func TestBuildURLBranch(t *testing.T) {
 }
 
 func TestBuildURLCommit(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Commit: "abc123"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	// PathEscape escapes "abc123" as "abc123" (no special chars)
@@ -106,6 +117,7 @@ func TestBuildURLCommit(t *testing.T) {
 }
 
 func TestBuildURLCommitPriority(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Commit: "abc123", Branch: "main", Arg: "42"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/commit/abc123"
@@ -115,6 +127,7 @@ func TestBuildURLCommitPriority(t *testing.T) {
 }
 
 func TestBuildURLBranchPriority(t *testing.T) {
+	t.Parallel()
 	opts := &BrowseOptions{Branch: "main", Arg: "42"}
 	got := buildURL("gitcode.com", "owner", "repo", opts)
 	want := "https://gitcode.com/owner/repo/tree/main"
@@ -124,6 +137,7 @@ func TestBuildURLBranchPriority(t *testing.T) {
 }
 
 func TestBrowseRunNoBrowserPrintsURL(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO: io,
@@ -148,6 +162,7 @@ func TestBrowseRunNoBrowserPrintsURL(t *testing.T) {
 }
 
 func TestBrowseRunNonTTYPrintsURL(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO: io,
@@ -170,6 +185,7 @@ func TestBrowseRunNonTTYPrintsURL(t *testing.T) {
 }
 
 func TestBrowseRunOpensBrowser(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.TestTTY()
 	var openedURL string
 	opts := &BrowseOptions{
@@ -193,6 +209,7 @@ func TestBrowseRunOpensBrowser(t *testing.T) {
 }
 
 func TestBrowseRunIssueNumber(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO: io,
@@ -214,6 +231,7 @@ func TestBrowseRunIssueNumber(t *testing.T) {
 }
 
 func TestBrowseRunPRNumber(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO: io,
@@ -236,6 +254,7 @@ func TestBrowseRunPRNumber(t *testing.T) {
 }
 
 func TestBrowseRunMissingRepo(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO:         io,
@@ -252,6 +271,7 @@ func TestBrowseRunMissingRepo(t *testing.T) {
 }
 
 func TestIsNumeric(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  bool
@@ -264,6 +284,7 @@ func TestIsNumeric(t *testing.T) {
 		{"42abc", false},
 	}
 	for _, tt := range tests {
+		tt := tt
 		if got := isNumeric(tt.input); got != tt.want {
 			t.Errorf("isNumeric(%q) = %v, want %v", tt.input, got, tt.want)
 		}
@@ -271,6 +292,7 @@ func TestIsNumeric(t *testing.T) {
 }
 
 func TestResolveHostDefault(t *testing.T) {
+	t.Parallel()
 	host, err := resolveHost(func() (config.Config, error) {
 		return config.New(), nil
 	})
@@ -283,6 +305,7 @@ func TestResolveHostDefault(t *testing.T) {
 }
 
 func TestResolveHostNil(t *testing.T) {
+	t.Parallel()
 	host, err := resolveHost(nil)
 	if err != nil {
 		t.Fatalf("resolveHost(nil) error = %v", err)
@@ -293,6 +316,7 @@ func TestResolveHostNil(t *testing.T) {
 }
 
 func TestResolveHostAPIHostNormalization(t *testing.T) {
+	t.Parallel()
 	host, err := resolveHost(func() (config.Config, error) {
 		return config.New(), nil
 	})
@@ -305,6 +329,7 @@ func TestResolveHostAPIHostNormalization(t *testing.T) {
 }
 
 func TestResolveHostError(t *testing.T) {
+	t.Parallel()
 	_, err := resolveHost(func() (config.Config, error) {
 		return nil, fmt.Errorf("config error")
 	})
@@ -317,6 +342,7 @@ func TestResolveHostError(t *testing.T) {
 }
 
 func TestBrowseRunNoInteractiveSuppressesBrowser(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.TestTTY()
 	io.SetNoInteractive(true)
 	browserCalled := false
@@ -344,6 +370,7 @@ func TestBrowseRunNoInteractiveSuppressesBrowser(t *testing.T) {
 }
 
 func TestBrowseRunInvalidRepoFormat(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &BrowseOptions{
 		IO:         io,

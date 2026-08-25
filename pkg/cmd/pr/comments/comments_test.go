@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdComments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -50,7 +51,9 @@ func TestNewCmdComments(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			io, _, _, _ := iostreams.Test()
 			f := &cmdutil.Factory{
 				IOStreams: io,
@@ -85,6 +88,7 @@ func TestNewCmdComments(t *testing.T) {
 }
 
 func TestCommentsFlags(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	f := &cmdutil.Factory{
 		IOStreams: io,
@@ -117,6 +121,7 @@ func TestCommentsFlags(t *testing.T) {
 }
 
 func TestFormatID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    interface{}
@@ -145,7 +150,9 @@ func TestFormatID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := cmdutil.FormatAPIID(tt.input)
 			if result != tt.expected {
 				t.Errorf("FormatAPIID(%v) = %s, want %s", tt.input, result, tt.expected)
@@ -155,6 +162,7 @@ func TestFormatID(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		repo      string
@@ -187,7 +195,9 @@ func TestParseRepo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			owner, repo, err := parseRepo(tt.repo)
 			if tt.wantErr {
 				if err == nil {
@@ -209,6 +219,7 @@ func TestParseRepo(t *testing.T) {
 }
 
 func TestCommentsOptions(t *testing.T) {
+	t.Parallel()
 	opts := &CommentsOptions{
 		Number: 123,
 		Limit:  5,
@@ -284,6 +295,7 @@ func TestCommentsRunJSONEmptyOutput(t *testing.T) {
 }
 
 func TestCommentsRunValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		opts    *CommentsOptions
@@ -302,7 +314,9 @@ func TestCommentsRunValidation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			io, _, _, _ := iostreams.Test()
 			tt.opts.IO = io
 			tt.opts.HttpClient = func() (*http.Client, error) {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdUpdate(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdUpdate(cmdutil.TestFactory(), func(opts *UpdateOptions) error { return nil })
 	if cmd.Use != "update <wildcard>" {
 		t.Fatalf("Use = %q, want update", cmd.Use)

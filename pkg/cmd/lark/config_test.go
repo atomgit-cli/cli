@@ -66,6 +66,7 @@ func TestConfigGetRun_JSON(t *testing.T) {
 }
 
 func TestConfigSetCommand_RequiresDefaultChat(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := newCmdConfig(f, nil, nil)
 	// Run "config set" without --default-chat through the parent command so

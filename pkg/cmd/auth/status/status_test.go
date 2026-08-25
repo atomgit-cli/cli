@@ -18,6 +18,7 @@ type errWriter struct{}
 func (errWriter) Write(p []byte) (int, error) { return 0, errors.New("write failed") }
 
 func TestNewCmdStatus(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdStatus(f, nil)
 	if cmd == nil {

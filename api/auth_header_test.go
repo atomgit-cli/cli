@@ -9,6 +9,7 @@ import (
 )
 
 func TestListPRCommentsUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	var gotAuth string
 
@@ -34,6 +35,7 @@ func TestListPRCommentsUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestUpdateIssueUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	var gotAuth string
 
@@ -61,6 +63,7 @@ func TestUpdateIssueUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestGetReleaseUploadURLUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	var gotAuth string
 
@@ -89,6 +92,7 @@ func TestGetReleaseUploadURLUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestReviewPRUsesAuthorizationHeaderAndReviewEndpoint(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	var gotAuth string
 
@@ -117,6 +121,7 @@ func TestReviewPRUsesAuthorizationHeaderAndReviewEndpoint(t *testing.T) {
 }
 
 func TestReviewPRReturnsErrorMessageField(t *testing.T) {
+	t.Parallel()
 	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
 		return authTestResponse(http.StatusBadRequest, `{"error_code_name":"UN_KNOW","error_message":"403 Forbidden - You don't have the authority to approval this merge request."}`), nil
 	})
@@ -132,6 +137,7 @@ func TestReviewPRReturnsErrorMessageField(t *testing.T) {
 }
 
 func TestEditPRCommentUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var gotMethod string
 	var gotPath string
 	var gotAuth string
@@ -167,6 +173,7 @@ func TestEditPRCommentUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestDeletePRCommentUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var gotMethod string
 	var gotPath string
 	var gotAuth string
@@ -196,6 +203,7 @@ func TestDeletePRCommentUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestNewClientMapsGitCodeHostToAPIHost(t *testing.T) {
+	t.Parallel()
 	client := NewClient(&http.Client{}, "gitcode.com", "")
 	if client.Host() != DefaultHost {
 		t.Fatalf("Host() = %q, want %q", client.Host(), DefaultHost)

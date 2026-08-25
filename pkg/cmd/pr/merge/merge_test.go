@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewCmdMerge(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -53,7 +54,9 @@ func TestNewCmdMerge(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdMerge(f, func(opts *MergeOptions) error {
 				return nil
@@ -206,6 +209,7 @@ func (fn mergeRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func TestWrapMergeError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		err        error
@@ -239,7 +243,9 @@ func TestWrapMergeError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := wrapMergeError(tt.err)
 			if got == nil {
 				t.Fatal("wrapMergeError() = nil, want error")
@@ -255,6 +261,7 @@ func TestWrapMergeError(t *testing.T) {
 }
 
 func TestWrapMergeError_NotWrapped(t *testing.T) {
+	t.Parallel()
 	// Verify that wrapMergeError errors are unwrappable to CLIError
 	conflictErr := wrapMergeError(&api.APIError{StatusCode: 409, Message: "conflict"})
 	var cliErr *cmdutil.CLIError

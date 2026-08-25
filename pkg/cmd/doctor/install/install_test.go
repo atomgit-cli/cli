@@ -13,6 +13,7 @@ import (
 )
 
 func TestInspectUsesWrapperMetadataAndFindsCandidates(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	command := "gitcode"
 	if runtime.GOOS == "windows" {
@@ -42,6 +43,7 @@ func TestInspectUsesWrapperMetadataAndFindsCandidates(t *testing.T) {
 }
 
 func TestInspectDetectsBootstrapManifest(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "gitcode")
 	if err := os.WriteFile(binary, []byte("test"), 0o755); err != nil {
@@ -59,6 +61,7 @@ func TestInspectDetectsBootstrapManifest(t *testing.T) {
 }
 
 func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
+	t.Parallel()
 	first := t.TempDir()
 	second := t.TempDir()
 	name := "gitcode"
@@ -66,6 +69,7 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 		name += ".exe"
 	}
 	for _, dir := range []string{first, second} {
+		dir := dir
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -73,6 +77,7 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 	report := Inspect([]string{"PATH=" + first + string(os.PathListSeparator) + second}, runtime.GOOS, "", "", "")
 	found := false
 	for _, conflict := range report.Conflicts {
+		conflict := conflict
 		if strings.Contains(conflict, "gitcode is provided by multiple PATH directories") {
 			found = true
 		}
@@ -83,6 +88,7 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 }
 
 func TestDoctorInstallJSON(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdInstall(cmdutil.TestFactory(), "1.2.3", "abc", "today")
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)

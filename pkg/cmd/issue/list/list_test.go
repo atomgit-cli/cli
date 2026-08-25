@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -107,7 +108,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error {
 				return nil
@@ -123,6 +126,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestResolveOutputOptions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		opts    *ListOptions
@@ -168,7 +172,9 @@ func TestResolveOutputOptions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := resolveOutputOptions(tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveOutputOptions() error = %v, wantErr %v", err, tt.wantErr)
@@ -178,6 +184,7 @@ func TestResolveOutputOptions(t *testing.T) {
 }
 
 func TestNormalizeIssueListTime(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -212,7 +219,9 @@ func TestNormalizeIssueListTime(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := normalizeIssueListTime(tt.input, tt.endOfDay)
 			if tt.wantErr {
 				if err == nil {
@@ -231,6 +240,7 @@ func TestNormalizeIssueListTime(t *testing.T) {
 }
 
 func TestListRunRejectsOutputUsageErrorsBeforeHTTP(t *testing.T) {
+	t.Parallel()
 	httpCalled := false
 	opts := &ListOptions{
 		IO: cmdutil.TestFactory().IOStreams,
@@ -395,6 +405,7 @@ func TestListRunReturnsNotFoundForUnknownMilestoneNumber(t *testing.T) {
 }
 
 func TestResolveMilestoneFilterNumericBoundaries(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		value   string
@@ -410,7 +421,9 @@ func TestResolveMilestoneFilterNumericBoundaries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := resolveMilestoneFilter(nil, "owner", "repo", tt.value)
 			if tt.wantErr {
 				if err == nil || cmdutil.ExitCode(err) != cmdutil.ExitUsage {
@@ -467,6 +480,7 @@ func jsonResponse(status int, body string) *http.Response {
 }
 
 func TestResolvePerPage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		perPageSet bool
@@ -480,7 +494,9 @@ func TestResolvePerPage(t *testing.T) {
 		{name: "per-page set negative falls back to limit", perPageSet: true, perPage: -5, limit: 15, want: 15},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			opts := &ListOptions{Limit: tt.limit, PerPage: tt.perPage, PerPageSet: tt.perPageSet}
 			if got := resolvePerPage(opts); got != tt.want {
 				t.Fatalf("resolvePerPage() = %d, want %d", got, tt.want)
@@ -490,6 +506,7 @@ func TestResolvePerPage(t *testing.T) {
 }
 
 func TestTrimIssues(t *testing.T) {
+	t.Parallel()
 	mk := func(n int) []api.Issue { return make([]api.Issue, n) }
 	tests := []struct {
 		name       string
@@ -506,7 +523,9 @@ func TestTrimIssues(t *testing.T) {
 		{name: "under limit no truncation", issues: mk(2), limit: 5, limitSet: true, perPageSet: true, wantLen: 2},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			opts := &ListOptions{Limit: tt.limit, LimitSet: tt.limitSet, PerPageSet: tt.perPageSet}
 			got := trimIssues(tt.issues, opts)
 			if len(got) != tt.wantLen {

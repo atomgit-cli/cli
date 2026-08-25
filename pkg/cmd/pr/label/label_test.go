@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdLabel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -55,7 +56,9 @@ func TestNewCmdLabel(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdLabel(f, func(opts *LabelOptions) error {
 				return nil
@@ -237,6 +240,7 @@ func TestLabelRunAddEmptyAfterNormalizeDoesNotMutate(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 
 	for _, add := range []string{"", ",", " , , "} {
+		add := add
 		client := &http.Client{
 			Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 				t.Fatalf("no remote request expected for add %q; got %s %s", add, req.Method, req.URL.Path)

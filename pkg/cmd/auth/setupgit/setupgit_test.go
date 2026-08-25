@@ -10,6 +10,7 @@ import (
 )
 
 func TestNewCmdSetupGit(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdSetupGit(f, nil)
 	if cmd == nil {
@@ -159,6 +160,7 @@ func TestSetupGitRunAppendsWhenDifferentHelperExists(t *testing.T) {
 }
 
 func TestSetupGitRunConfigErrorReturnsError(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	f.IOStreams.Out = &strings.Builder{}
 	opts := &SetupGitOptions{
@@ -240,6 +242,7 @@ func TestSetupGitRunInvalidHostReturnsError(t *testing.T) {
 }
 
 func TestHasHelperValue(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		output string
@@ -253,7 +256,9 @@ func TestHasHelperValue(t *testing.T) {
 		{name: "whitespace trimmed", output: "  x  \n", helper: "x", want: true},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := hasHelperValue(tc.output, tc.helper); got != tc.want {
 				t.Errorf("hasHelperValue(%q, %q) = %v, want %v", tc.output, tc.helper, got, tc.want)
 			}

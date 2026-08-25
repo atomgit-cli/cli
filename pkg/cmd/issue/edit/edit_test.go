@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdEdit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -82,7 +83,9 @@ func TestNewCmdEdit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdEdit(f, func(opts *EditOptions) error {
 				// Mock run function - just validate
@@ -138,6 +141,7 @@ func TestEditRunJSONWritesUpdatedIssue(t *testing.T) {
 }
 
 func TestEditRun_NoEditOptions(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &EditOptions{
 		IO:         f.IOStreams,
@@ -156,6 +160,7 @@ func TestEditRun_NoEditOptions(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		repo      string
 		wantOwner string
@@ -170,7 +175,9 @@ func TestParseRepo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.repo, func(t *testing.T) {
+			t.Parallel()
 			owner, repo, err := parseRepo(tt.repo)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseRepo() error = %v, wantErr %v", err, tt.wantErr)

@@ -18,6 +18,7 @@ import (
 )
 
 func TestNewCmdCreate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -61,7 +62,9 @@ func TestNewCmdCreate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			// For validation tests, don't provide runF so actual validation runs
 			var cmd *cobra.Command
@@ -338,6 +341,7 @@ func TestCreateRunJSONWithWebReturnsUsageBeforeCreate(t *testing.T) {
 }
 
 func TestCreateRunJSONWithWebReturnsUsageBeforeAuth(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	called := false
 	opts := &CreateOptions{
@@ -372,6 +376,7 @@ func TestCreateRunJSONWithWebReturnsUsageBeforeAuth(t *testing.T) {
 }
 
 func TestFillFromLastCommit(t *testing.T) {
+	t.Parallel()
 	opts := &CreateOptions{
 		ExecGitCommand: func(name string, args ...string) (string, error) {
 			return "feat: add api auth cleanup\n\nBody line 1\nBody line 2\n", nil
@@ -572,6 +577,7 @@ func TestCreateRunUsesFactoryBranch(t *testing.T) {
 }
 
 func TestResolveHead(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		head        string
@@ -632,7 +638,9 @@ func TestResolveHead(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, warning, err := resolveHead(tt.head, tt.fork)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveHead() error = %v, wantErr %v", err, tt.wantErr)
@@ -810,6 +818,7 @@ func TestCreateRunNoLabels(t *testing.T) {
 }
 
 func TestNewCmdCreate_LabelsFlag(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdCreate(cmdutil.TestFactory(), func(opts *CreateOptions) error {
 		if len(opts.Labels) != 2 || opts.Labels[0] != "bug" || opts.Labels[1] != "feature" {
 			t.Fatalf("expected labels [bug, feature], got %v", opts.Labels)

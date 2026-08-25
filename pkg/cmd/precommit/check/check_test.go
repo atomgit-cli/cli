@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdCheck(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdCheck(f, nil)
 	if cmd == nil {
@@ -25,6 +26,7 @@ func TestNewCmdCheck(t *testing.T) {
 }
 
 func TestCheckRunNoConfigSkips(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	r := &stubRunner{}
 	opts := &CheckOptions{
@@ -41,6 +43,7 @@ func TestCheckRunNoConfigSkips(t *testing.T) {
 }
 
 func TestCheckRunNotReadyReturnsExit1(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	io, _, _, errOut := iostreams.Test()
@@ -63,6 +66,7 @@ func TestCheckRunNotReadyReturnsExit1(t *testing.T) {
 }
 
 func TestCheckRunReportsMissingPrePushHook(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHookNamed(t, dir, "pre-commit")
@@ -90,6 +94,7 @@ func TestCheckRunReportsMissingPrePushHook(t *testing.T) {
 }
 
 func TestCheckRunJSONPreservesLegacyHookField(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHookNamed(t, dir, "pre-commit")
@@ -118,6 +123,7 @@ func TestCheckRunJSONPreservesLegacyHookField(t *testing.T) {
 }
 
 func TestCheckRunJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHook(t, dir)
@@ -143,6 +149,7 @@ func TestCheckRunJSON(t *testing.T) {
 }
 
 func TestCheckRunNotInGitRepo(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &CheckOptions{
 		IO:      io,
@@ -156,6 +163,7 @@ func TestCheckRunNotInGitRepo(t *testing.T) {
 }
 
 func TestCheckRunNotInGitRepoJSON(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	opts := &CheckOptions{
 		IO:      io,
@@ -177,6 +185,7 @@ func TestCheckRunNotInGitRepoJSON(t *testing.T) {
 }
 
 func TestCheckRunFlagFailureExits1(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHook(t, dir)
@@ -210,6 +219,7 @@ func TestCheckRunFlagFailureExits1(t *testing.T) {
 }
 
 func TestCheckRunFlagFailureJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHook(t, dir)
@@ -239,6 +249,7 @@ func TestCheckRunFlagFailureJSON(t *testing.T) {
 }
 
 func TestCheckRunInstallFailureJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	io, _, out, _ := iostreams.Test()
@@ -271,6 +282,7 @@ func TestCheckRunInstallFailureJSON(t *testing.T) {
 }
 
 func TestCheckRunHookInstallFailureJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHookNamed(t, dir, "pre-commit")
@@ -304,6 +316,7 @@ func TestCheckRunHookInstallFailureJSON(t *testing.T) {
 }
 
 func TestCheckRunConfigInvalidJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	io, _, out, _ := iostreams.Test()
@@ -331,6 +344,7 @@ func TestCheckRunConfigInvalidJSON(t *testing.T) {
 }
 
 func TestCheckMutuallyExclusiveFlags(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdCheck(f, func(*CheckOptions) error { return nil })
 	cmd.SetArgs([]string{"--no-install", "--yes"})
@@ -342,6 +356,7 @@ func TestCheckMutuallyExclusiveFlags(t *testing.T) {
 }
 
 func TestCheckRunFlagSuccess(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeConfig(t, dir)
 	writeInstalledHook(t, dir)

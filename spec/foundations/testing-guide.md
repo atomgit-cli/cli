@@ -82,6 +82,7 @@ func TestLabelCmdWithError(t *testing.T) {}
 
 ```go
 func TestXxxCommand(t *testing.T) {
+    t.Parallel()
     tests := []struct {
         name    string
         args    []string
@@ -100,10 +101,51 @@ func TestXxxCommand(t *testing.T) {
     }
 
     for _, tt := range tests {
+        tt := tt
         t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
             // 测试逻辑
         })
     }
+}
+```
+
+### 并行测试
+
+基于 mock 的测试（使用 `cmdutil.TestFactory()` 或 `testutil` mock HTTP）应使用 `t.Parallel()` 并行化，以减少 CI 执行时间。
+
+**规则：**
+
+- 顶层 `Test*` 函数：在函数体首行调用 `t.Parallel()`
+- 子测试（`t.Run` 回调）：在回调体首行调用 `t.Parallel()`
+- `for` 循环中使用 `tt := tt` 闭包捕获模式
+- **禁止**在调用 `t.Parallel()` 的测试中使用 `t.Setenv()`：Go 1.22 中 `t.Setenv` 会在并行测试中 panic。需要环境变量的测试不应调用 `t.Parallel()`
+- `t.Setenv()` 在父级调用时，子测试仍可调用 `t.Parallel()`（因为父级未并行）
+
+**示例：**
+
+```go
+// 可并行化的测试（使用 mock HTTP）
+func TestListCmd(t *testing.T) {
+    t.Parallel()
+    tests := []struct{ ... }{ ... }
+
+    for _, tt := range tests {
+        tt := tt
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            f := cmdutil.TestFactory()
+            // 使用 testutil.NewRoundTripFunc 的 mock HTTP
+        })
+    }
+}
+
+// 不可并行化的测试（使用 t.Setenv）
+func TestListRunJSON(t *testing.T) {
+    // 不调用 t.Parallel()
+    t.Setenv("GC_TOKEN", "test-token")
+    f := cmdutil.TestFactory()
+    // ...
 }
 ```
 
@@ -233,7 +275,7 @@ func TestIssueCreate(t *testing.T) {
 ## 测试工具
 
 ### 表格驱动测试
-推荐使用表格驱动测试：
+推荐使用表格驱动测试，子测试使用 `tt := tt` 闭包捕获并调用 `t.Parallel()`：
 
 ```go
 tests := []struct {
@@ -246,7 +288,9 @@ tests := []struct {
 }
 
 for _, tt := range tests {
+    tt := tt
     t.Run(tt.name, func(t *testing.T) {
+        t.Parallel()
         got := process(tt.input)
         if got != tt.want {
             t.Errorf("got %q, want %q", got, tt.want)
@@ -276,4 +320,4 @@ func (m *MockClient) Do(req *Request) (*Response, error) {
 
 ---
 
-**最后更新**: 2026-03-26
+**最后更新**: 2026-08-25

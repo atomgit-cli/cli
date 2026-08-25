@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdComments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -40,7 +41,9 @@ func TestNewCmdComments(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdComments(cmdutil.TestFactory(), func(opts *CommentsOptions) error {
 				return nil
 			})
@@ -143,6 +146,7 @@ func TestCommentsRunValidation(t *testing.T) {
 }
 
 func TestFormatID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   interface{}
@@ -155,7 +159,9 @@ func TestFormatID(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := cmdutil.FormatAPIID(tt.in); got != tt.want {
 				t.Fatalf("FormatAPIID(%v) = %q, want %q", tt.in, got, tt.want)
 			}

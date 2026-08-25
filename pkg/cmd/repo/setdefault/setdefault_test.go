@@ -18,6 +18,7 @@ func testConfig(t *testing.T) config.Config {
 }
 
 func TestNewCmdSetDefault(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -31,7 +32,9 @@ func TestNewCmdSetDefault(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdSetDefault(f, func(opts *SetDefaultOptions) error {
 				return nil
@@ -47,10 +50,12 @@ func TestNewCmdSetDefault(t *testing.T) {
 }
 
 func TestNewCmdSetDefaultFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdSetDefault(cmdutil.TestFactory(), func(opts *SetDefaultOptions) error {
 		return nil
 	})
 	for _, flag := range []string{"view", "unset", "json"} {
+		flag := flag
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)
@@ -59,6 +64,7 @@ func TestNewCmdSetDefaultFlagsExist(t *testing.T) {
 }
 
 func TestSetDefaultExplicit(t *testing.T) {
+	t.Parallel()
 	io, _, _, errOut := iostreams.Test()
 	cfg := testConfig(t)
 	opts := &SetDefaultOptions{
@@ -83,6 +89,7 @@ func TestSetDefaultExplicit(t *testing.T) {
 }
 
 func TestSetDefaultFromGitContext(t *testing.T) {
+	t.Parallel()
 	io, _, _, errOut := iostreams.Test()
 	cfg := testConfig(t)
 	opts := &SetDefaultOptions{
@@ -104,6 +111,7 @@ func TestSetDefaultFromGitContext(t *testing.T) {
 }
 
 func TestViewDefaultEmpty(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	cfg := testConfig(t)
 	opts := &SetDefaultOptions{
@@ -121,6 +129,7 @@ func TestViewDefaultEmpty(t *testing.T) {
 }
 
 func TestViewDefaultSet(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	cfg := testConfig(t)
 	_ = cfg.Set(defaultHost, "default_repo", "owner/repo")
@@ -139,6 +148,7 @@ func TestViewDefaultSet(t *testing.T) {
 }
 
 func TestViewDefaultJSON(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	cfg := testConfig(t)
 	_ = cfg.Set(defaultHost, "default_repo", "owner/repo")
@@ -162,6 +172,7 @@ func TestViewDefaultJSON(t *testing.T) {
 }
 
 func TestViewDefaultJSONEmpty(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	cfg := testConfig(t)
 	opts := &SetDefaultOptions{
@@ -184,6 +195,7 @@ func TestViewDefaultJSONEmpty(t *testing.T) {
 }
 
 func TestSetDefaultNoRepoNoGit(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &SetDefaultOptions{
 		IO:       io,
@@ -202,6 +214,7 @@ func TestSetDefaultNoRepoNoGit(t *testing.T) {
 }
 
 func TestSetDefaultInvalidRepoFormat(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &SetDefaultOptions{
 		IO:         io,
@@ -220,6 +233,7 @@ func TestSetDefaultInvalidRepoFormat(t *testing.T) {
 }
 
 func TestUnsetDefault(t *testing.T) {
+	t.Parallel()
 	io, _, _, errOut := iostreams.Test()
 	cfg := testConfig(t)
 	_ = cfg.Set(defaultHost, "default_repo", "owner/repo")
@@ -242,6 +256,7 @@ func TestUnsetDefault(t *testing.T) {
 }
 
 func TestSetDefaultEmptyString(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &SetDefaultOptions{
 		IO:         io,

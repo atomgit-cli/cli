@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -26,7 +27,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -39,6 +42,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListJSONFlag(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error { return nil })
 	if cmd.Flags().Lookup("json") == nil {
 		t.Fatal("json flag missing")
@@ -212,6 +216,7 @@ func TestListRunTable(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"STATUS", "NAME", "IDENTIFIER", "SEQUENCE", "STEPS", "compile", "test"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("table output missing %q; output=%s", want, got)
 		}
@@ -240,6 +245,7 @@ func TestListRunHumanRendering(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"compile", "test", "steps"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("human output missing %q; output=%s", want, got)
 		}
@@ -273,6 +279,7 @@ func TestListRunError(t *testing.T) {
 }
 
 func TestResolveOutputFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		jsonFlag bool
@@ -287,7 +294,9 @@ func TestResolveOutputFormat(t *testing.T) {
 		{name: "json incompatible", jsonFlag: true, raw: "table", wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := resolveOutputFormat(tt.jsonFlag, tt.raw)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveOutputFormat() error = %v, wantErr %v", err, tt.wantErr)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -24,7 +25,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -40,6 +43,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestNewCmdViewEmptyRunID(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdView(f, nil)
 	cmd.SetArgs([]string{""})
@@ -51,6 +55,7 @@ func TestNewCmdViewEmptyRunID(t *testing.T) {
 }
 
 func TestNewCmdViewJSONFlag(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdView(cmdutil.TestFactory(), func(opts *ViewOptions) error {
 		return nil
 	})
@@ -144,6 +149,7 @@ func TestViewRunHumanRendering(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"CI", "#7", "run id", "build", "compile", "Stages"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("human output missing %q; output=%s", want, got)
 		}
@@ -203,7 +209,9 @@ func detailRunJSON() string {
 }
 
 func TestFormatTime(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
+		tt := tt
 		name string
 		in   int64
 		want string
@@ -212,6 +220,7 @@ func TestFormatTime(t *testing.T) {
 		{name: "negative", in: -1, want: "-"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := formatTime(tt.in); got != tt.want {
 				t.Errorf("formatTime(%d) = %q, want %q", tt.in, got, tt.want)
 			}

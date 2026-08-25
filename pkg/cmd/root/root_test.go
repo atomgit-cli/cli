@@ -28,6 +28,7 @@ func TestRootHelpMentionsWindowsPowerShellAliasForGC(t *testing.T) {
 
 	help := out.String()
 	for _, want := range []string{"Windows PowerShell", "Get-Content", "gitcode", "gc.exe", "python -m gc_cli"} {
+		want := want
 		if !strings.Contains(help, want) {
 			t.Fatalf("help missing %q: %s", want, help)
 		}
@@ -89,7 +90,9 @@ func TestGitcodeCommandNamePropagatesToDiscoveryCommands(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewRootCmd("dev", "none", "unknown", cmdutil.TestFactory())
 			out := &bytes.Buffer{}
 			cmd.SetOut(out)
@@ -102,6 +105,7 @@ func TestGitcodeCommandNamePropagatesToDiscoveryCommands(t *testing.T) {
 
 			output := out.String()
 			for _, want := range tt.want {
+				want := want
 				if !strings.Contains(output, want) {
 					t.Fatalf("output missing %q: %s", want, output)
 				}
@@ -136,7 +140,9 @@ func TestGitcodeHelpRewritesExamples(t *testing.T) {
 }
 
 func TestNoInteractiveFlag(t *testing.T) {
+	t.Parallel()
 	t.Run("flag is registered as persistent", func(t *testing.T) {
+		t.Parallel()
 		cmd := NewRootCmd("dev", "none", "unknown", cmdutil.TestFactory())
 		flag := cmd.PersistentFlags().Lookup("no-interactive")
 		if flag == nil {
@@ -148,6 +154,7 @@ func TestNoInteractiveFlag(t *testing.T) {
 	})
 
 	t.Run("flag sets IOStreams.noInteractive and disables CanPrompt", func(t *testing.T) {
+		t.Parallel()
 		f := cmdutil.TestFactory()
 		io, _, _, _ := iostreams.TestTTY()
 		f.IOStreams = io
@@ -174,6 +181,7 @@ func TestNoInteractiveFlag(t *testing.T) {
 	})
 
 	t.Run("without flag CanPrompt remains true", func(t *testing.T) {
+		t.Parallel()
 		f := cmdutil.TestFactory()
 		io, _, _, _ := iostreams.TestTTY()
 		f.IOStreams = io
@@ -195,6 +203,7 @@ func TestNoInteractiveFlag(t *testing.T) {
 }
 
 func TestNoUpdateCheckFlagIsRegistered(t *testing.T) {
+	t.Parallel()
 	cmd := NewRootCmd("dev", "none", "unknown", cmdutil.TestFactory())
 	flag := cmd.PersistentFlags().Lookup("no-update-check")
 	if flag == nil || flag.DefValue != "false" {

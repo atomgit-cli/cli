@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -28,7 +29,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error {
 				return nil
@@ -84,6 +87,7 @@ func TestListRunBuildsV8Query(t *testing.T) {
 	}
 	q := parsed.Query()
 	for _, key := range []string{"keyword", "per_page", "page"} {
+		key := key
 		if _, ok := q[key]; !ok {
 			t.Fatalf("query missing %s in %s", key, q.Encode())
 		}
@@ -373,6 +377,7 @@ func TestListRunPaginateMultiplePages(t *testing.T) {
 }
 
 func TestTrimNamespaces(t *testing.T) {
+	t.Parallel()
 	opts := &ListOptions{Limit: 1, PerPage: 10, LimitSet: true, PerPageSet: true}
 	tests := []struct {
 		name       string
@@ -386,7 +391,9 @@ func TestTrimNamespaces(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := trimNamespaces(tt.namespaces, tt.opts)
 			if len(got) != tt.want {
 				t.Fatalf("trimNamespaces() len = %d, want %d", len(got), tt.want)

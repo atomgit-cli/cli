@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewCmdCheckout(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -30,7 +31,9 @@ func TestNewCmdCheckout(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdCheckout(f, func(opts *CheckoutOptions) error {
 				return nil
@@ -46,6 +49,7 @@ func TestNewCmdCheckout(t *testing.T) {
 }
 
 func TestFetchURLHost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		authority string
@@ -64,7 +68,9 @@ func TestFetchURLHost(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := fetchURLHost(tt.authority)
 			if got != tt.want {
 				t.Errorf("fetchURLHost(%q) = %q, want %q", tt.authority, got, tt.want)
@@ -74,6 +80,7 @@ func TestFetchURLHost(t *testing.T) {
 }
 
 func TestScpHost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		rawURL string
@@ -84,7 +91,9 @@ func TestScpHost(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := scpHost(tt.rawURL)
 			if got != tt.want {
 				t.Errorf("scpHost(%q) = %q, want %q", tt.rawURL, got, tt.want)

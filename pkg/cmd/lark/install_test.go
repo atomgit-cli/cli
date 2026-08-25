@@ -37,6 +37,7 @@ func TestInstallRun_Success(t *testing.T) {
 }
 
 func TestInstallRun_InstallFails(t *testing.T) {
+	t.Parallel()
 	streams, _, _, _ := iostreams.Test()
 	opts := &installOptions{
 		IO: streams,
@@ -50,6 +51,7 @@ func TestInstallRun_InstallFails(t *testing.T) {
 }
 
 func TestNewCmdInstall_Builds(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	if cmd := newCmdInstall(f, nil); cmd == nil {
 		t.Fatal("cmd nil")

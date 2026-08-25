@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdLogin(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -31,7 +32,9 @@ func TestNewCmdLogin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdLogin(f, func(opts *LoginOptions) error {
 				return nil
@@ -54,10 +57,13 @@ func TestNewCmdLogin(t *testing.T) {
 // to avoid false positives on the safety guidance prose ("Never echo/cat a
 // token literal", which has no space after echo/cat).
 func TestNewCmdLoginHelpAvoidsUnsafeTokenExamples(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdLogin(f, nil)
 	for _, source := range []string{cmd.Example, cmd.Long} {
+		source := source
 		for _, bad := range []string{`echo "`, `echo '`, `printf "`, `printf '`, "token.txt", "cat token", "cat ~/.secret"} {
+			bad := bad
 			if strings.Contains(source, bad) {
 				t.Errorf("help contains unsafe token example %q: %q", bad, source)
 			}
@@ -66,6 +72,7 @@ func TestNewCmdLoginHelpAvoidsUnsafeTokenExamples(t *testing.T) {
 }
 
 func TestNewCmdLoginBindsWebAndHostnameFlags(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	var gotWeb bool
 	var gotHostname string
@@ -88,6 +95,7 @@ func TestNewCmdLoginBindsWebAndHostnameFlags(t *testing.T) {
 }
 
 func TestNewCmdLoginRejectsWebWithToken(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	f.IOStreams.In = bytes.NewBufferString("test-token\n")
 	f.HttpClient = func() (*http.Client, error) {
@@ -115,6 +123,7 @@ func TestNewCmdLoginRejectsWebWithToken(t *testing.T) {
 }
 
 func TestNewCmdLoginRejectsWebWithCustomHost(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	f.HttpClient = func() (*http.Client, error) {
 		t.Fatal("unexpected HTTP client creation")
@@ -182,6 +191,7 @@ func TestLoginWithWebOpensBrowser(t *testing.T) {
 }
 
 func TestLoginWithWebRejectsCustomHost(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &LoginOptions{
 		IO:       io,
@@ -232,6 +242,7 @@ func TestLoginWithTokenRejectsMalformedHost(t *testing.T) {
 }
 
 func TestLoginWithWebRejectsMalformedHost(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	opts := &LoginOptions{
 		IO:       io,
@@ -252,6 +263,7 @@ func TestLoginWithWebRejectsMalformedHost(t *testing.T) {
 }
 
 func TestNewCmdLoginRejectsInteractiveLoginWithoutTTY(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdLogin(f, nil)
 	cmd.SetArgs([]string{})
@@ -266,6 +278,7 @@ func TestNewCmdLoginRejectsInteractiveLoginWithoutTTY(t *testing.T) {
 }
 
 func TestNewCmdLoginRejectsRemovedTokenFlag(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdLogin(f, nil)
 	cmd.SetArgs([]string{"--token", "test-token"})

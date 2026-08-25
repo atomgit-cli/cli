@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	cmd := newCmdList(cmdutil.TestFactory())
 	if cmd == nil {
 		t.Fatal("newCmdList returned nil")
@@ -23,6 +24,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := newCmdList(cmdutil.TestFactory())
 	if cmd.Flags().Lookup("json") == nil {
 		t.Fatal("json flag missing")
@@ -30,6 +32,7 @@ func TestNewCmdListFlagsExist(t *testing.T) {
 }
 
 func TestNewCmdClearCache(t *testing.T) {
+	t.Parallel()
 	cmd := newCmdClearCache(cmdutil.TestFactory())
 	if cmd == nil {
 		t.Fatal("newCmdClearCache returned nil")
@@ -61,6 +64,7 @@ func TestListConfig(t *testing.T) {
 		"update.mode":  "default",
 	}
 	for _, item := range items {
+		item := item
 		if src, ok := want[item.Key]; ok {
 			if item.Source != src {
 				t.Errorf("key %q: source = %q, want %q", item.Key, item.Source, src)
@@ -76,6 +80,7 @@ func TestListConfigEnvOverride(t *testing.T) {
 
 	items, _ := listConfig(cfg)
 	for _, item := range items {
+		item := item
 		if item.Key == "browser" {
 			if item.Value != "chrome" {
 				t.Fatalf("browser value = %q, want %q", item.Value, "chrome")
@@ -93,6 +98,7 @@ func TestListConfigUpdateModeDefault(t *testing.T) {
 
 	items, _ := listConfig(cfg)
 	for _, item := range items {
+		item := item
 		if item.Key == "update.mode" {
 			if item.Value != "notify" {
 				t.Fatalf("update.mode value = %q, want %q", item.Value, "notify")
@@ -135,6 +141,7 @@ func TestListConfigHumanReadable(t *testing.T) {
 	}
 	out := buf.String()
 	for _, key := range []string{"browser", "editor", "pager", "update.mode", "default_repo"} {
+		key := key
 		if !strings.Contains(out, key) {
 			t.Errorf("output missing key %q; output=%s", key, out)
 		}
@@ -224,6 +231,7 @@ func TestConfigDirFromEnv(t *testing.T) {
 }
 
 func TestPluralEntry(t *testing.T) {
+	t.Parallel()
 	if got := pluralEntry(1); got != "y" {
 		t.Errorf("pluralEntry(1) = %q, want %q", got, "y")
 	}

@@ -29,7 +29,9 @@ func TestNonManagedInstallReturnsManualGuidance(t *testing.T) {
 }
 
 func TestManagerMessagesNeverClaimToUninstallOtherChannels(t *testing.T) {
+	t.Parallel()
 	for _, distribution := range []string{"pypi", "homebrew", "system-package", "npm", "archive"} {
+		distribution := distribution
 		message := strings.ToLower(managerMessage(distribution))
 		if strings.Contains(message, "uninstall") || strings.Contains(message, "remove") {
 			t.Fatalf("%s guidance mutates another channel: %s", distribution, message)

@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdListFlags(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error {
 		if opts.Limit != 12 || opts.Page != 2 || opts.PerPage != 20 || !opts.JSON {
 			t.Fatalf("options = %+v", opts)
@@ -63,6 +64,7 @@ func TestListRunSanitizesTextOutput(t *testing.T) {
 }
 
 func TestListRunValidatesPagination(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	err := listRun(&ListOptions{IO: f.IOStreams, Limit: 30, Page: 1, PerPage: 101})
 	if err == nil || !strings.Contains(err.Error(), "must not exceed 100") {

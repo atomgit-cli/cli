@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -30,7 +31,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -46,6 +49,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		repo      string
@@ -78,7 +82,9 @@ func TestParseRepo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gotOwner, gotName, err := parseRepo(tt.repo)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseRepo() error = %v, wantErr %v", err, tt.wantErr)

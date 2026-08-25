@@ -14,6 +14,7 @@ import (
 )
 
 func TestBuildURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		base   string
@@ -53,7 +54,9 @@ func TestBuildURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := BuildURL(tt.base, tt.params)
 			if got != tt.want {
 				t.Errorf("BuildURL() = %q, want %q", got, tt.want)
@@ -63,6 +66,7 @@ func TestBuildURL(t *testing.T) {
 }
 
 func TestAPIError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		apiErr     APIError
@@ -96,7 +100,9 @@ func TestAPIError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.apiErr.Error()
 			if !contains(got, tt.wantSubstr) {
 				t.Errorf("Error() = %q, want containing %q", got, tt.wantSubstr)
@@ -106,6 +112,7 @@ func TestAPIError(t *testing.T) {
 }
 
 func TestAPIHostForGitCodeHost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		host string
@@ -119,7 +126,9 @@ func TestAPIHostForGitCodeHost(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := apiHostForGitCodeHost(tt.host)
 			if got != tt.want {
 				t.Errorf("apiHostForGitCodeHost(%q) = %q, want %q", tt.host, got, tt.want)
@@ -129,6 +138,7 @@ func TestAPIHostForGitCodeHost(t *testing.T) {
 }
 
 func TestSetHost(t *testing.T) {
+	t.Parallel()
 	c := NewClientFromHTTP(nil)
 	c.SetHost("gitcode.internal")
 	if c.Host() != "api.gitcode.internal" {
@@ -137,6 +147,7 @@ func TestSetHost(t *testing.T) {
 }
 
 func TestToken(t *testing.T) {
+	t.Parallel()
 	c := NewClientFromHTTP(nil)
 	if c.Token() != "" {
 		t.Errorf("Token() = %q, want empty", c.Token())
@@ -148,6 +159,7 @@ func TestToken(t *testing.T) {
 }
 
 func TestRawURL(t *testing.T) {
+	t.Parallel()
 	c := NewClientFromHTTP(nil)
 	tests := []struct {
 		name     string
@@ -162,7 +174,9 @@ func TestRawURL(t *testing.T) {
 		{"foreign host rejected", "https://evil.com/api/v5/repos/owner/repo", "", true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := c.rawURL(tt.endpoint)
 			if tt.wantErr {
 				if err == nil {
@@ -182,6 +196,7 @@ func TestRawURL(t *testing.T) {
 }
 
 func TestDefaultHTTPClient(t *testing.T) {
+	t.Parallel()
 	c := DefaultHTTPClient()
 	if c == nil {
 		t.Fatal("DefaultHTTPClient() returned nil")
@@ -192,6 +207,7 @@ func TestDefaultHTTPClient(t *testing.T) {
 }
 
 func TestNewHTTPClientWithRetryAndLogger(t *testing.T) {
+	t.Parallel()
 	c := NewHTTPClientWithRetryAndLogger(time.Second, RetryConfig{MaxRetries: 3}, nil)
 	if c == nil {
 		t.Fatal("NewHTTPClientWithRetryAndLogger() returned nil")
@@ -208,6 +224,7 @@ func contains(s, substr string) bool {
 }
 
 func TestDecodeAPIError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		body       string
@@ -275,7 +292,9 @@ func TestDecodeAPIError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := decodeAPIError([]byte(tt.body), tt.statusCode, tt.status)
 			if err == nil {
 				t.Fatal("decodeAPIError() returned nil")
@@ -306,6 +325,7 @@ func TestDecodeAPIError(t *testing.T) {
 }
 
 func TestRawREST(t *testing.T) {
+	t.Parallel()
 	handler := testutil.MockAPIHandler()
 	mockClient := testutil.NewTestHTTPClient(handler)
 	c := NewClientFromHTTP(mockClient)
@@ -324,6 +344,7 @@ func TestRawREST(t *testing.T) {
 }
 
 func TestRawRESTWithHostGuard(t *testing.T) {
+	t.Parallel()
 	handler := testutil.MockAPIHandler()
 	mockClient := testutil.NewTestHTTPClient(handler)
 	c := NewClientFromHTTP(mockClient)
@@ -336,6 +357,7 @@ func TestRawRESTWithHostGuard(t *testing.T) {
 }
 
 func TestUploadToURL(t *testing.T) {
+	t.Parallel()
 	handler := testutil.MockAPIHandler()
 	mockClient := testutil.NewTestHTTPClient(handler)
 	c := NewClientFromHTTP(mockClient)
@@ -349,6 +371,7 @@ func TestUploadToURL(t *testing.T) {
 }
 
 func TestUploadAsset(t *testing.T) {
+	t.Parallel()
 	handler := testutil.MockAPIHandler()
 	mockClient := testutil.NewTestHTTPClient(handler)
 	c := NewClientFromHTTP(mockClient)
@@ -364,6 +387,7 @@ func TestUploadAsset(t *testing.T) {
 }
 
 func TestUploadToURL_TruncatesLongErrorBody(t *testing.T) {
+	t.Parallel()
 	longBody := strings.Repeat("x", 1024)
 	mockClient := &http.Client{
 		Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -389,6 +413,7 @@ func TestUploadToURL_TruncatesLongErrorBody(t *testing.T) {
 }
 
 func TestREST_NonJSONErrorReturnsAPIErrorWithStatusCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		statusCode int
@@ -400,7 +425,9 @@ func TestREST_NonJSONErrorReturnsAPIErrorWithStatusCode(t *testing.T) {
 		{"500 server error", 500},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			mockClient := &http.Client{
 				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 					return &http.Response{
@@ -428,6 +455,7 @@ func TestREST_NonJSONErrorReturnsAPIErrorWithStatusCode(t *testing.T) {
 }
 
 func TestGetText_NonJSONErrorReturnsAPIError(t *testing.T) {
+	t.Parallel()
 	mockClient := &http.Client{
 		Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
@@ -453,6 +481,7 @@ func TestGetText_NonJSONErrorReturnsAPIError(t *testing.T) {
 }
 
 func TestUploadAsset_NonJSONErrorReturnsAPIError(t *testing.T) {
+	t.Parallel()
 	mockClient := &http.Client{
 		Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{

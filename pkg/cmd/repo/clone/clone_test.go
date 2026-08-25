@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdClone(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -39,7 +40,9 @@ func TestNewCmdClone(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdClone(f, func(opts *CloneOptions) error {
 				return nil
@@ -55,6 +58,7 @@ func TestNewCmdClone(t *testing.T) {
 }
 
 func TestParseRepoURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		repo     string
@@ -99,7 +103,9 @@ func TestParseRepoURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gotURL, err := parseRepoURL(tt.repo, tt.protocol, io.Discard)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseRepoURL() error = %v, wantErr %v", err, tt.wantErr)
@@ -113,6 +119,7 @@ func TestParseRepoURL(t *testing.T) {
 }
 
 func TestResolveGitProtocolUsesConfig(t *testing.T) {
+	t.Parallel()
 	opts := &CloneOptions{
 		Config: func() (config.Config, error) {
 			return cloneConfig{protocol: "ssh"}, nil
@@ -129,6 +136,7 @@ func TestResolveGitProtocolUsesConfig(t *testing.T) {
 }
 
 func TestResolveGitProtocolFlagOverridesConfig(t *testing.T) {
+	t.Parallel()
 	opts := &CloneOptions{
 		GitProtocol: "https",
 		Config: func() (config.Config, error) {
@@ -146,6 +154,7 @@ func TestResolveGitProtocolFlagOverridesConfig(t *testing.T) {
 }
 
 func TestResolveGitProtocolDefaultsToSSHWithoutConfig(t *testing.T) {
+	t.Parallel()
 	opts := &CloneOptions{}
 
 	got, err := resolveGitProtocol(opts)
@@ -158,6 +167,7 @@ func TestResolveGitProtocolDefaultsToSSHWithoutConfig(t *testing.T) {
 }
 
 func TestResolveGitProtocolDefaultsToSSHWhenConfigUnset(t *testing.T) {
+	t.Parallel()
 	opts := &CloneOptions{
 		Config: func() (config.Config, error) {
 			return cloneConfig{}, nil
@@ -174,6 +184,7 @@ func TestResolveGitProtocolDefaultsToSSHWhenConfigUnset(t *testing.T) {
 }
 
 func TestCloneRunUsesCorrectURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		repo     string
@@ -201,7 +212,9 @@ func TestCloneRunUsesCorrectURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var capturedArgs []string
 			io, _, _, _ := iostreams.Test()
 
@@ -223,6 +236,7 @@ func TestCloneRunUsesCorrectURL(t *testing.T) {
 			// Find the URL argument (should be after "clone" and any flags)
 			found := false
 			for _, arg := range capturedArgs {
+				arg := arg
 				if arg == tt.wantURL {
 					found = true
 					break
@@ -236,6 +250,7 @@ func TestCloneRunUsesCorrectURL(t *testing.T) {
 }
 
 func TestCloneRunWithDepthFlag(t *testing.T) {
+	t.Parallel()
 	var capturedArgs []string
 	io, _, _, _ := iostreams.Test()
 
@@ -269,6 +284,7 @@ func TestCloneRunWithDepthFlag(t *testing.T) {
 }
 
 func TestCloneRunWithBranchFlag(t *testing.T) {
+	t.Parallel()
 	var capturedArgs []string
 	io, _, _, _ := iostreams.Test()
 
@@ -300,6 +316,7 @@ func TestCloneRunWithBranchFlag(t *testing.T) {
 }
 
 func TestCloneRunGitFailure(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 
 	opts := &CloneOptions{
@@ -317,6 +334,7 @@ func TestCloneRunGitFailure(t *testing.T) {
 }
 
 func TestCloneRunInvalidDepth(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 
 	opts := &CloneOptions{
@@ -332,6 +350,7 @@ func TestCloneRunInvalidDepth(t *testing.T) {
 }
 
 func TestCloneRunInvalidBranch(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 
 	opts := &CloneOptions{
@@ -347,6 +366,7 @@ func TestCloneRunInvalidBranch(t *testing.T) {
 }
 
 func TestCloneRunRejectsOptionInjectionDirectory(t *testing.T) {
+	t.Parallel()
 	injections := []string{
 		"--config=/tmp/evil",
 		"--template=/tmp/malicious",
@@ -356,7 +376,9 @@ func TestCloneRunRejectsOptionInjectionDirectory(t *testing.T) {
 	}
 
 	for _, inj := range injections {
+		inj := inj
 		t.Run(inj, func(t *testing.T) {
+			t.Parallel()
 			io, _, _, _ := iostreams.Test()
 
 			opts := &CloneOptions{
@@ -378,6 +400,7 @@ func TestCloneRunRejectsOptionInjectionDirectory(t *testing.T) {
 }
 
 func TestCloneRunUsesSeparatorForDirectory(t *testing.T) {
+	t.Parallel()
 	var capturedArgs []string
 	io, _, _, _ := iostreams.Test()
 
@@ -422,6 +445,7 @@ func TestCloneRunUsesSeparatorForDirectory(t *testing.T) {
 }
 
 func TestCloneRunAcceptsValidDirectory(t *testing.T) {
+	t.Parallel()
 	validDirs := []string{
 		"my-project",
 		"subdir/my-project",
@@ -431,7 +455,9 @@ func TestCloneRunAcceptsValidDirectory(t *testing.T) {
 	}
 
 	for _, dir := range validDirs {
+		dir := dir
 		t.Run(dir, func(t *testing.T) {
+			t.Parallel()
 			var capturedArgs []string
 			io, _, _, _ := iostreams.Test()
 
@@ -454,6 +480,7 @@ func TestCloneRunAcceptsValidDirectory(t *testing.T) {
 			// Verify directory appears in args
 			found := false
 			for _, arg := range capturedArgs {
+				arg := arg
 				if arg == dir {
 					found = true
 					break

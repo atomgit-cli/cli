@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewCmdEdit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -43,7 +44,9 @@ func TestNewCmdEdit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			io, _, _, _ := iostreams.Test()
 			f := &cmdutil.Factory{
 				IOStreams: io,
@@ -78,6 +81,7 @@ func TestNewCmdEdit(t *testing.T) {
 }
 
 func TestEditRun(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		opts    *EditOptions
@@ -95,7 +99,9 @@ func TestEditRun(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			io, _, _, _ := iostreams.Test()
 			tt.opts.IO = io
 			tt.opts.HttpClient = func() (*http.Client, error) {
@@ -111,6 +117,7 @@ func TestEditRun(t *testing.T) {
 }
 
 func TestNewCmdEditTracksLabelFlags(t *testing.T) {
+	t.Parallel()
 	ioStreams, _, _, _ := iostreams.Test()
 	f := &cmdutil.Factory{IOStreams: ioStreams}
 
@@ -184,6 +191,7 @@ func TestEditRunUpdatesLabels(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("GC_TOKEN", "test-token")
 			var methods []string
@@ -240,6 +248,7 @@ func TestEditRunUpdatesLabels(t *testing.T) {
 }
 
 func TestEditRunRejectsUnsafeLabelChangesBeforeHTTP(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		configure func(*EditOptions)
@@ -272,7 +281,9 @@ func TestEditRunRejectsUnsafeLabelChangesBeforeHTTP(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ioStreams, _, _, _ := iostreams.Test()
 			httpCalled := false
 			opts := &EditOptions{
@@ -438,6 +449,7 @@ func TestEditRunJSONReturnsErrorWhenFinalStateCannotBeFetched(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		repo      string
@@ -470,7 +482,9 @@ func TestParseRepo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			owner, repo, err := parseRepo(tt.repo)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseRepo() error = %v, wantErr %v", err, tt.wantErr)
@@ -525,6 +539,7 @@ func TestEditRunAddAssignee(t *testing.T) {
 	}
 	foundPost := false
 	for _, m := range methods {
+		m := m
 		if m == "POST" {
 			foundPost = true
 		}
@@ -556,6 +571,7 @@ func TestEditRunAddReviewerAndTester(t *testing.T) {
 	}
 	postCount := 0
 	for _, m := range methods {
+		m := m
 		if m == "POST" {
 			postCount++
 		}
@@ -586,6 +602,7 @@ func TestEditRunRemoveAssignee(t *testing.T) {
 	}
 	foundDelete := false
 	for _, m := range methods {
+		m := m
 		if m == "DELETE" {
 			foundDelete = true
 		}
@@ -596,6 +613,7 @@ func TestEditRunRemoveAssignee(t *testing.T) {
 }
 
 func TestHasAssigneeChanges(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		opts *EditOptions
@@ -607,7 +625,9 @@ func TestHasAssigneeChanges(t *testing.T) {
 		{name: "add tester", opts: &EditOptions{AddTesters: []string{"u1"}}, want: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := hasAssigneeChanges(tt.opts); got != tt.want {
 				t.Errorf("hasAssigneeChanges() = %v, want %v", got, tt.want)
 			}

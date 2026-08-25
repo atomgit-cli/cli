@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdBranchView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -45,7 +46,9 @@ func TestNewCmdBranchView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -120,6 +123,7 @@ func TestViewRunText(t *testing.T) {
 	}
 	output := out.String()
 	for _, want := range []string{"main", "Protected: yes", "abc123def456", "Initial commit", "dev"} {
+		want := want
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q: %s", want, output)
 		}
@@ -244,6 +248,7 @@ func TestViewRunCommitPartialFields(t *testing.T) {
 }
 
 func TestViewRunAuthError(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 
 	err := viewRun(&ViewOptions{
@@ -259,6 +264,7 @@ func TestViewRunAuthError(t *testing.T) {
 }
 
 func TestViewRunHttpClientError(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 
 	err := viewRun(&ViewOptions{

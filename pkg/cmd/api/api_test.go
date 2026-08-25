@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdAPIParsesFlags(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdAPI(cmdutil.TestFactory(), func(opts *Options) error {
 		if opts.Endpoint != "repos/owner/repo" {
 			t.Fatalf("Endpoint = %q", opts.Endpoint)
@@ -139,6 +140,7 @@ func TestRunRejectsForeignURLHost(t *testing.T) {
 }
 
 func TestParseHeadersRejectsInvalidHeader(t *testing.T) {
+	t.Parallel()
 	_, err := parseHeaders([]string{"missing-colon"})
 	if err == nil || !strings.Contains(err.Error(), "--header") {
 		t.Fatalf("parseHeaders() error = %v, want host rejection", err)
@@ -146,6 +148,7 @@ func TestParseHeadersRejectsInvalidHeader(t *testing.T) {
 }
 
 func TestReadInputEmptyReturnsNil(t *testing.T) {
+	t.Parallel()
 	r, err := readInput(&Options{Input: ""})
 	if err != nil {
 		t.Fatalf("readInput() error = %v", err)
@@ -156,6 +159,7 @@ func TestReadInputEmptyReturnsNil(t *testing.T) {
 }
 
 func TestReadInputStreamsFile(t *testing.T) {
+	t.Parallel()
 	tmpFile, err := os.CreateTemp("", "input*.json")
 	if err != nil {
 		t.Fatalf("CreateTemp() error = %v", err)

@@ -16,6 +16,7 @@ import (
 )
 
 func TestNewCmdValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -27,7 +28,9 @@ func TestNewCmdValidate(t *testing.T) {
 		{name: "no file", args: []string{}, wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdValidate(f, func(opts *ValidateOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -338,7 +341,9 @@ func TestValidateRunAPIError(t *testing.T) {
 		{name: "409 conflict", status: http.StatusConflict, wantExit: cmdutil.ExitConflict},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ios, _, _, _ := iostreams.Test()
 			opts := &ValidateOptions{
 				IO: ios,

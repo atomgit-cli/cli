@@ -16,6 +16,7 @@ import (
 )
 
 func TestDefaultRetryConfig(t *testing.T) {
+	t.Parallel()
 	cfg := DefaultRetryConfig()
 	if cfg.MaxRetries != 3 {
 		t.Errorf("MaxRetries = %d, want 3", cfg.MaxRetries)
@@ -32,6 +33,7 @@ func TestDefaultRetryConfig(t *testing.T) {
 }
 
 func TestRetryMiddleware_Success(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -56,6 +58,7 @@ func TestRetryMiddleware_Success(t *testing.T) {
 }
 
 func TestRetryMiddleware_ServerError(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -83,6 +86,7 @@ func TestRetryMiddleware_ServerError(t *testing.T) {
 }
 
 func TestRetryMiddleware_RateLimit(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -115,6 +119,7 @@ func TestRetryMiddleware_RateLimit(t *testing.T) {
 }
 
 func TestRetryMiddleware_NoRetryOn401(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -139,6 +144,7 @@ func TestRetryMiddleware_NoRetryOn401(t *testing.T) {
 }
 
 func TestRetryMiddleware_Exhausted(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -163,6 +169,7 @@ func TestRetryMiddleware_Exhausted(t *testing.T) {
 }
 
 func TestShouldRetryOnStatus(t *testing.T) {
+	t.Parallel()
 	rt := &retryTransport{cfg: DefaultRetryConfig()}
 
 	tests := []struct {
@@ -182,6 +189,7 @@ func TestShouldRetryOnStatus(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := rt.shouldRetryOnStatus(tt.code)
 		if got != tt.expected {
 			t.Errorf("shouldRetryOnStatus(%d) = %v, want %v", tt.code, got, tt.expected)
@@ -190,6 +198,7 @@ func TestShouldRetryOnStatus(t *testing.T) {
 }
 
 func TestShouldRetryOnErrorWrappedContext(t *testing.T) {
+	t.Parallel()
 	rt := &retryTransport{cfg: DefaultRetryConfig()}
 
 	tests := []struct {
@@ -206,7 +215,9 @@ func TestShouldRetryOnErrorWrappedContext(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := rt.shouldRetryOnError(tt.err)
 			if got != tt.expected {
 				t.Errorf("shouldRetryOnError(%v) = %v, want %v", tt.err, got, tt.expected)
@@ -216,6 +227,7 @@ func TestShouldRetryOnErrorWrappedContext(t *testing.T) {
 }
 
 func TestCalculateWait(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{
 		MaxRetries:  3,
 		InitialWait: 1 * time.Second,
@@ -236,6 +248,7 @@ func TestCalculateWait(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		got := rt.calculateWait(tt.attempt)
 		if got != tt.expected {
 			t.Errorf("calculateWait(%d) = %v, want %v", tt.attempt, got, tt.expected)
@@ -244,6 +257,7 @@ func TestCalculateWait(t *testing.T) {
 }
 
 func TestSanitizeError_UrlErrorStripsHost(t *testing.T) {
+	t.Parallel()
 	inner := errors.New("dial tcp: connection refused")
 	ue := &url.Error{Op: "Get", URL: "https://api.gitcode.com/api/v5/repos", Err: inner}
 
@@ -257,6 +271,7 @@ func TestSanitizeError_UrlErrorStripsHost(t *testing.T) {
 }
 
 func TestSanitizeError_PlainError(t *testing.T) {
+	t.Parallel()
 	err := errors.New("something failed")
 	if got := sanitizeError(err); got != "something failed" {
 		t.Errorf("sanitizeError = %q, want %q", got, "something failed")
@@ -264,6 +279,7 @@ func TestSanitizeError_PlainError(t *testing.T) {
 }
 
 func TestSanitizeError_NilInnerUsesOp(t *testing.T) {
+	t.Parallel()
 	ue := &url.Error{Op: "Get", URL: "https://api.gitcode.com/path", Err: nil}
 	if got := sanitizeError(ue); got != "Get" {
 		t.Errorf("sanitizeError = %q, want %q", got, "Get")
@@ -271,6 +287,7 @@ func TestSanitizeError_NilInnerUsesOp(t *testing.T) {
 }
 
 func TestRetrySkipsNonRewindableBody(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	mockTransport := testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++

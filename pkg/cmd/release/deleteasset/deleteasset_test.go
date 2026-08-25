@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdDeleteAsset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -23,7 +24,9 @@ func TestNewCmdDeleteAsset(t *testing.T) {
 		{name: "one arg", args: []string{"v1.0.0"}, wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdDeleteAsset(f, func(opts *DeleteAssetOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -79,6 +82,7 @@ func TestDeleteAssetRunWithYes(t *testing.T) {
 }
 
 func TestDeleteAssetRunDryRun(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out
@@ -166,6 +170,7 @@ func TestDeleteAssetRunAPIErrorReturnsError(t *testing.T) {
 }
 
 func TestDeleteAssetRunParseRepoError(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &DeleteAssetOptions{
 		IO:           f.IOStreams,
@@ -182,6 +187,7 @@ func TestDeleteAssetRunParseRepoError(t *testing.T) {
 }
 
 func TestDeleteAssetRunHttpClientError(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &DeleteAssetOptions{
 		IO:           f.IOStreams,

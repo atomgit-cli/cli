@@ -17,6 +17,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -40,7 +41,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error {
 				return nil
@@ -56,6 +59,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListStatusEnum(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error {
 		return nil
 	})
@@ -66,6 +70,7 @@ func TestNewCmdListStatusEnum(t *testing.T) {
 	}
 	got := flag.Annotations[cmdutil.FlagEnumAnnotation]
 	for _, want := range []string{"COMPLETED", "RUNNING", "FAILED", "CANCELED", "IGNORED", "PAUSED", "SUSPEND"} {
+		want := want
 		if !slices.Contains(got, want) {
 			t.Fatalf("status enum = %v, missing %q", got, want)
 		}
@@ -73,6 +78,7 @@ func TestNewCmdListStatusEnum(t *testing.T) {
 }
 
 func TestNewCmdListEventEnum(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error {
 		return nil
 	})
@@ -83,6 +89,7 @@ func TestNewCmdListEventEnum(t *testing.T) {
 	}
 	got := flag.Annotations[cmdutil.FlagEnumAnnotation]
 	for _, want := range []string{"MR", "Push", "Manual"} {
+		want := want
 		if !slices.Contains(got, want) {
 			t.Fatalf("event enum = %v, missing %q", got, want)
 		}
@@ -532,6 +539,7 @@ func TestListRunPaginateWithPage(t *testing.T) {
 }
 
 func TestResolveOutputFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		jsonFlag bool
@@ -548,7 +556,9 @@ func TestResolveOutputFormat(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := resolveOutputFormat(tt.jsonFlag, tt.raw)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveOutputFormat() error = %v, wantErr %v", err, tt.wantErr)

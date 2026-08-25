@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -56,7 +57,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -72,6 +75,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestNewCmdViewIssuesFlagParsing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		args       []string
@@ -105,7 +109,9 @@ func TestNewCmdViewIssuesFlagParsing(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			var capturedOpts *ViewOptions
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
@@ -437,6 +443,7 @@ func TestViewRunEmptyMilestone(t *testing.T) {
 }
 
 func TestViewRunRejectsJSONWithWebBeforeAuth(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	err := viewRun(&ViewOptions{
 		IO:     io,
@@ -454,6 +461,7 @@ func TestViewRunRejectsJSONWithWebBeforeAuth(t *testing.T) {
 }
 
 func TestCountIssuesByState(t *testing.T) {
+	t.Parallel()
 	issues := []api.Issue{
 		{Number: "1", State: "open"},
 		{Number: "2", State: "closed"},
@@ -483,6 +491,7 @@ func TestViewRunMilestoneNotFound(t *testing.T) {
 }
 
 func TestViewRunAuthError(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -499,6 +508,7 @@ func TestViewRunAuthError(t *testing.T) {
 }
 
 func TestViewRunNetworkError(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	err := viewRun(&ViewOptions{
 		IO:         io,

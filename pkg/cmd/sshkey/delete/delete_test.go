@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdDeleteParsesID(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdDelete(cmdutil.TestFactory(), func(opts *DeleteOptions) error {
 		if opts.ID != 42 || !opts.Yes || !opts.JSON {
 			t.Fatalf("options = %+v", opts)
@@ -26,6 +27,7 @@ func TestNewCmdDeleteParsesID(t *testing.T) {
 }
 
 func TestDeleteRunRequiresConfirmation(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	err := deleteRun(&DeleteOptions{IO: f.IOStreams, ID: 42})
 	if err == nil || !strings.Contains(err.Error(), "confirmation required") {
@@ -34,6 +36,7 @@ func TestDeleteRunRequiresConfirmation(t *testing.T) {
 }
 
 func TestDeleteRunDryRunDoesNotCallAPI(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out
@@ -47,6 +50,7 @@ func TestDeleteRunDryRunDoesNotCallAPI(t *testing.T) {
 }
 
 func TestDeleteRunDryRunJSONDoesNotCallAPI(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out

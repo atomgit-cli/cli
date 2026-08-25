@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error { return nil })
 	if cmd.Use != "list" {
 		t.Fatalf("Use = %q, want list", cmd.Use)
@@ -63,6 +64,7 @@ func TestListRunHumanReadable(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"CI", "Release", "ci.yml"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q; output=%s", want, got)
 		}

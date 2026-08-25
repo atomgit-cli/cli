@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdArchive(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -23,7 +24,9 @@ func TestNewCmdArchive(t *testing.T) {
 		{name: "no args", args: []string{}, wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdArchive(f, func(opts *Options) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -97,6 +100,7 @@ func testStatusChange(t *testing.T, repo string, status int, verb, pastTense str
 }
 
 func TestRunArchiveDryRun(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out
@@ -186,6 +190,7 @@ func TestRunArchiveAPIErrorReturnsError(t *testing.T) {
 }
 
 func TestRunArchiveParseRepoError(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &Options{
 		IO:         f.IOStreams,
@@ -200,6 +205,7 @@ func TestRunArchiveParseRepoError(t *testing.T) {
 }
 
 func TestNewCmdUnarchive(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdUnarchive(f, func(opts *Options) error { return nil })
 	cmd.SetArgs([]string{"owner/repo", "--yes"})
@@ -236,6 +242,7 @@ func TestRunArchiveJSON(t *testing.T) {
 }
 
 func TestRunArchiveDryRunJSON(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out
@@ -255,6 +262,7 @@ func TestRunArchiveDryRunJSON(t *testing.T) {
 }
 
 func TestRunArchiveHttpClientError(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &Options{
 		IO:         f.IOStreams,
