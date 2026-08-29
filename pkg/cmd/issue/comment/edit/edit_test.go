@@ -120,27 +120,29 @@ func TestEditRunValidation(t *testing.T) {
 
 func TestGetBody(t *testing.T) {
 	t.Parallel()
-	io, in, _, _ := iostreams.Test()
-	_, _ = io, in
 	tests := []struct {
 		name string
-		opts *EditOptions
+		body string
+		file string
+		in   string
 		want string
 		err  string
 	}{
 		{
 			name: "body",
-			opts: &EditOptions{IO: io, Body: "hello"},
+			body: "hello",
 			want: "hello",
 		},
 		{
 			name: "stdin",
-			opts: &EditOptions{IO: io, BodyFile: "-"},
+			file: "-",
+			in:   "from stdin\n",
 			want: "from stdin",
 		},
 		{
 			name: "both",
-			opts: &EditOptions{IO: io, Body: "a", BodyFile: "-"},
+			body: "a",
+			file: "-",
 			err:  "cannot use both",
 		},
 	}
@@ -149,10 +151,12 @@ func TestGetBody(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.opts.BodyFile == "-" && tt.opts.Body == "" {
-				tt.opts.IO.In = strings.NewReader("from stdin\n")
+			io, _, _, _ := iostreams.Test()
+			if tt.in != "" {
+				io.In = strings.NewReader(tt.in)
 			}
-			got, err := getBody(tt.opts)
+			opts := &EditOptions{IO: io, Body: tt.body, BodyFile: tt.file}
+			got, err := getBody(opts)
 			if tt.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.err) {
 					t.Fatalf("getBody() error = %v, want %q", err, tt.err)
