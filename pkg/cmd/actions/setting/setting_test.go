@@ -77,7 +77,7 @@ func TestSettingRunSingleRepositoryReadsBeforeConfirmingAndPreservesFields(t *te
 	if _, ok := putBody["project_id"]; ok {
 		t.Fatalf("PUT body unexpectedly contains project_id: %#v", putBody)
 	}
-	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "Type y to confirm:") {
+	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "! Type y to confirm:") {
 		t.Fatalf("confirmation prompt = %q", errOut.String())
 	}
 	if !strings.Contains(out.String(), "Actions enabled for 1/1 repositories") {
@@ -253,7 +253,7 @@ func TestSettingRunSkipsWriteButStillConfirmsWhenAlreadyDesired(t *testing.T) {
 	if putCalled {
 		t.Fatal("PUT called even though Actions was already enabled")
 	}
-	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "owner/repo: skipped (Actions already enabled)") || !strings.Contains(errOut.String(), "Type y to confirm:") {
+	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "owner/repo: skipped (Actions already enabled)") || !strings.Contains(errOut.String(), "! Type y to confirm:") {
 		t.Fatalf("confirmation prompt = %q", errOut.String())
 	}
 	if !strings.Contains(out.String(), "Actions enabled for 0/1 repositories") {

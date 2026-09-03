@@ -24,7 +24,7 @@ import (
 
 const organizationRepoPageSize = 100
 
-const actionsSettingRiskWarning = "Warning: This command calls a GitCode Web API endpoint that is not documented in the official GitCode API reference. Use of this command is at your own risk."
+const actionsSettingRiskMessage = "This command calls a GitCode Web API endpoint that is not documented in the official GitCode API reference. Use of this command is at your own risk."
 
 type terminalPasswordReader func(int) ([]byte, error)
 
@@ -331,11 +331,12 @@ func readStates(client *api.Client, targets []repositoryTarget) ([]repositorySta
 }
 
 func confirmSettingChange(opts *SettingOptions) error {
+	cs := opts.IO.ColorScheme()
 	return cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: "y",
-		Prompt:   fmt.Sprintf("%s %s\nType y to confirm: ", opts.IO.ColorScheme().WarningIcon(), actionsSettingRiskWarning),
+		Prompt:   fmt.Sprintf("%s %s: %s\n%s Type y to confirm: ", cs.WarningIcon(), cs.Yellow("Warning"), actionsSettingRiskMessage, cs.WarningIcon()),
 	})
 }
 
