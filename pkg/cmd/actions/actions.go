@@ -12,6 +12,7 @@ import (
 	runnercmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/runner"
 	runnergroupcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/runner-group"
 	runnersetcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/runner-set"
+	settingcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/setting"
 	workflowcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/workflow"
 	yamlcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/actions/yaml"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -21,14 +22,13 @@ import (
 func NewCmdActions(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "actions <command>",
-		Short: "Manage GitCode Actions (pipeline runs and workflow jobs)",
+		Short: "Manage GitCode Actions",
 		Long: heredoc.Doc(`
-			Work with GitCode Actions: inspect pipeline runs, workflow jobs and
-			job logs.
+			Work with GitCode Actions: inspect pipeline runs and workflow jobs,
+			or enable and disable repository Actions.
 
-			GitCode Actions exposes pipeline run records and workflow jobs through
-			the Actions v8 API. This command group provides read-only inspection
-			of CI run status.
+			Changing repository Actions permissions is a dangerous operation and
+			requires confirmation unless --yes is provided.
 		`),
 		Example: heredoc.Doc(`
 			# List recent pipeline runs
@@ -55,6 +55,7 @@ func NewCmdActions(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(runnergroupcmd.NewCmdRunnerGroup(f))
 	cmd.AddCommand(runnercmd.NewCmdRunner(f))
 	cmd.AddCommand(runnersetcmd.NewCmdRunnerSet(f))
+	cmd.AddCommand(settingcmd.NewCmdSetting(f, nil))
 	cmd.AddCommand(yamlcmd.NewCmdYaml(f))
 	cmd.AddCommand(workflowcmd.NewCmdWorkflow(f))
 
