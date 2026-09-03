@@ -24,6 +24,8 @@ import (
 
 const organizationRepoPageSize = 100
 
+const actionsSettingRiskWarning = "Warning: This command calls a GitCode Web API endpoint that is not documented in the official GitCode API reference. Use of this command is at your own risk."
+
 type terminalPasswordReader func(int) ([]byte, error)
 
 // webJWTHelpText explains why the command needs the web session JWT and
@@ -101,6 +103,8 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 			then changes only action_enabled and preserves the other permission
 			fields. This is a dangerous operation: type y to confirm, or use
 			--yes in a non-interactive environment.
+			Before confirmation, the command warns that it uses a Web API endpoint
+			not documented in the official GitCode API reference.
 
 			The Actions settings endpoint requires a GitCode web-session JWT; a
 			classic personal access token cannot be used for this request. The
@@ -331,7 +335,7 @@ func confirmSettingChange(opts *SettingOptions) error {
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: "y",
-		Prompt:   fmt.Sprintf("%s Type y to confirm: ", opts.IO.ColorScheme().WarningIcon()),
+		Prompt:   fmt.Sprintf("%s %s\nType y to confirm: ", opts.IO.ColorScheme().WarningIcon(), actionsSettingRiskWarning),
 	})
 }
 
@@ -493,12 +497,23 @@ func writePreview(ioStreams *iostreams.IOStreams, action string, states []reposi
 	if ioStreams == nil {
 		return
 	}
-	fmt.Fprintf(ioStreams.ErrOut, "Actions will be %s for %d of %d repositories:\n", action, changed, len(states))
+	fmt.Fprintf(ioStreams.ErrOut, "Actions will be %sd for %d of %d repositories:\n", action, changed, len(states))
 	for _, state := range states {
 		if *state.setting.ActionEnabled != desired {
 			fmt.Fprintf(ioStreams.ErrOut, "  %s: %t -> %t\n", state.target.Name, *state.setting.ActionEnabled, desired)
+			continue
+		}
+		if changed != len(states) {
+			fmt.Fprintf(ioStreams.ErrOut, "  %s: skipped (Actions already %s)\n", state.target.Name, actionState(*state.setting.ActionEnabled))
 		}
 	}
+}
+
+func actionState(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 func writeSummary(opts *SettingOptions, summary SettingSummary) error {
