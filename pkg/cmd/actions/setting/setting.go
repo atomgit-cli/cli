@@ -331,7 +331,7 @@ func confirmSettingChange(opts *SettingOptions) error {
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: "y",
-		Prompt:   "Type y to confirm: ",
+		Prompt:   fmt.Sprintf("%s Type y to confirm: ", opts.IO.ColorScheme().WarningIcon()),
 	})
 }
 
