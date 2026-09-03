@@ -105,6 +105,7 @@ docker compose up gc
 - `repo branch list`
 - `repo branch-protection list`
 - `repo pr-settings view`
+- `actions setting enable|disable`
 - `actions run list`
 - `actions run view`
 - `actions run watch`
@@ -2312,7 +2313,53 @@ gc precommit check --json
 
 ## Actions 命令 (actions)
 
-`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以只读为主（`run stop`/`run rerun`/`run retry`/`artifact delete`/`workflow run` 等写操作带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
+`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以及管理仓库的 Actions 权限。运行记录相关命令以只读为主（`run stop`/`run rerun`/`run retry`/`artifact delete`/`workflow run` 等写操作带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问，与其它命令默认使用的 v5 不同；权限控制使用 GitCode Web API 的 Actions setting 接口。
+
+### actions setting - 启用或停用 Actions
+
+启用或停用单个仓库，或组织下的全部仓库 Actions。统一使用 `-R`/`--repo` 指定目标：包含 `/` 时按 `owner/repo` 解析为单个仓库，不包含 `/` 时按组织名解析为组织下的全部仓库。命令会先读取每个仓库当前的 Actions 权限配置，PUT 时只修改 `action_enabled`，保留 `block_all_new_pipelines`、`block_cross_repo_pr_triggers` 等其余已读取字段。
+
+Actions setting 接口位于 GitCode Web API（`web-api.gitcode.com`），需要 GitCode 网页会话 JWT，经典个人访问令牌（PAT）不适用于该接口。执行命令前，请按以下步骤获取 JWT：
+
+1. 打开 `https://gitcode.com` 并登录具有目标仓库管理权限的账号。
+2. 点击页面右上角的账号头像。
+3. 按 `F12` 打开开发者工具并切换到 `Console`。
+4. 执行 `copy(localStorage.getItem('access_token'))`。
+5. 将复制的内容粘贴到 CLI 提示处并按回车。
+
+交互式终端输入使用隐藏回显，JWT 不会显示在屏幕上；JWT 只在本次命令内存中使用，不写入日志或磁盘。命令会本地校验 JWT 格式与 `exp` 过期时间。仓库与组织列表仍使用常规 CLI 凭证（PAT/GC_TOKEN）读取。
+
+这是危险操作。默认会列出将发生变化的仓库，并要求交互式输入精确的 `y`；非交互环境必须显式传 `--yes`。如果目标仓库已经处于目标状态，确认后不会发送 PUT 请求。
+
+```bash
+# 启用单个仓库的 Actions
+gc actions setting enable -R owner/repo
+
+# 停用单个仓库的 Actions
+gc actions setting disable -R owner/repo
+
+# 启用组织下全部仓库的 Actions（不包含 /，按组织解析）
+gc actions setting enable -R my-org
+
+# 非交互环境跳过确认
+gc actions setting disable -R my-org --yes
+
+# 非交互：通过 stdin 提供 web JWT（不要在命令行书写 token 字面量，从密钥管理工具管道输出）
+$ <print-token-from-secret-manager> | gc actions setting disable -R owner/repo --with-token --yes
+
+# 输出结构化结果
+gc actions setting enable -R owner/repo --yes --json
+```
+
+说明：
+
+- `-R`/`--repo` 必须指定；值包含 `/` 时按仓库解析，值不包含 `/` 时按组织解析。仓库值支持 CLI 通用的 HTTPS/SSH 仓库地址格式。
+- 组织模式按 `GET /api/v5/orgs/{org}/repos` 分页读取组织下的全部仓库，再逐个读取 Actions setting。
+- Actions setting 读取和更新使用 `GET/PUT /api/v2/projects/{project_id}/actions/setting`；请求体不发送 `project_id`。
+- `--with-token` 从 stdin 首行读取 web JWT；交互式终端下未提供该 flag 时提示粘贴。非 TTY 且未提供 `--with-token` 时立即报错（退出码 `2`），不会阻塞等待输入。
+- JWT 格式不合法或已过期时报认证错误（退出码 `4`），提示刷新 GitCode 页面后重新执行 `copy(localStorage.getItem('access_token'))` 并粘贴新的值。
+- `--json` 输出到 stdout，包含目标仓库、project id、修改前后的 `action_enabled` 和 `status`；确认提示和预览写入 stderr。
+- 退出码：`0` 成功；`1` 通用/API 错误；`2` 参数或确认错误；`3` 资源不存在；`4` 认证/权限错误；`5` 资源冲突。
 
 ### actions run list - 列出流水线运行记录
 

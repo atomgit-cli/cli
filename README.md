@@ -390,6 +390,12 @@ gitcode precommit check
 # 查看流水线运行记录
 gitcode actions run list -R owner/repo --status FAILED
 
+# 启用单个仓库的 Actions（交互确认）
+gitcode actions setting enable -R owner/repo
+
+# 启用组织下全部仓库的 Actions（非交互；无 / 时按组织解析）
+gitcode actions setting enable -R my-org --yes
+
 # 查看流水线运行详情
 gitcode actions run view <run-id> -R owner/repo
 
