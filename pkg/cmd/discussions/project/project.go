@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/delete"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/list"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/view"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -31,6 +32,9 @@ func NewCmdProject(f *cmdutil.Factory) *cobra.Command {
 			# View a discussion
 			$ gc discussions project view 42 -R owner/repo
 
+			# Delete a discussion
+			$ gc discussions project delete 42 -R owner/repo
+
 			# Output as JSON
 			$ gc discussions project list -R owner/repo --json
 		`),
@@ -39,6 +43,7 @@ func NewCmdProject(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(list.NewCmdList(f, nil))
 	cmd.AddCommand(view.NewCmdView(f, nil))
 	cmd.AddCommand(comments.NewCmdComments(f))
+	cmd.AddCommand(delete.NewCmdDelete(f, nil))
 
 	return cmd
 }
