@@ -309,3 +309,297 @@ func TestListRepoDiscussionCommentRepliesBuildsPath(t *testing.T) {
 		t.Fatalf("path = %q, want .../discuss/3/comment/c1/reply", gotPath)
 	}
 }
+
+// --- Write operation tests ---
+
+func TestCreateOrgDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"new1","number":1,"title":"hello"}`), nil
+	})
+	d, err := CreateOrgDiscussion(client, "my-org", &CreateOrgDiscussionOptions{Title: "hello", MdContent: "body"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss", gotPath)
+	}
+	if d.ID != "new1" || d.Number != 1 || d.Title != "hello" {
+		t.Fatalf("discussion = %+v, want id=new1 number=1 title=hello", d)
+	}
+}
+
+func TestUpdateOrgDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"a","number":7,"title":"updated"}`), nil
+	})
+	d, err := UpdateOrgDiscussion(client, "my-org", 7, &UpdateOrgDiscussionOptions{Title: "updated"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7", gotPath)
+	}
+	if d.Title != "updated" {
+		t.Fatalf("title = %q, want updated", d.Title)
+	}
+}
+
+func TestDeleteOrgDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+	if err := DeleteOrgDiscussion(client, "my-org", 7); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7", gotPath)
+	}
+}
+
+func TestCreateOrgDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"c1","md_content":"hi"}`), nil
+	})
+	c, err := CreateOrgDiscussionComment(client, "my-org", 7, &CreateOrgDiscussionCommentOptions{MdContent: "hi"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7/comment" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7/comment", gotPath)
+	}
+	if c.ID != "c1" || c.MdContent != "hi" {
+		t.Fatalf("comment = %+v, want id=c1 md_content=hi", c)
+	}
+}
+
+func TestUpdateOrgDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"c1","md_content":"edited"}`), nil
+	})
+	c, err := UpdateOrgDiscussionComment(client, "my-org", 7, "c1", &UpdateOrgDiscussionCommentOptions{MdContent: "edited"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7/comment/c1" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7/comment/c1", gotPath)
+	}
+	if c.MdContent != "edited" {
+		t.Fatalf("md_content = %q, want edited", c.MdContent)
+	}
+}
+
+func TestDeleteOrgDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+	if err := DeleteOrgDiscussionComment(client, "my-org", 7, "c1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7/comment/c1" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7/comment/c1", gotPath)
+	}
+}
+
+func TestReplyOrgDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"r1","md_content":"reply"}`), nil
+	})
+	c, err := ReplyOrgDiscussionComment(client, "my-org", 7, "c1", &ReplyOrgDiscussionCommentOptions{MdContent: "reply"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/orgs/my-org/discuss/7/comment/c1/reply" {
+		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7/comment/c1/reply", gotPath)
+	}
+	if c.ID != "r1" || c.MdContent != "reply" {
+		t.Fatalf("comment = %+v, want id=r1 md_content=reply", c)
+	}
+}
+
+func TestCreateRepoDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"new1","number":1,"title":"hello"}`), nil
+	})
+	d, err := CreateRepoDiscussion(client, "owner", "repo", &CreateRepoDiscussionOptions{Title: "hello"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss", gotPath)
+	}
+	if d.ID != "new1" || d.Title != "hello" {
+		t.Fatalf("discussion = %+v, want id=new1 title=hello", d)
+	}
+}
+
+func TestUpdateRepoDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"a","number":7,"title":"updated"}`), nil
+	})
+	d, err := UpdateRepoDiscussion(client, "owner", "repo", 7, &UpdateRepoDiscussionOptions{Title: "updated"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7", gotPath)
+	}
+	if d.Title != "updated" {
+		t.Fatalf("title = %q, want updated", d.Title)
+	}
+}
+
+func TestDeleteRepoDiscussionBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+	if err := DeleteRepoDiscussion(client, "owner", "repo", 7); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7", gotPath)
+	}
+}
+
+func TestCreateRepoDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"c1","md_content":"hi"}`), nil
+	})
+	c, err := CreateRepoDiscussionComment(client, "owner", "repo", 7, &CreateRepoDiscussionCommentOptions{MdContent: "hi"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7/comment" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7/comment", gotPath)
+	}
+	if c.ID != "c1" {
+		t.Fatalf("comment = %+v, want id=c1", c)
+	}
+}
+
+func TestUpdateRepoDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"c1","md_content":"edited"}`), nil
+	})
+	c, err := UpdateRepoDiscussionComment(client, "owner", "repo", 7, "c1", &UpdateRepoDiscussionCommentOptions{MdContent: "edited"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7/comment/c1" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7/comment/c1", gotPath)
+	}
+	if c.MdContent != "edited" {
+		t.Fatalf("md_content = %q, want edited", c.MdContent)
+	}
+}
+
+func TestDeleteRepoDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+	if err := DeleteRepoDiscussionComment(client, "owner", "repo", 7, "c1"); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7/comment/c1" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7/comment/c1", gotPath)
+	}
+}
+
+func TestReplyRepoDiscussionCommentBuildsRequest(t *testing.T) {
+	var gotPath, gotMethod string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		gotMethod = req.Method
+		return authTestResponse(http.StatusOK, `{"id":"r1","md_content":"reply"}`), nil
+	})
+	c, err := ReplyRepoDiscussionComment(client, "owner", "repo", 7, "c1", &ReplyRepoDiscussionCommentOptions{MdContent: "reply"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/discuss/7/comment/c1/reply" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/discuss/7/comment/c1/reply", gotPath)
+	}
+	if c.ID != "r1" || c.MdContent != "reply" {
+		t.Fatalf("comment = %+v, want id=r1 md_content=reply", c)
+	}
+}
