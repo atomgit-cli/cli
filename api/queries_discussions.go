@@ -203,3 +203,219 @@ func appendDiscussionCommentParams(endpoint string, opts *ListDiscussionComments
 		Set("order", opts.Order).
 		String()
 }
+
+// --- Write operations (POST / PATCH / DELETE) ---
+
+// CreateOrgDiscussionOptions specifies the parameters for creating an
+// organization discussion.
+type CreateOrgDiscussionOptions struct {
+	Title     string `json:"title"`
+	MdContent string `json:"md_content,omitempty"`
+}
+
+// CreateOrgDiscussion creates a new discussion in an organization.
+// POST /api/v5/orgs/{org}/discuss
+func CreateOrgDiscussion(client *Client, org string, opts *CreateOrgDiscussionOptions) (*Discussion, error) {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss"
+	var d Discussion
+	if err := client.Post(endpoint, opts, &d); err != nil {
+		return nil, fmt.Errorf("failed to create org discussion: %w", err)
+	}
+	return &d, nil
+}
+
+// UpdateOrgDiscussionOptions specifies the parameters for updating an
+// organization discussion.
+type UpdateOrgDiscussionOptions struct {
+	Title     string `json:"title,omitempty"`
+	MdContent string `json:"md_content,omitempty"`
+}
+
+// UpdateOrgDiscussion updates an existing organization discussion.
+// PATCH /api/v5/orgs/{org}/discuss/{number}
+func UpdateOrgDiscussion(client *Client, org string, number int, opts *UpdateOrgDiscussionOptions) (*Discussion, error) {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number)
+	var d Discussion
+	if err := client.Patch(endpoint, opts, &d); err != nil {
+		return nil, fmt.Errorf("failed to update org discussion: %w", err)
+	}
+	return &d, nil
+}
+
+// DeleteOrgDiscussion deletes an organization discussion.
+// DELETE /api/v5/orgs/{org}/discuss/{number}
+func DeleteOrgDiscussion(client *Client, org string, number int) error {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number)
+	if err := client.Delete(endpoint); err != nil {
+		return fmt.Errorf("failed to delete org discussion: %w", err)
+	}
+	return nil
+}
+
+// CreateOrgDiscussionCommentOptions specifies the parameters for creating a
+// comment on an organization discussion.
+type CreateOrgDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// CreateOrgDiscussionComment creates a comment on an organization discussion.
+// POST /api/v5/orgs/{org}/discuss/{number}/comment
+func CreateOrgDiscussionComment(client *Client, org string, number int, opts *CreateOrgDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number) + "/comment"
+	var c DiscussionComment
+	if err := client.Post(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to create org discussion comment: %w", err)
+	}
+	return &c, nil
+}
+
+// UpdateOrgDiscussionCommentOptions specifies the parameters for updating a
+// comment on an organization discussion.
+type UpdateOrgDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// UpdateOrgDiscussionComment updates a comment on an organization discussion.
+// PATCH /api/v5/orgs/{org}/discuss/{number}/comment/{id}
+func UpdateOrgDiscussionComment(client *Client, org string, number int, commentID string, opts *UpdateOrgDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID)
+	var c DiscussionComment
+	if err := client.Patch(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to update org discussion comment: %w", err)
+	}
+	return &c, nil
+}
+
+// DeleteOrgDiscussionComment deletes a comment on an organization discussion.
+// DELETE /api/v5/orgs/{org}/discuss/{number}/comment/{id}
+func DeleteOrgDiscussionComment(client *Client, org string, number int, commentID string) error {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID)
+	if err := client.Delete(endpoint); err != nil {
+		return fmt.Errorf("failed to delete org discussion comment: %w", err)
+	}
+	return nil
+}
+
+// ReplyOrgDiscussionCommentOptions specifies the parameters for replying to a
+// comment on an organization discussion.
+type ReplyOrgDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// ReplyOrgDiscussionComment replies to a comment on an organization discussion.
+// POST /api/v5/orgs/{org}/discuss/{number}/comment/{id}/reply
+func ReplyOrgDiscussionComment(client *Client, org string, number int, commentID string, opts *ReplyOrgDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID) + "/reply"
+	var c DiscussionComment
+	if err := client.Post(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to reply org discussion comment: %w", err)
+	}
+	return &c, nil
+}
+
+// CreateRepoDiscussionOptions specifies the parameters for creating a
+// repository discussion.
+type CreateRepoDiscussionOptions struct {
+	Title     string `json:"title"`
+	MdContent string `json:"md_content,omitempty"`
+}
+
+// CreateRepoDiscussion creates a new discussion in a repository.
+// POST /api/v5/repos/{owner}/{repo}/discuss
+func CreateRepoDiscussion(client *Client, owner, repo string, opts *CreateRepoDiscussionOptions) (*Discussion, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss"
+	var d Discussion
+	if err := client.Post(endpoint, opts, &d); err != nil {
+		return nil, fmt.Errorf("failed to create repo discussion: %w", err)
+	}
+	return &d, nil
+}
+
+// UpdateRepoDiscussionOptions specifies the parameters for updating a
+// repository discussion.
+type UpdateRepoDiscussionOptions struct {
+	Title     string `json:"title,omitempty"`
+	MdContent string `json:"md_content,omitempty"`
+}
+
+// UpdateRepoDiscussion updates an existing repository discussion.
+// PATCH /api/v5/repos/{owner}/{repo}/discuss/{number}
+func UpdateRepoDiscussion(client *Client, owner, repo string, number int, opts *UpdateRepoDiscussionOptions) (*Discussion, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number)
+	var d Discussion
+	if err := client.Patch(endpoint, opts, &d); err != nil {
+		return nil, fmt.Errorf("failed to update repo discussion: %w", err)
+	}
+	return &d, nil
+}
+
+// DeleteRepoDiscussion deletes a repository discussion.
+// DELETE /api/v5/repos/{owner}/{repo}/discuss/{number}
+func DeleteRepoDiscussion(client *Client, owner, repo string, number int) error {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number)
+	if err := client.Delete(endpoint); err != nil {
+		return fmt.Errorf("failed to delete repo discussion: %w", err)
+	}
+	return nil
+}
+
+// CreateRepoDiscussionCommentOptions specifies the parameters for creating a
+// comment on a repository discussion.
+type CreateRepoDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// CreateRepoDiscussionComment creates a comment on a repository discussion.
+// POST /api/v5/repos/{owner}/{repo}/discuss/{number}/comment
+func CreateRepoDiscussionComment(client *Client, owner, repo string, number int, opts *CreateRepoDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number) + "/comment"
+	var c DiscussionComment
+	if err := client.Post(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to create repo discussion comment: %w", err)
+	}
+	return &c, nil
+}
+
+// UpdateRepoDiscussionCommentOptions specifies the parameters for updating a
+// comment on a repository discussion.
+type UpdateRepoDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// UpdateRepoDiscussionComment updates a comment on a repository discussion.
+// PATCH /api/v5/repos/{owner}/{repo}/discuss/{number}/comment/{id}
+func UpdateRepoDiscussionComment(client *Client, owner, repo string, number int, commentID string, opts *UpdateRepoDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID)
+	var c DiscussionComment
+	if err := client.Patch(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to update repo discussion comment: %w", err)
+	}
+	return &c, nil
+}
+
+// DeleteRepoDiscussionComment deletes a comment on a repository discussion.
+// DELETE /api/v5/repos/{owner}/{repo}/discuss/{number}/comment/{id}
+func DeleteRepoDiscussionComment(client *Client, owner, repo string, number int, commentID string) error {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID)
+	if err := client.Delete(endpoint); err != nil {
+		return fmt.Errorf("failed to delete repo discussion comment: %w", err)
+	}
+	return nil
+}
+
+// ReplyRepoDiscussionCommentOptions specifies the parameters for replying to a
+// comment on a repository discussion.
+type ReplyRepoDiscussionCommentOptions struct {
+	MdContent string `json:"md_content"`
+}
+
+// ReplyRepoDiscussionComment replies to a comment on a repository discussion.
+// POST /api/v5/repos/{owner}/{repo}/discuss/{number}/comment/{id}/reply
+func ReplyRepoDiscussionComment(client *Client, owner, repo string, number int, commentID string, opts *ReplyRepoDiscussionCommentOptions) (*DiscussionComment, error) {
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID) + "/reply"
+	var c DiscussionComment
+	if err := client.Post(endpoint, opts, &c); err != nil {
+		return nil, fmt.Errorf("failed to reply repo discussion comment: %w", err)
+	}
+	return &c, nil
+}
