@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/actions/run/list"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/actions/run/stop"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/actions/run/view"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/actions/run/watch"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -32,6 +33,7 @@ func NewCmdRun(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	cmd.AddCommand(list.NewCmdList(f, nil))
+	cmd.AddCommand(stop.NewCmdStop(f, nil))
 	cmd.AddCommand(view.NewCmdView(f, nil))
 	cmd.AddCommand(watch.NewCmdWatch(f, nil))
 

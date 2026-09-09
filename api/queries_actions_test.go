@@ -72,6 +72,33 @@ func TestListActionsRunsBuildsV8Query(t *testing.T) {
 	}
 }
 
+func TestStopActionsRunBuildsV8Path(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotAuth = req.Header.Get("Authorization")
+		return authTestResponse(http.StatusOK, `{"success":true}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	if err := StopActionsRun(client, "owner", "repo", "run-1"); err != nil {
+		t.Fatalf("StopActionsRun() error = %v", err)
+	}
+
+	want := "/api/v8/repos/owner/repo/actions/runs/run-1/stop"
+	if gotPath != want {
+		t.Fatalf("request path = %q, want %q", gotPath, want)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("request method = %q, want POST", gotMethod)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Fatalf("Authorization = %q, want Bearer test-token", gotAuth)
+	}
+	assertNoAccessTokenQuery(t, gotPath)
+}
+
 func TestListActionsRunsNoOptions(t *testing.T) {
 	var gotPath string
 	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
