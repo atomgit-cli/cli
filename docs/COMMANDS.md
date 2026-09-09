@@ -106,6 +106,7 @@ docker compose up gc
 - `repo branch-protection list`
 - `repo pr-settings view`
 - `actions run list`
+- `actions run rerun`
 - `actions run view`
 - `actions run watch`
 - `actions job list`
@@ -2431,6 +2432,27 @@ gc actions run watch <run-id> -R owner/repo --json
 - 支持 `--json`：输出写入 stdout，原样透传 API 响应（同 `run view --json`）。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 退出码：`0` 成功（含 `--exit-status` 时 run 成功完成）；`1` 通用错误或 `--exit-status` 时 run 失败；`2` 参数错误（如缺少 `<run-id>` 或 `--interval < 1`）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）。
+
+### actions run rerun - 重跑整条流水线
+
+重新执行指定流水线的全部任务（对齐 `gh run rerun`）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`。
+
+```bash
+# 重跑 run
+gc actions run rerun <run-id> -R owner/repo
+
+# JSON 输出
+gc actions run rerun <run-id> -R owner/repo --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/rerun`。
+- 仅处于完成状态的 run 可重跑；对 RUNNING 中的 run 调用会返回冲突错误（HTTP 409，服务端业务校验）。
+- 重跑为同 run 原地重跑，可结合 `gc actions run watch <run-id>` 继续跟踪。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409，如对运行中的 run 重跑）。
 
 ### actions job list - 列出工作流运行的 jobs
 
