@@ -106,6 +106,7 @@ docker compose up gc
 - `repo branch-protection list`
 - `repo pr-settings view`
 - `actions run list`
+- `actions run retry`
 - `actions run view`
 - `actions run watch`
 - `actions job list`
@@ -2464,6 +2465,32 @@ gc actions run watch <run-id> -R owner/repo --json
 - 支持 `--json`：输出写入 stdout，原样透传 API 响应（同 `run view --json`）。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 退出码：`0` 成功（含 `--exit-status` 时 run 成功完成）；`1` 通用错误或 `--exit-status` 时 run 失败；`2` 参数错误（如缺少 `<run-id>` 或 `--interval < 1`）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）。
+
+### actions run retry - 按 job 重试流水线任务
+
+重试指定流水线中失败/取消的任务，避免整条流水线重跑（能力对标 `gh run rerun --failed`，但 GitCode 接口按 job_run_ids 显式指定，可自由组合）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`，job id 取 `gc actions job list <run-id>` 返回的 `job_run_id`。
+
+```bash
+# 显式指定要重试的 job（可重复）
+gc actions run retry <run-id> --job <job-id> --job <job-id-2> -R owner/repo
+
+# 重试全部失败/取消的 job
+gc actions run retry <run-id> --failed -R owner/repo
+
+# JSON 输出
+gc actions run retry <run-id> --failed --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/retry`，请求体 `{"job_run_ids": [...]}`。
+- `--job` 与 `--failed` 互斥且必须二选一；`--failed` 会先调用 `GET .../runs/{run_id}/jobs`，过滤 `FAILED`/`CANCELED` 状态的 job 后提交。
+- 调用前一律先查询 jobs 列表校验 job 归属：服务端不校验 job_run_ids 是否属于目标 run，传入其他 run 的 job id 会造成"假运行"状态，CLI 侧对不匹配的 job id 直接报错退出、不发起请求。
+- `--failed` 无匹配 job（如全部成功）时报错"no failed or canceled jobs to retry"且不发起请求（服务端对空数组无校验，会静默成功但不调度任何任务）。
+- 仅失败/取消状态的 run 支持重试；对 COMPLETED 的 run 调用会透传服务端 HTTP 400 错误。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action","job_run_ids"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误（含无匹配 job、服务端 400）；`2` 参数错误（如缺少 `<run-id>`、`--job` 与 `--failed` 同时指定或都未指定）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）。
 
 ### actions job list - 列出工作流运行的 jobs
 
