@@ -109,6 +109,8 @@ func stopRun(opts *StopOptions) error {
 	}
 
 	cs := opts.IO.ColorScheme()
-	fmt.Fprintf(opts.IO.Out, "%s Stopped pipeline run %s in %s/%s\n", cs.Green("✓"), opts.RunID, owner, repo)
+	if _, err := fmt.Fprintf(opts.IO.Out, "%s Stopped pipeline run %s in %s/%s\n", cs.Green("✓"), opts.RunID, owner, repo); err != nil {
+		return err
+	}
 	return nil
 }
