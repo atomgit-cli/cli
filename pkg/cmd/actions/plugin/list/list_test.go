@@ -405,3 +405,44 @@ func TestListRunPaginationLimit(t *testing.T) {
 		t.Fatalf("stdout = %q, want p1 and p3", out)
 	}
 }
+
+func TestListRunContentPaginationUsesServerMetadata(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	page1 := `{"page_num":1,"page_size":2,"total":3,"page_count":2,"content":[{"name":"p1"},{"name":"p2"}]}`
+	page2 := `{"page_num":2,"page_size":2,"total":3,"page_count":2,"content":[{"name":"p3"}]}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					parsed, _ := url.Parse(req.URL.String())
+					if parsed.Query().Get("page") == "2" {
+						return listTestResponse(http.StatusOK, page2), nil
+					}
+					return listTestResponse(http.StatusOK, page1), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		JSON:       true,
+	}
+
+	if err := listRun(opts); err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &entries); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2", callCount)
+	}
+	if len(entries) != 3 || entries[2]["name"] != "p3" {
+		t.Fatalf("entries = %v, want three entries including p3", entries)
+	}
+}

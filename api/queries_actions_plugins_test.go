@@ -219,6 +219,7 @@ func TestParseActionsPluginsListWrapper(t *testing.T) {
 		{name: "plugins wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
 		{name: "list wrapper", raw: `{"list":[{"name":"b"}]}`, want: 1},
 		{name: "data wrapper", raw: `{"data":[{"name":"c"}]}`, want: 1},
+		{name: "content wrapper", raw: `{"content":[{"name":"d"}]}`, want: 1},
 		{name: "empty array", raw: `[]`, want: 0},
 		{name: "empty wrapper", raw: `{"plugins":[]}`, want: 0},
 	}
@@ -236,12 +237,23 @@ func TestParseActionsPluginsListWrapper(t *testing.T) {
 }
 
 func TestParseActionsPluginsListUnrecognized(t *testing.T) {
-	plugins, err := ParseActionsPluginsList([]byte(`{"unrelated":"field"}`))
-	if err != nil {
-		t.Fatalf("ParseActionsPluginsList() error = %v", err)
+	_, err := ParseActionsPluginsList([]byte(`{"unrelated":"field"}`))
+	if err == nil {
+		t.Fatal("expected an error for an unrecognized response object")
 	}
-	if len(plugins) != 0 {
-		t.Fatalf("len = %d, want 0", len(plugins))
+}
+
+func TestParseActionsPluginsPageContentMetadata(t *testing.T) {
+	raw := []byte(`{"page_num":2,"page_size":50,"total":51,"page_count":2,"content":[{"name":"official_shell"}]}`)
+	page, err := ParseActionsPluginsPage(raw)
+	if err != nil {
+		t.Fatalf("ParseActionsPluginsPage() error = %v", err)
+	}
+	if page.PageNum != 2 || page.PageSize != 50 || page.Total != 51 || page.PageCount != 2 {
+		t.Fatalf("metadata = %+v, want page 2/50 total 51 count 2", page)
+	}
+	if len(page.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(page.Entries))
 	}
 }
 
@@ -279,6 +291,7 @@ func TestCountPluginsEntries(t *testing.T) {
 		{name: "plain array 3", raw: `[{"name":"a"},{"name":"b"},{"name":"c"}]`, want: 3},
 		{name: "empty", raw: `[]`, want: 0},
 		{name: "wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
+		{name: "content wrapper", raw: `{"content":[{"name":"a"}]}`, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

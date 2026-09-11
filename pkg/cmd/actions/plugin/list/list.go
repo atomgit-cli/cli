@@ -178,18 +178,11 @@ func fetchPlugins(client *api.Client, project string, opts *ListOptions) ([]json
 
 func fetchPluginsPage(client *api.Client, project string, opts *ListOptions) ([]json.RawMessage, error) {
 	perPage := resolvePerPage(opts)
-	raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
-		PerPage: perPage,
-		Page:    opts.Page,
-	})
+	page, err := fetchPluginPage(client, project, opts.Page, perPage)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := api.ParseActionsPluginsListRaw(raw)
-	if err != nil {
-		return nil, err
-	}
-	return trimEntries(entries, opts), nil
+	return trimEntries(page.Entries, opts), nil
 }
 
 func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]json.RawMessage, error) {
@@ -199,26 +192,41 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 	}
 	var all []json.RawMessage
 	for page := 1; ; page++ {
-		raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
-			PerPage: perPage,
-			Page:    page,
-		})
+		response, err := fetchPluginPage(client, project, page, perPage)
 		if err != nil {
 			return nil, err
 		}
-		entries, err := api.ParseActionsPluginsListRaw(raw)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, entries...)
+		all = append(all, response.Entries...)
 		if opts.Limit > 0 && len(all) >= opts.Limit {
 			return trimEntries(all, opts), nil
 		}
-		if len(entries) < perPage {
+		if shouldStopPagination(page, response, perPage) {
 			break
 		}
 	}
 	return trimEntries(all, opts), nil
+}
+
+func fetchPluginPage(client *api.Client, project string, page, perPage int) (*api.ActionsPluginsPage, error) {
+	raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
+		PerPage: perPage,
+		Page:    page,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return api.ParseActionsPluginsPage(raw)
+}
+
+func shouldStopPagination(page int, response *api.ActionsPluginsPage, requestedPerPage int) bool {
+	if response.PageCount > 0 {
+		return page >= response.PageCount
+	}
+	pageSize := response.PageSize
+	if pageSize == 0 {
+		pageSize = requestedPerPage
+	}
+	return len(response.Entries) < pageSize
 }
 
 func resolvePerPage(opts *ListOptions) int {
