@@ -38,6 +38,8 @@ jobs:
 
       - name: Install gitleaks
         run: go install github.com/zricethezav/gitleaks/v8@latest
+        env:
+          GOTOOLCHAIN: auto
 
       - name: Run gitleaks
         run: gitleaks detect --source . --redact=100 --verbose --exit-code 1 --config .gitleaks.toml
