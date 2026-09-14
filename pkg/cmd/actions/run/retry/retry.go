@@ -40,6 +40,7 @@ type RetryOptions struct {
 	JobIDs     []string
 	Failed     bool
 
+	Yes  bool
 	JSON bool
 }
 
@@ -64,6 +65,8 @@ func NewCmdRetry(f *cmdutil.Factory, runF func(*RetryOptions) error) *cobra.Comm
 			Exactly one of --job or --failed is required. Job ids are validated
 			against the target run before the request is sent, because the server
 			silently accepts job ids belonging to other runs.
+
+			Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
 			# Retry specific jobs (repeatable)
@@ -72,8 +75,11 @@ func NewCmdRetry(f *cmdutil.Factory, runF func(*RetryOptions) error) *cobra.Comm
 			# Retry all failed/canceled jobs
 			$ gc actions run retry <run-id> --failed -R owner/repo
 
+			# Skip confirmation (for scripts)
+			$ gc actions run retry <run-id> --failed --yes -R owner/repo
+
 			# JSON output
-			$ gc actions run retry <run-id> --failed --json
+			$ gc actions run retry <run-id> --failed --yes --json
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -94,6 +100,7 @@ func NewCmdRetry(f *cmdutil.Factory, runF func(*RetryOptions) error) *cobra.Comm
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
 	cmd.Flags().StringArrayVar(&opts.JobIDs, "job", nil, "Job id to retry (repeatable)")
 	cmd.Flags().BoolVar(&opts.Failed, "failed", false, "Retry all failed/canceled jobs of the run")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation prompt")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -126,6 +133,16 @@ func retryRun(opts *RetryOptions) error {
 		return err
 	}
 
+	expected := fmt.Sprintf("retry pipeline run %s", opts.RunID)
+	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
+		IO:       opts.IO,
+		Yes:      opts.Yes,
+		Expected: expected,
+		Prompt:   fmt.Sprintf("! This will retry %d job(s) of pipeline run %s in %s/%s\nType %q to confirm: ", len(jobIDs), opts.RunID, owner, repo, expected),
+	}); err != nil {
+		return err
+	}
+
 	if err := api.RetryActionsRun(client, owner, repo, opts.RunID, jobIDs); err != nil {
 		return fmt.Errorf("failed to retry pipeline run jobs: %w", err)
 	}
@@ -145,7 +162,7 @@ func retryRun(opts *RetryOptions) error {
 	cs := opts.IO.ColorScheme()
 	if _, err := fmt.Fprintf(opts.IO.Out, "%s Retried %d job(s) of pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
 		cs.Green("✓"), len(jobIDs), opts.RunID, owner, repo, opts.RunID); err != nil {
-		return err
+		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
 }

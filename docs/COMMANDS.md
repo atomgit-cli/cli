@@ -2477,8 +2477,11 @@ gc actions run retry <run-id> --job <job-id> --job <job-id-2> -R owner/repo
 # 重试全部失败/取消的 job
 gc actions run retry <run-id> --failed -R owner/repo
 
+# 跳过确认（脚本场景）
+gc actions run retry <run-id> --failed --yes -R owner/repo
+
 # JSON 输出
-gc actions run retry <run-id> --failed --json
+gc actions run retry <run-id> --failed --yes --json
 ```
 
 说明：
@@ -2488,9 +2491,10 @@ gc actions run retry <run-id> --failed --json
 - 调用前一律先查询 jobs 列表校验 job 归属：服务端不校验 job_run_ids 是否属于目标 run，传入其他 run 的 job id 会造成"假运行"状态，CLI 侧对不匹配的 job id 直接报错退出、不发起请求。
 - `--failed` 无匹配 job（如全部成功）时报错"no failed or canceled jobs to retry"且不发起请求（服务端对空数组无校验，会静默成功但不调度任何任务）。
 - 仅失败/取消状态的 run 支持重试；对 COMPLETED 的 run 调用会透传服务端 HTTP 400 错误。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 状态变更写操作保护）：默认需交互输入 `retry pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。确认门在 retry 写请求之前触发，之前的 jobs 查询为只读。
 - 支持 `--json`：输出 `{"run_id","owner","repo","action","job_run_ids"}` 结构到 stdout。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
-- 退出码：`0` 成功；`1` 通用错误（含无匹配 job、服务端 400）；`2` 参数错误（如缺少 `<run-id>`、`--job` 与 `--failed` 同时指定或都未指定）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）。
+- 退出码：`0` 成功；`1` 通用错误（含无匹配 job、服务端 400）；`2` 参数错误（如缺少 `<run-id>`、`--job` 与 `--failed` 同时指定或都未指定、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）。
 
 ### actions job list - 列出工作流运行的 jobs
 
