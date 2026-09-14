@@ -19,6 +19,7 @@ func TestNewCmdStop(t *testing.T) {
 	}{
 		{name: "stop run", args: []string{"run-1"}, wantErr: false},
 		{name: "stop with json", args: []string{"--json", "run-1"}, wantErr: false},
+		{name: "stop with yes", args: []string{"--yes", "run-1"}, wantErr: false},
 		{name: "no args", args: []string{}, wantErr: true},
 		{name: "too many args", args: []string{"a", "b"}, wantErr: true},
 	}
@@ -59,6 +60,115 @@ func TestNewCmdStopJSONFlag(t *testing.T) {
 	}
 }
 
+func TestNewCmdStopYesFlag(t *testing.T) {
+	cmd := NewCmdStop(cmdutil.TestFactory(), func(opts *StopOptions) error {
+		return nil
+	})
+	if cmd.Flags().Lookup("yes") == nil {
+		t.Fatal("yes flag missing")
+	}
+}
+
+// TestStopRunRequiresConfirmationBeforeWrite verifies the confirmation gate
+// fires before any HTTP request in non-interactive mode (spec §4).
+func TestStopRunRequiresConfirmationBeforeWrite(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	requests := 0
+	opts := &StopOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return stopTestResponse(http.StatusOK, `{"success":true}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+	}
+
+	err := stopRun(opts)
+	if err == nil {
+		t.Fatal("stopRun() without --yes in non-interactive mode = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("error = %q, want mention of --yes", err.Error())
+	}
+	if requests != 0 {
+		t.Fatalf("HTTP requests = %d, want 0 before confirmation", requests)
+	}
+}
+
+// TestStopRunTTYConfirm exercises the interactive confirmation path: typing
+// the expected value proceeds with the stop request.
+func TestStopRunTTYConfirm(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	streams, _, out, _ := iostreams.TestTTY()
+	streams.In = strings.NewReader("stop pipeline run run-1\n")
+	requests := 0
+	opts := &StopOptions{
+		IO: streams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return stopTestResponse(http.StatusOK, `{"success":true}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+	}
+
+	if err := stopRun(opts); err != nil {
+		t.Fatalf("stopRun() with TTY confirmation error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("HTTP requests = %d, want 1 after confirmation", requests)
+	}
+	if !strings.Contains(out.String(), "Stopped pipeline run run-1 in owner/repo") {
+		t.Fatalf("human output missing stop summary; output=%q", out.String())
+	}
+}
+
+// TestStopRunTTYConfirmMismatch verifies a wrong confirmation input aborts
+// before any HTTP request.
+func TestStopRunTTYConfirmMismatch(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	streams, _, _, _ := iostreams.TestTTY()
+	streams.In = strings.NewReader("wrong input\n")
+	requests := 0
+	opts := &StopOptions{
+		IO: streams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return stopTestResponse(http.StatusOK, `{"success":true}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+	}
+
+	err := stopRun(opts)
+	if err == nil {
+		t.Fatal("stopRun() with mismatched confirmation = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "did not match") {
+		t.Fatalf("error = %q, want 'did not match'", err.Error())
+	}
+	if requests != 0 {
+		t.Fatalf("HTTP requests = %d, want 0 after mismatched confirmation", requests)
+	}
+}
+
 func TestStopRunBuildsV8Path(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 
@@ -77,6 +187,7 @@ func TestStopRunBuildsV8Path(t *testing.T) {
 		},
 		Repository: "owner/repo",
 		RunID:      "run-1",
+		Yes:        true,
 	}
 
 	if err := stopRun(opts); err != nil {
@@ -110,6 +221,7 @@ func TestStopRunJSONOutput(t *testing.T) {
 		},
 		Repository: "owner/repo",
 		RunID:      "run-1",
+		Yes:        true,
 		JSON:       true,
 	}
 
@@ -138,6 +250,7 @@ func TestStopRunError(t *testing.T) {
 		},
 		Repository: "owner/repo",
 		RunID:      "missing",
+		Yes:        true,
 	}
 
 	err := stopRun(opts)
@@ -149,6 +262,66 @@ func TestStopRunError(t *testing.T) {
 	}
 	if got := cmdutil.ExitCode(err); got != cmdutil.ExitNotFound {
 		t.Fatalf("ExitCode = %d, want %d (404 preserved through %%w wrap)", got, cmdutil.ExitNotFound)
+	}
+}
+
+// TestStopRunUnauthorized verifies a 401 response preserves the ExitAuth
+// exit code through the error wrap (exit-code contract matrix).
+func TestStopRunUnauthorized(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	opts := &StopOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return stopTestResponse(http.StatusUnauthorized, `{"message":"unauthorized"}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Yes:        true,
+	}
+
+	err := stopRun(opts)
+	if err == nil {
+		t.Fatal("stopRun() error = nil, want error")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
+		t.Fatalf("ExitCode = %d, want %d (401 preserved through %%w wrap)", got, cmdutil.ExitAuth)
+	}
+}
+
+// TestStopRunInvalidRepo verifies an invalid --repo format fails in the
+// ParseRepo branch before any HTTP request.
+func TestStopRunInvalidRepo(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	requests := 0
+	opts := &StopOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					return stopTestResponse(http.StatusOK, `{"success":true}`), nil
+				}),
+			}, nil
+		},
+		Repository: "invalid",
+		RunID:      "run-1",
+		Yes:        true,
+	}
+
+	err := stopRun(opts)
+	if err == nil {
+		t.Fatal("stopRun() with invalid repo = nil, want error")
+	}
+	if requests != 0 {
+		t.Fatalf("HTTP requests = %d, want 0 for invalid repo", requests)
 	}
 }
 

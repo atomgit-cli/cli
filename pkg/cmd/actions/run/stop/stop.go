@@ -31,6 +31,7 @@ type StopOptions struct {
 	Repository string
 	RunID      string
 
+	Yes  bool
 	JSON bool
 }
 
@@ -51,13 +52,18 @@ func NewCmdStop(f *cmdutil.Factory, runF func(*StopOptions) error) *cobra.Comman
 			The run id is the workflow_run_id returned by ` + "`gc actions run list`" + `.
 			The API is idempotent: stopping a run that has already finished still
 			returns success. Use --json for a machine-readable result.
+
+			Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
 			# Stop a running pipeline run
 			$ gc actions run stop <run-id> -R owner/repo
 
+			# Skip confirmation (for scripts)
+			$ gc actions run stop <run-id> -R owner/repo --yes
+
 			# JSON output
-			$ gc actions run stop <run-id> -R owner/repo --json
+			$ gc actions run stop <run-id> -R owner/repo --yes --json
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,6 +79,7 @@ func NewCmdStop(f *cmdutil.Factory, runF func(*StopOptions) error) *cobra.Comman
 	}
 
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation prompt")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -93,6 +100,16 @@ func stopRun(opts *StopOptions) error {
 		return err
 	}
 
+	expected := fmt.Sprintf("stop pipeline run %s", opts.RunID)
+	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
+		IO:       opts.IO,
+		Yes:      opts.Yes,
+		Expected: expected,
+		Prompt:   fmt.Sprintf("! This will stop pipeline run %s in %s/%s\nType %q to confirm: ", opts.RunID, owner, repo, expected),
+	}); err != nil {
+		return err
+	}
+
 	if err := api.StopActionsRun(client, owner, repo, opts.RunID); err != nil {
 		return fmt.Errorf("failed to stop pipeline run: %w", err)
 	}
@@ -110,7 +127,7 @@ func stopRun(opts *StopOptions) error {
 
 	cs := opts.IO.ColorScheme()
 	if _, err := fmt.Fprintf(opts.IO.Out, "%s Stopped pipeline run %s in %s/%s\n", cs.Green("✓"), opts.RunID, owner, repo); err != nil {
-		return err
+		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
 }
