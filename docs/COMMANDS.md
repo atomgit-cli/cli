@@ -2438,11 +2438,14 @@ gc actions run watch <run-id> -R owner/repo --json
 重新执行指定流水线的全部任务（对齐 `gh run rerun`）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`。
 
 ```bash
-# 重跑 run
+# 重跑 run（交互确认）
 gc actions run rerun <run-id> -R owner/repo
 
+# 跳过确认（脚本场景）
+gc actions run rerun <run-id> -R owner/repo --yes
+
 # JSON 输出
-gc actions run rerun <run-id> -R owner/repo --json
+gc actions run rerun <run-id> -R owner/repo --yes --json
 ```
 
 说明：
@@ -2450,9 +2453,10 @@ gc actions run rerun <run-id> -R owner/repo --json
 - 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/rerun`。
 - 仅处于完成状态的 run 可重跑；对 RUNNING 中的 run 调用会返回冲突错误（HTTP 409，服务端业务校验）。
 - 重跑为同 run 原地重跑，可结合 `gc actions run watch <run-id>` 继续跟踪。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 状态变更写操作保护）：默认需交互输入 `rerun pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
 - 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
-- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409，如对运行中的 run 重跑）。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409，如对运行中的 run 重跑）。
 
 ### actions job list - 列出工作流运行的 jobs
 

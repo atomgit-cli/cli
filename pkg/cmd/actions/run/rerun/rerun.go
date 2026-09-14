@@ -31,6 +31,7 @@ type RerunOptions struct {
 	Repository string
 	RunID      string
 
+	Yes  bool
 	JSON bool
 }
 
@@ -52,13 +53,18 @@ func NewCmdRerun(f *cmdutil.Factory, runF func(*RerunOptions) error) *cobra.Comm
 			Only runs in a complete status can be rerun; rerunning a run that is
 			still RUNNING fails with a conflict error. Use --json for a
 			machine-readable result.
+
+			Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
 			# Rerun a pipeline run
 			$ gc actions run rerun <run-id> -R owner/repo
 
+			# Skip confirmation (for scripts)
+			$ gc actions run rerun <run-id> -R owner/repo --yes
+
 			# JSON output
-			$ gc actions run rerun <run-id> -R owner/repo --json
+			$ gc actions run rerun <run-id> -R owner/repo --yes --json
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,6 +80,7 @@ func NewCmdRerun(f *cmdutil.Factory, runF func(*RerunOptions) error) *cobra.Comm
 	}
 
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation prompt")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -91,6 +98,16 @@ func rerunRun(opts *RerunOptions) error {
 	}
 	owner, repo, err := cmdutil.ParseRepo(repository)
 	if err != nil {
+		return err
+	}
+
+	expected := fmt.Sprintf("rerun pipeline run %s", opts.RunID)
+	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
+		IO:       opts.IO,
+		Yes:      opts.Yes,
+		Expected: expected,
+		Prompt:   fmt.Sprintf("! This will rerun pipeline run %s in %s/%s\nType %q to confirm: ", opts.RunID, owner, repo, expected),
+	}); err != nil {
 		return err
 	}
 
@@ -112,7 +129,7 @@ func rerunRun(opts *RerunOptions) error {
 	cs := opts.IO.ColorScheme()
 	if _, err := fmt.Fprintf(opts.IO.Out, "%s Rerunning pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
 		cs.Green("✓"), opts.RunID, owner, repo, opts.RunID); err != nil {
-		return err
+		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
 }
