@@ -75,6 +75,7 @@ jobs:
         with:
           name: ${{ steps.coverage-artifact.outputs.name }}
           path: coverage.out
+          retention-days: 7
 
   build:
     name: Build
@@ -109,6 +110,7 @@ jobs:
         with:
           name: ${{ steps.binary-artifact.outputs.name }}
           path: bin/gc
+          retention-days: 7
 
   package:
     name: Package
@@ -168,3 +170,4 @@ jobs:
         with:
           name: ${{ steps.wheel-artifact.outputs.name }}
           path: dist/*.whl
+          retention-days: 7
