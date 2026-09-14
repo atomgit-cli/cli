@@ -23,6 +23,27 @@
 - 在源码、测试或文档中提交真实凭证
 - 使用非 `infra-test/*` 仓库做真实命令测试
 
+## 本地防线与提交纪律
+
+本地多层防线是防止敏感信息进入版本库的主要手段，开发者与 AI 代理都必须遵守：
+
+### 提交纪律
+
+1. **精确暂存** - `git add` 必须逐个指定文件；禁止 `git add -A`、`git add .`（会把本地无关文件、子模块脏状态扫进提交）
+2. **提交前复核** - 提交前必须执行 `git status` 与 `git diff --staged`，确认暂存区只包含本次任务相关的文件
+3. **禁止跳过钩子** - 禁止 `git commit --no-verify`、`git push --no-verify`
+4. **新 clone 必装钩子** - 每次 clone 后必须执行 `pre-commit install --hook-type pre-commit --hook-type pre-push`，pre-commit 钩子不会随 clone 自动安装
+5. **误报登记** - gitleaks 确认误报后，将 fingerprint 登记到 `.gitleaksignore` 并随相关 PR 提交，不得用 `--no-verify` 绕过
+
+### 双阶段扫描
+
+项目通过 `.pre-commit-config.yaml` 配置两阶段秘密扫描：
+
+- **workspace 扫描**（pre-commit / pre-push）：扫描当前工作区，含 `.gitignore` 中的文件
+- **git history 扫描**（pre-push）：push 前全量扫描提交历史，拦截已 commit 未 push 的泄漏
+
+CI（`.gitcode/workflows/ci.yml` 与 `.github/workflows/ci.yml` 的 Secret Scan job）作为最后一道自动化防线，覆盖未安装本地钩子、`--no-verify` 裸奔、平台网页直接编辑三类本地防线失效场景。
+
 ## 同步要求
 
 - 认证模型变化时同步 `docs/AUTH.md`、相关命令文档和 AI 入口文档
