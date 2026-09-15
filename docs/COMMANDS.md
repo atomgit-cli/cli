@@ -154,6 +154,8 @@ docker compose up gc
 - `release create`
 - `release edit`
 - `release upload`
+- `actions run rerun`
+- `actions run stop`
 - `actions workflow run`
 - `repo branch create`
 - `repo edit`
