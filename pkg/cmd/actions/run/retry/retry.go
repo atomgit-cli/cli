@@ -187,8 +187,10 @@ func writeRetryResult(opts *RetryOptions, owner, repo string, jobIDs []string) e
 	}
 
 	cs := opts.IO.ColorScheme()
-	if _, err := fmt.Fprintf(opts.IO.Out, "%s Retried %d job(s) of pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
-		cs.Red("✗"), len(jobIDs), opts.RunID, owner, repo, opts.RunID); err != nil {
+	if _, err := fmt.Fprintf(opts.IO.Out,
+		"%s Retried %d job(s) of pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
+		cs.Red("✗"), len(jobIDs), opts.RunID, owner, repo, opts.RunID,
+	); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil

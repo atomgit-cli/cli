@@ -530,6 +530,49 @@ func TestRetryRunJobListTruncated(t *testing.T) {
 	}
 }
 
+// TestRetryRunFailedListTruncated mirrors TestRetryRunJobListTruncated for
+// the --failed mode: both selection paths share the same truncation defense,
+// so the matrix covers each entry point.
+func TestRetryRunFailedListTruncated(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	retryCalled := false
+	opts := &RetryOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					if strings.HasSuffix(req.URL.Path, "/retry") {
+						retryCalled = true
+						return retryTestResponse(http.StatusOK, `{"success":true}`), nil
+					}
+					// Server claims 5 jobs but only 3 are in the page.
+					return retryTestResponse(http.StatusOK, `{"total_count":5,"jobs":[`+
+						`{"id":"job-ok","name":"ok_job","status":"COMPLETED"},`+
+						`{"id":"job-fail","name":"fail_job","status":"FAILED"},`+
+						`{"id":"job-cancel","name":"cancel_job","status":"CANCELED"}]}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Failed:     true,
+		Yes:        true,
+	}
+
+	err := retryRun(opts)
+	if err == nil {
+		t.Fatal("retryRun() error = nil, want truncation error")
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("error = %q, want truncation error", err.Error())
+	}
+	if retryCalled {
+		t.Fatal("retry endpoint must not be called when the job list is truncated")
+	}
+}
+
 // TestRetryRunNotFound verifies a 404 response preserves the ExitNotFound
 // exit code through the error wrap (exit-code contract matrix).
 func TestRetryRunNotFound(t *testing.T) {
