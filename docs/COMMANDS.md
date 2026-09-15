@@ -172,6 +172,11 @@ docker compose up gc
 - `config set`
 - `update`
 
+写命令家族约定（issue close / pr close / artifact delete / actions run stop/rerun/retry 等）：
+
+- JSON 结果的 `action` 字段统一使用过去式（如 `stopped`、`deleted`、`retried`）；`rerun` 兼作过去分词，保持原形
+- 人类可读成功输出统一以红色 `✗` 前缀标识破坏性/写操作家族，与只读/普通写操作的绿色 `✓` 区分
+
 其中 `issue list` 额外支持：
 
 - `--format json|simple|table`

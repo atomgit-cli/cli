@@ -99,6 +99,24 @@ func TestStopActionsRunBuildsV8Path(t *testing.T) {
 	assertNoAccessTokenQuery(t, gotPath)
 }
 
+func TestStopActionsRunEscapesPathParams(t *testing.T) {
+	var gotEscapedPath string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotEscapedPath = req.URL.EscapedPath()
+		return authTestResponse(http.StatusOK, `{"success":true}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	if err := StopActionsRun(client, "my owner", "repo", "run/1"); err != nil {
+		t.Fatalf("StopActionsRun() error = %v", err)
+	}
+
+	want := "/api/v8/repos/my%20owner/repo/actions/runs/run%2F1/stop"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped request path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
 func TestRerunActionsRunBuildsV8Path(t *testing.T) {
 	var gotMethod, gotPath, gotAuth string
 	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {

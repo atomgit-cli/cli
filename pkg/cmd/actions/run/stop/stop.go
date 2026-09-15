@@ -105,7 +105,10 @@ func stopRun(opts *StopOptions) error {
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: expected,
-		Prompt:   fmt.Sprintf("! This will stop pipeline run %s in %s/%s\nType %q to confirm: ", opts.RunID, owner, repo, expected),
+		Prompt: fmt.Sprintf(
+			"! This will stop pipeline run %s in %s/%s\nType %q to confirm: ",
+			opts.RunID, owner, repo, expected,
+		),
 	}); err != nil {
 		return err
 	}
@@ -126,7 +129,10 @@ func stopRun(opts *StopOptions) error {
 	}
 
 	cs := opts.IO.ColorScheme()
-	if _, err := fmt.Fprintf(opts.IO.Out, "%s Stopped pipeline run %s in %s/%s\n", cs.Red("✗"), opts.RunID, owner, repo); err != nil {
+	if _, err := fmt.Fprintf(opts.IO.Out,
+		"%s Stopped pipeline run %s in %s/%s\n",
+		cs.Red("✗"), opts.RunID, owner, repo,
+	); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
