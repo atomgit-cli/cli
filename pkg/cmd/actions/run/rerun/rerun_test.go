@@ -265,6 +265,36 @@ func TestRerunRunConflict(t *testing.T) {
 	}
 }
 
+// TestRerunRunNotFound verifies a 404 response preserves the ExitNotFound
+// exit code through the error wrap (exit-code contract matrix; nonexistent
+// run-id is a realistic input).
+func TestRerunRunNotFound(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	opts := &RerunOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return rerunTestResponse(http.StatusNotFound, `{"message":"run not found"}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-missing",
+		Yes:        true,
+	}
+
+	err := rerunRun(opts)
+	if err == nil {
+		t.Fatal("rerunRun() error = nil, want error for 404")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitNotFound {
+		t.Fatalf("ExitCode = %d, want %d (404 preserved through %%w wrap)", got, cmdutil.ExitNotFound)
+	}
+}
+
 // TestRerunRunUnauthorized verifies a 401 response preserves the ExitAuth
 // exit code through the error wrap (exit-code contract matrix).
 func TestRerunRunUnauthorized(t *testing.T) {

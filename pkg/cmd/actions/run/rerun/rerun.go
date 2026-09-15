@@ -106,7 +106,10 @@ func rerunRun(opts *RerunOptions) error {
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: expected,
-		Prompt:   fmt.Sprintf("! This will rerun pipeline run %s in %s/%s\nType %q to confirm: ", opts.RunID, owner, repo, expected),
+		Prompt: fmt.Sprintf(
+			"! This will rerun pipeline run %s in %s/%s\nType %q to confirm: ",
+			opts.RunID, owner, repo, expected,
+		),
 	}); err != nil {
 		return err
 	}
@@ -128,7 +131,7 @@ func rerunRun(opts *RerunOptions) error {
 
 	cs := opts.IO.ColorScheme()
 	if _, err := fmt.Fprintf(opts.IO.Out, "%s Rerunning pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
-		cs.Green("✓"), opts.RunID, owner, repo, opts.RunID); err != nil {
+		cs.Red("✗"), opts.RunID, owner, repo, opts.RunID); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
