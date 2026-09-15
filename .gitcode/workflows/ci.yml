@@ -47,6 +47,14 @@ jobs:
         with:
           version: "1.22"
 
+      - name: Verify checkout depth
+        run: |
+          COUNT=$(git rev-list --count HEAD)
+          echo "commit count reachable from HEAD: ${COUNT}"
+          if [ "${COUNT}" -le 1 ]; then
+            echo "::warning::shallow checkout detected - history scan coverage limited"
+          fi
+
       - name: Install gitleaks
         run: go install github.com/zricethezav/gitleaks/v8@latest
         env:

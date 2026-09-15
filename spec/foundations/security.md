@@ -152,7 +152,7 @@ pre-commit install --hook-type pre-commit --hook-type pre-push
 **注意**：
 - 仓库通过 `default_install_hook_types` 默认安装 pre-commit 与 pre-push；旧 clone 或未更新配置的环境可显式执行上述双 `--hook-type` 安装命令
 - 未安装 pre-push 时，`stages: [pre-push]` 的 hook 不生效，push 前密钥扫描缺失
-- gitleaks 是 local hook（`language: system`），需手动安装并加入 PATH：`brew install gitleaks` / `go install github.com/gitleaks/gitleaks/v8/cmd/gitleaks@latest` / 从 https://github.com/gitleaks/gitleaks/releases 下载二进制。`pre-commit autoupdate` 仅对 remote repo hook 生效，不更新 local hook 的 gitleaks 二进制
+- gitleaks 是 local hook（`language: system`），需手动安装并加入 PATH：`brew install gitleaks` / `go install github.com/zricethezav/gitleaks/v8@latest`（注意 module path 是 `zricethezav`，非 `gitleaks` 组织）/ 从 https://github.com/gitleaks/gitleaks/releases 下载二进制。`pre-commit autoupdate` 仅对 remote repo hook 生效，不更新 local hook 的 gitleaks 二进制
 
 ## 测试安全
 
