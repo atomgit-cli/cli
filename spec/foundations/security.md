@@ -42,7 +42,7 @@
 - **workspace 扫描**（pre-commit / pre-push）：扫描当前工作区，含 `.gitignore` 中的文件
 - **git history 扫描**（pre-push）：push 前全量扫描提交历史，拦截已 commit 未 push 的泄漏
 
-CI（`.gitcode/workflows/ci.yml` 与 `.github/workflows/ci.yml` 的 Secret Scan job）作为最后一道自动化防线，覆盖未安装本地钩子、`--no-verify` 裸奔、平台网页直接编辑三类本地防线失效场景。
+CI（`.gitcode/workflows/ci.yml` 与 `.github/workflows/ci.yml` 的 Secret Scan job）作为最后一道自动化防线，覆盖未安装本地钩子、`--no-verify` 裸奔、平台网页直接编辑三类本地防线失效场景。GitCode 托管 runner 默认浅克隆 checkout，security job 检测到浅克隆时会先 `git fetch --unshallow` 补全历史再扫描，unshallow 失败则 job 失败（fail-closed）；GitHub 侧通过 `fetch-depth: 0` 显式全量。注意：子模块（如 `api-doc/`）内容不在 CI 扫描覆盖面内，依赖子模块仓库自身的扫描防线。
 
 ## 同步要求
 
@@ -256,4 +256,4 @@ git ls-files | grep -iE "\.pem|\.key|\.env|credentials|secret"
 
 ---
 
-**最后更新**: 2026-07-09
+**最后更新**: 2026-09-15

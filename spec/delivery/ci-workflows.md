@@ -88,7 +88,7 @@ GitCode 原生工作流 `.gitcode/workflows/ci.yml` 对齐 GitHub CI 的 Linux �
 | Job | 运行环境 | 内容 | 对应质量门禁 |
 |-----|---------|------|-------------|
 | `lint` | codearts-hosted / ubuntu-latest / x64 / small | golangci-lint v2.12.2 | 代码规范检查（`coding-standards.md`） |
-| `security` | codearts-hosted / ubuntu-latest / x64 / small | gitleaks 全历史密钥扫描（`--redact=100` 脱敏输出）+ checkout 深度验证 | 凭证泄漏扫描（`security.md`） |
+| `security` | codearts-hosted / ubuntu-latest / x64 / small | 浅克隆检测 + unshallow 后 gitleaks 全历史密钥扫描（`--redact=100` 脱敏输出） | 凭证泄漏扫描（`security.md`） |
 | `test` | codearts-hosted / ubuntu-latest / x64 / small | release / package 版本校验 + `go test -v -race -coverprofile` + npm wrapper 单测 + 覆盖率制品 | 发布输入脚本回归 + Go/Node 单元测试 + 竞态检测 + 覆盖率（`testing-guide.md`） |
 | `build` | codearts-hosted / ubuntu-latest / x64 / small | Linux `go build` + `gc version` + 二进制制品 | Linux 构建验证（`build-and-package.md`） |
 | `package` | codearts-hosted / ubuntu-latest / x64 / small | 补全生成 + Linux 二进制 + wheel 构建、三入口冒烟与制品上传 | 打包与 wheel 入口验证 |
@@ -110,14 +110,13 @@ GitCode 托管 runner 不提供 Docker daemon，因此 Docker 构建由 GitHub L
 ### 2.2 Job 依赖关系
 
 ```
-lint
-security ──┐
-test ──┬───┴──→ build
-       └─────→ package
+lint      security      test   （三者并行，security 无下游依赖）
+                          ├──→ build
+                          └──→ package
 ```
 
 - `lint`、`security` 和 `test` 并行启动
-- GitCode `build`、`package` 等待 `test` 通过后执行
+- GitCode `build`、`package` 等待 `test` 通过后执行（`security` 无下游依赖）
 - 任何 Job 失败即整体 CI 失败
 
 ### 2.3 与质量门禁的映射
