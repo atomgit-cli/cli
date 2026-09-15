@@ -90,6 +90,11 @@ func NewCmdRetry(f *cmdutil.Factory, runF func(*RetryOptions) error) *cobra.Comm
 			if opts.Failed == (len(opts.JobIDs) > 0) {
 				return cmdutil.NewUsageError("exactly one of --job or --failed is required")
 			}
+			for _, id := range opts.JobIDs {
+				if strings.TrimSpace(id) == "" {
+					return cmdutil.NewUsageError("job id must not be empty")
+				}
+			}
 			if runF != nil {
 				return runF(opts)
 			}
@@ -121,14 +126,7 @@ func retryRun(opts *RetryOptions) error {
 		return err
 	}
 
-	// Always list jobs first: --failed needs the statuses, --job needs the
-	// ownership validation (the server silently accepts foreign job ids).
-	jobs, err := api.ListActionsRunJobs(client, owner, repo, opts.RunID)
-	if err != nil {
-		return fmt.Errorf("failed to list jobs of pipeline run: %w", err)
-	}
-
-	jobIDs, err := resolveRetryJobIDs(opts, jobs.Jobs)
+	jobIDs, err := resolveRetryTargets(client, owner, repo, opts)
 	if err != nil {
 		return err
 	}
@@ -138,7 +136,10 @@ func retryRun(opts *RetryOptions) error {
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: expected,
-		Prompt:   fmt.Sprintf("! This will retry %d job(s) of pipeline run %s in %s/%s\nType %q to confirm: ", len(jobIDs), opts.RunID, owner, repo, expected),
+		Prompt: fmt.Sprintf(
+			"! This will retry pipeline run %s in %s/%s (jobs: %s)\nType %q to confirm: ",
+			opts.RunID, owner, repo, strings.Join(jobIDs, ", "), expected,
+		),
 	}); err != nil {
 		return err
 	}
@@ -147,6 +148,32 @@ func retryRun(opts *RetryOptions) error {
 		return fmt.Errorf("failed to retry pipeline run jobs: %w", err)
 	}
 
+	return writeRetryResult(opts, owner, repo, jobIDs)
+}
+
+// resolveRetryTargets lists the run's jobs (read-only) and resolves
+// --job/--failed into a validated job id list. Truncation defense: if the
+// server reports more jobs than returned, refuse to validate the selection
+// against partial data instead of silently mis-rejecting valid ids.
+func resolveRetryTargets(client *api.Client, owner, repo string, opts *RetryOptions) ([]string, error) {
+	// Always list jobs first: --failed needs the statuses, --job needs the
+	// ownership validation (the server silently accepts foreign job ids).
+	jobs, err := api.ListActionsRunJobs(client, owner, repo, opts.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs of pipeline run: %w", err)
+	}
+	if jobs.TotalCount > len(jobs.Jobs) {
+		return nil, fmt.Errorf(
+			"job list truncated: server reports %d jobs but %d returned; refusing to validate against partial data",
+			jobs.TotalCount, len(jobs.Jobs),
+		)
+	}
+	return resolveRetryJobIDs(opts, jobs.Jobs)
+}
+
+// writeRetryResult renders the retry result as JSON or human output. The
+// human variant uses the destructive/write family indicator (red ✗).
+func writeRetryResult(opts *RetryOptions, owner, repo string, jobIDs []string) error {
 	result := RetryResult{
 		RunID:     opts.RunID,
 		Owner:     owner,
@@ -161,7 +188,7 @@ func retryRun(opts *RetryOptions) error {
 
 	cs := opts.IO.ColorScheme()
 	if _, err := fmt.Fprintf(opts.IO.Out, "%s Retried %d job(s) of pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
-		cs.Green("✓"), len(jobIDs), opts.RunID, owner, repo, opts.RunID); err != nil {
+		cs.Red("✗"), len(jobIDs), opts.RunID, owner, repo, opts.RunID); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
@@ -187,15 +214,24 @@ func resolveRetryJobIDs(opts *RetryOptions, jobs []api.WorkflowRunJob) ([]string
 		known[job.ID] = true
 	}
 	jobIDs := make([]string, 0, len(opts.JobIDs))
+	seen := make(map[string]bool, len(opts.JobIDs))
+	var foreign []string
 	for _, id := range opts.JobIDs {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			return nil, cmdutil.NewUsageError("job id must not be empty")
 		}
 		if !known[id] {
-			return nil, fmt.Errorf("job %s does not belong to run %s", id, opts.RunID)
+			foreign = append(foreign, id)
+			continue
 		}
-		jobIDs = append(jobIDs, id)
+		if !seen[id] {
+			seen[id] = true
+			jobIDs = append(jobIDs, id)
+		}
+	}
+	if len(foreign) > 0 {
+		return nil, fmt.Errorf("job ids %s do not belong to run %s", strings.Join(foreign, ", "), opts.RunID)
 	}
 	return jobIDs, nil
 }
