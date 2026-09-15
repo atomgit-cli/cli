@@ -106,7 +106,6 @@ docker compose up gc
 - `repo branch-protection list`
 - `repo pr-settings view`
 - `actions run list`
-- `actions run stop`
 - `actions run view`
 - `actions run watch`
 - `actions job list`
@@ -2305,7 +2304,7 @@ gc precommit check --json
 
 ## Actions 命令 (actions)
 
-`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以只读为主（`actions run stop` 为写操作，带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
+`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以只读为主（`run stop`/`run rerun`/`run retry`/`artifact delete`/`workflow run` 等写操作带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
 
 ### actions run list - 列出流水线运行记录
 
@@ -2378,7 +2377,7 @@ gc actions run stop <run-id> -R owner/repo --yes --json
 
 - 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/stop`。
 - 服务端幂等：对已经结束（非 RUNNING）的 run 调用同样返回成功。
-- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性写操作保护）：默认需交互输入 `stop pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `stop pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
 - 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
