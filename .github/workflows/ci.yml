@@ -37,7 +37,7 @@ jobs:
           go-version: '1.22'
 
       - name: Install gitleaks
-        run: go install github.com/zricethezav/gitleaks/v8@latest
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
         env:
           GOTOOLCHAIN: auto
 
