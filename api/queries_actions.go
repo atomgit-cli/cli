@@ -185,6 +185,18 @@ func GetActionsRun(client *Client, owner, repo, runID string) (*WorkflowRunDetai
 	return &detail, resp.Body, nil
 }
 
+// StopActionsRun stops a running pipeline run.
+//
+// It calls POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/stop.
+// The endpoint is idempotent: stopping a run that has already finished still
+// returns success.
+func StopActionsRun(client *Client, owner, repo, runID string) error {
+	endpoint := "/api/v8/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/actions/runs/" + url.PathEscape(runID) + "/stop"
+
+	_, err := client.RawREST("POST", endpoint, nil, nil)
+	return err
+}
+
 // WorkflowRunJobsResponse represents the response from listing the jobs of a
 // workflow run.
 type WorkflowRunJobsResponse struct {

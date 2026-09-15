@@ -2304,7 +2304,7 @@ gc precommit check --json
 
 ## Actions 命令 (actions)
 
-`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），只读，通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
+`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以只读为主（`run stop`/`run rerun`/`run retry`/`artifact delete`/`workflow run` 等写操作带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
 
 ### actions run list - 列出流水线运行记录
 
@@ -2357,6 +2357,30 @@ gc actions run list -R owner/repo --json
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 分页：`--limit`/`-L`（默认 30，映射为 `per_page`）、`--page`、`--paginate`（抓取全部分页至 `--limit`）、`--per-page`（API 页大小）。`--paginate` 与 `--page` 互斥。
 - 退出码：`0` 成功；`1` 通用错误（其它 API 错误）；`2` 参数错误（如 `--paginate` 与 `--page` 同用、`--limit`/`--per-page` 为负）；`3` 资源不存在（HTTP 404，如仓库不存在）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
+
+### actions run stop - 停止运行中的流水线
+
+停止一条正在运行的流水线（run）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`。
+
+```bash
+# 停止运行中的 run（交互确认）
+gc actions run stop <run-id> -R owner/repo
+
+# 跳过确认（脚本场景）
+gc actions run stop <run-id> -R owner/repo --yes
+
+# JSON 输出
+gc actions run stop <run-id> -R owner/repo --yes --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/stop`。
+- 服务端幂等：对已经结束（非 RUNNING）的 run 调用同样返回成功。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `stop pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
 
 ### actions run view - 查看流水线运行详情
 
