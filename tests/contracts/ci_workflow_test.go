@@ -153,7 +153,7 @@ func validateWorkflow(doc workflowDocument) []string {
 }
 
 func validateJobs(doc workflowDocument) []string {
-	required := []string{"lint", "test", "build", "package"}
+	required := []string{"lint", "security", "test", "build", "package"}
 	var problems []string
 	for _, jobID := range required {
 		if _, ok := doc.Jobs[jobID]; !ok {

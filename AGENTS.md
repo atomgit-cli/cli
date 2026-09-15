@@ -181,11 +181,12 @@ Linux/macOS/Windows 跨平台验证。正式规范见 [spec/delivery/ci-workflow
 | Job | GitCode Actions | GitHub Actions | 对应门禁 |
 |-----|-----------------|----------------|---------|
 | `lint` | Ubuntu latest | Ubuntu | 编码规范 |
+| `security` / `secret-scan` | Ubuntu latest（security） | Ubuntu（secret-scan） | gitleaks 凭证泄漏扫描 |
 | `test` | Ubuntu latest | Ubuntu / macOS / Windows | 单元测试 + 竞态 + 覆盖率 |
 | `build` | Ubuntu latest | Ubuntu / macOS / Windows | Linux / 跨平台构建 |
 | `package` / `docker` | Ubuntu latest（package） | Ubuntu（docker） | 补全 + wheel 入口冒烟 / Docker |
 
-依赖：`lint` 与 `test` 并行 → GitCode `build`、`package` 和 GitHub `build`、`docker`
+依赖：`lint`、`security` 与 `test` 并行 → GitCode `build`、`package` 和 GitHub `build`、`docker`
 等待 `test` 通过后执行；任一 Job 失败即整体失败。
 
 **AI 通过 `gc` / `gh` 监控**：
@@ -247,6 +248,8 @@ gh run view <run-id> --log --job=<job-id>
 - 禁止提交：`*.pem`、`*.key`、`*.p12`、`*.pfx`、`id_rsa*`、`id_ed*`、`.env*`、`*.secret`、`credentials.json`、`token.txt`、`*.token`、`secrets.y*ml`
 - 提交前自检：无硬编码凭证、无敏感文件被追踪、测试与文档不含真实凭证
 - 不得在 issue/PR/comment/discussion/commit/release 的内容中含敏感信息（token 值、密钥、私钥、安全漏洞细节、PoC、攻击细节）；gc 在 `--body`/`--body-file`/`--comment`/`--comment-file`/`--description`/`--description-file`/`--notes`/`--notes-file` 提交前会扫描当前 `GC_TOKEN`/`GITCODE_TOKEN` 值（`cmdutil.ScanContentForSecrets`），但 AI 代理仍须自觉避免任何敏感信息进入提交内容
+- `git add` 必须逐个精确指定文件，禁止 `git add -A` / `git add .`；提交前必须 `git status` + `git diff --staged` 复核暂存区只含本次任务相关文件（详见 [spec/foundations/security.md](./spec/foundations/security.md) 本地防线与提交纪律）
+- 禁止 `git commit --no-verify` / `git push --no-verify`；新 clone 后必须执行 `pre-commit install --hook-type pre-commit --hook-type pre-push`（钩子不随 clone 自动安装）；gitleaks 误报须登记 `.gitleaksignore`，不得绕过钩子
 - CI/CD 使用 Secrets；PyPI 发布使用 Trusted Publishing（OIDC）
 - 安全漏洞通过提交私密 Issue 报告（标记为私有），不在公开 Issue/PR/comment 中披露漏洞细节、PoC 或攻击细节
 

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -171,7 +172,7 @@ func TestViewRunWritesToFile(t *testing.T) {
 
 	io, _, _, _ := iostreams.Test()
 	detailJSON := `{"name":"checkout","display_name":"Checkout","vision_content":[{"version":"v1","readme":"# Checkout"}]}`
-	tmpFile := "/tmp/test-plugin-detail.json"
+	tmpFile := filepath.Join(t.TempDir(), "test-plugin-detail.json")
 	opts := &ViewOptions{
 		IO: io,
 		HttpClient: func() (*http.Client, error) {

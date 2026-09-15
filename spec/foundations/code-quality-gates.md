@@ -140,9 +140,9 @@ gofmt -w <files>
 
 CI 通过的判定标准：
 
-- GitCode 原生 `lint` / `test` / `build` / `package` Linux Job 通过
+- GitCode 原生 `lint` / `security` / `test` / `build` / `package` Linux Job 通过
 - 有 GitHub 镜像 PR 时，GitHub `test` / `build` 在 ubuntu / macOS / Windows 通过
-- 有 GitHub 镜像 PR 时，GitHub `lint` / `docker` Linux Job 通过
+- 有 GitHub 镜像 PR 时，GitHub `lint` / `secret-scan` / `docker` Linux Job 通过
 
 CI 失败时不得进入 PR 门禁，除非失败原因已明确判定为环境/平台偶发问题（需在自检中记录）。
 

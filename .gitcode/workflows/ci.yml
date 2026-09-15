@@ -35,6 +35,34 @@ jobs:
           go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
           run --disable=errcheck --disable=staticcheck
 
+  security:
+    name: Secret Scan
+    runs-on: [codearts-hosted, ubuntu-latest, x64, small]
+    steps:
+      - name: Checkout
+        uses: checkout
+
+      - name: Set up Go
+        uses: setup-go
+        with:
+          version: "1.22"
+
+      - name: Verify full history for secret scan
+        run: |
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            echo "shallow checkout detected - fetching full history"
+            git fetch --unshallow || { echo "::error::failed to unshallow"; exit 1; }
+          fi
+          echo "commits reachable from HEAD: $(git rev-list --count HEAD)"
+
+      - name: Install gitleaks
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        env:
+          GOTOOLCHAIN: auto
+
+      - name: Run gitleaks
+        run: gitleaks detect --source . --redact=100 --verbose --exit-code 1 --config .gitleaks.toml
+
   test:
     name: Test
     runs-on: [codearts-hosted, ubuntu-latest, x64, small]

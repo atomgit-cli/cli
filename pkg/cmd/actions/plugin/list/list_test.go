@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -267,7 +268,7 @@ func TestListRunWritesToFile(t *testing.T) {
 
 	io, _, _, _ := iostreams.Test()
 	pluginsJSON := `[{"name":"checkout","display_name":"Checkout","description":"checkout repo","version":"v1.0"}]`
-	tmpFile := "/tmp/test-plugins-output.json"
+	tmpFile := filepath.Join(t.TempDir(), "test-plugins-output.json")
 	opts := &ListOptions{
 		IO: io,
 		HttpClient: func() (*http.Client, error) {
