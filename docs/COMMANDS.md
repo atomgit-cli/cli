@@ -155,6 +155,7 @@ docker compose up gc
 - `release edit`
 - `release upload`
 - `actions run rerun`
+- `actions run retry`
 - `actions run stop`
 - `actions workflow run`
 - `repo branch create`
@@ -2390,6 +2391,38 @@ gc actions run rerun <run-id> -R owner/repo --yes --json
 - 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409，如对运行中的 run 重跑）。
+
+### actions run retry - 按 job 重试流水线任务
+
+重试指定流水线中失败/取消的任务，避免整条流水线重跑（能力对标 `gh run rerun --failed`，但 GitCode 接口按 job_run_ids 显式指定，可自由组合）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`，job id 取 `gc actions job list <run-id>` 返回的 `job_run_id`。
+
+```bash
+# 显式指定要重试的 job（可重复）
+gc actions run retry <run-id> --job <job-id> --job <job-id-2> -R owner/repo
+
+# 重试全部失败/取消的 job
+gc actions run retry <run-id> --failed -R owner/repo
+
+# 跳过确认（脚本场景）
+gc actions run retry <run-id> --failed --yes -R owner/repo
+
+# JSON 输出
+gc actions run retry <run-id> --failed --yes --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/retry`，请求体 `{"job_run_ids": [...]}`。
+- `--job` 与 `--failed` 互斥且必须二选一；`--job` 可重复传入，重复的 job id 会去重；`--failed` 会先调用 `GET .../runs/{run_id}/jobs`，过滤 `FAILED`/`CANCELED` 状态的 job 后提交。
+- 调用前一律先查询 jobs 列表校验 job 归属：服务端不校验 job_run_ids 是否属于目标 run，传入其他 run 的 job id 会造成"假运行"状态，CLI 侧收集全部不匹配的 job id 一次性报错退出、不发起请求。
+- 截断防御：服务端 jobs 列表若被分页截断（`total_count` 大于实际返回条数），归属校验拒绝基于不完整数据执行，直接报错、不发起请求。
+- `--failed` 无匹配 job（如全部成功）时报错"no failed or canceled jobs to retry"且不发起请求（服务端对空数组无校验，会静默成功但不调度任何任务）。
+- 仅失败/取消状态的 run 支持重试；对 COMPLETED 的 run 调用会透传服务端 HTTP 400 错误。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `retry pipeline run <run-id>` 确认（提示语展示将重试的 job 清单）；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。确认门在 retry 写请求之前触发，之前的 jobs 查询为只读。
+- 成功输出使用红色 `✗` 前缀（破坏性/写命令家族统一视觉约定）。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action","job_run_ids"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误（含无匹配 job、jobs 列表截断）；`2` 参数错误（如缺少 `<run-id>`、`--job` 空值、`--job` 与 `--failed` 同时指定或都未指定、非交互未携带 `--yes`、确认输入不匹配、服务端 400）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
 
 ### actions run stop - 停止运行中的流水线
 

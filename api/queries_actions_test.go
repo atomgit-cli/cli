@@ -72,6 +72,58 @@ func TestListActionsRunsBuildsV8Query(t *testing.T) {
 	}
 }
 
+func TestRetryActionsRunBuildsV8PathAndBody(t *testing.T) {
+	var gotMethod, gotPath, gotAuth, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotAuth = req.Header.Get("Authorization")
+		if req.Body != nil {
+			b, _ := io.ReadAll(req.Body)
+			gotBody = string(b)
+		}
+		return authTestResponse(http.StatusOK, `{"success":true}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	if err := RetryActionsRun(client, "owner", "repo", "run-1", []string{"job-1", "job-2"}); err != nil {
+		t.Fatalf("RetryActionsRun() error = %v", err)
+	}
+
+	want := "/api/v8/repos/owner/repo/actions/runs/run-1/retry"
+	if gotPath != want {
+		t.Fatalf("request path = %q, want %q", gotPath, want)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("request method = %q, want POST", gotMethod)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Fatalf("Authorization = %q, want Bearer test-token", gotAuth)
+	}
+	if !strings.Contains(gotBody, `"job_run_ids":["job-1","job-2"]`) {
+		t.Fatalf("request body = %q, want job_run_ids array", gotBody)
+	}
+	assertNoAccessTokenQuery(t, gotPath)
+}
+
+func TestRetryActionsRunEscapesPathParams(t *testing.T) {
+	var gotEscapedPath string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotEscapedPath = req.URL.EscapedPath()
+		return authTestResponse(http.StatusOK, `{"success":true}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	if err := RetryActionsRun(client, "my owner", "repo", "run/1", []string{"job-1"}); err != nil {
+		t.Fatalf("RetryActionsRun() error = %v", err)
+	}
+
+	want := "/api/v8/repos/my%20owner/repo/actions/runs/run%2F1/retry"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped request path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
 func TestStopActionsRunBuildsV8Path(t *testing.T) {
 	var gotMethod, gotPath, gotAuth string
 	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
