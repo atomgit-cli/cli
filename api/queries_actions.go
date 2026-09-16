@@ -197,6 +197,18 @@ func StopActionsRun(client *Client, owner, repo, runID string) error {
 	return err
 }
 
+// RerunActionsRun reruns all jobs of a pipeline run.
+//
+// It calls POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/rerun.
+// The server only allows rerunning a run in a complete status; rerunning a
+// RUNNING run fails with HTTP 409.
+func RerunActionsRun(client *Client, owner, repo, runID string) error {
+	endpoint := "/api/v8/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/actions/runs/" + url.PathEscape(runID) + "/rerun"
+
+	_, err := client.RawREST("POST", endpoint, nil, nil)
+	return err
+}
+
 // WorkflowRunJobsResponse represents the response from listing the jobs of a
 // workflow run.
 type WorkflowRunJobsResponse struct {

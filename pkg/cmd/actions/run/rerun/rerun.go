@@ -1,5 +1,5 @@
-// Package stop implements the actions run stop command.
-package stop
+// Package rerun implements the actions run rerun command.
+package rerun
 
 import (
 	"fmt"
@@ -14,16 +14,16 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 )
 
-// StopResult represents the result of a run stop operation.
-type StopResult struct {
+// RerunResult represents the result of a run rerun operation.
+type RerunResult struct {
 	RunID  string `json:"run_id"`
 	Owner  string `json:"owner"`
 	Repo   string `json:"repo"`
 	Action string `json:"action"`
 }
 
-// StopOptions configures the actions run stop command.
-type StopOptions struct {
+// RerunOptions configures the actions run rerun command.
+type RerunOptions struct {
 	IO         *iostreams.IOStreams
 	HttpClient func() (*http.Client, error)
 	BaseRepo   func() (string, error)
@@ -35,35 +35,36 @@ type StopOptions struct {
 	JSON bool
 }
 
-// NewCmdStop creates the actions run stop command.
-func NewCmdStop(f *cmdutil.Factory, runF func(*StopOptions) error) *cobra.Command {
-	opts := &StopOptions{
+// NewCmdRerun creates the actions run rerun command.
+func NewCmdRerun(f *cmdutil.Factory, runF func(*RerunOptions) error) *cobra.Command {
+	opts := &RerunOptions{
 		IO:         f.IOStreams,
 		HttpClient: f.HttpClient,
 		BaseRepo:   f.BaseRepo,
 	}
 
 	cmd := &cobra.Command{
-		Use:   "stop <run-id>",
-		Short: "Stop a running pipeline run",
+		Use:   "rerun <run-id>",
+		Short: "Rerun all jobs of a pipeline run",
 		Long: heredoc.Doc(`
-			Stop a running pipeline (workflow) run.
+			Rerun all jobs of a pipeline (workflow) run.
 
 			The run id is the workflow_run_id returned by ` + "`gc actions run list`" + `.
-			The API is idempotent: stopping a run that has already finished still
-			returns success. Use --json for a machine-readable result.
+			Only runs in a complete status can be rerun; rerunning a run that is
+			still RUNNING fails with a conflict error. Use --json for a
+			machine-readable result.
 
 			Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
-			# Stop a running pipeline run
-			$ gc actions run stop <run-id> -R owner/repo
+			# Rerun a pipeline run
+			$ gc actions run rerun <run-id> -R owner/repo
 
 			# Skip confirmation (for scripts)
-			$ gc actions run stop <run-id> -R owner/repo --yes
+			$ gc actions run rerun <run-id> -R owner/repo --yes
 
 			# JSON output
-			$ gc actions run stop <run-id> -R owner/repo --yes --json
+			$ gc actions run rerun <run-id> -R owner/repo --yes --json
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,7 +75,7 @@ func NewCmdStop(f *cmdutil.Factory, runF func(*StopOptions) error) *cobra.Comman
 			if runF != nil {
 				return runF(opts)
 			}
-			return stopRun(opts)
+			return rerunRun(opts)
 		},
 	}
 
@@ -85,7 +86,7 @@ func NewCmdStop(f *cmdutil.Factory, runF func(*StopOptions) error) *cobra.Comman
 	return cmd
 }
 
-func stopRun(opts *StopOptions) error {
+func rerunRun(opts *RerunOptions) error {
 	client, err := cmdutil.AuthenticatedClientFromFactory(opts.HttpClient)
 	if err != nil {
 		return err
@@ -100,28 +101,28 @@ func stopRun(opts *StopOptions) error {
 		return err
 	}
 
-	expected := fmt.Sprintf("stop pipeline run %s", opts.RunID)
+	expected := fmt.Sprintf("rerun pipeline run %s", opts.RunID)
 	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: expected,
 		Prompt: fmt.Sprintf(
-			"! This will stop pipeline run %s in %s/%s\nType %q to confirm: ",
+			"! This will rerun pipeline run %s in %s/%s\nType %q to confirm: ",
 			opts.RunID, owner, repo, expected,
 		),
 	}); err != nil {
 		return err
 	}
 
-	if err := api.StopActionsRun(client, owner, repo, opts.RunID); err != nil {
-		return fmt.Errorf("failed to stop pipeline run: %w", err)
+	if err := api.RerunActionsRun(client, owner, repo, opts.RunID); err != nil {
+		return fmt.Errorf("failed to rerun pipeline run: %w", err)
 	}
 
-	result := StopResult{
+	result := RerunResult{
 		RunID:  opts.RunID,
 		Owner:  owner,
 		Repo:   repo,
-		Action: "stopped",
+		Action: "rerun",
 	}
 
 	if opts.JSON {
@@ -129,10 +130,8 @@ func stopRun(opts *StopOptions) error {
 	}
 
 	cs := opts.IO.ColorScheme()
-	if _, err := fmt.Fprintf(opts.IO.Out,
-		"%s Stopped pipeline run %s in %s/%s\n",
-		cs.Red("✗"), opts.RunID, owner, repo,
-	); err != nil {
+	if _, err := fmt.Fprintf(opts.IO.Out, "%s Rerunning pipeline run %s in %s/%s (track with: gc actions run watch %s)\n",
+		cs.Red("✗"), opts.RunID, owner, repo, opts.RunID); err != nil {
 		return fmt.Errorf("failed to write output: %w", err)
 	}
 	return nil
