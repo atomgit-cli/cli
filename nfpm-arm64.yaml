@@ -1,7 +1,7 @@
 name: "gc"
 arch: "arm64"
 platform: "linux"
-version: "0.12.0"
+version: "0.13.0"
 section: "default"
 priority: "extra"
 maintainer: "gitcode-cli contributors"

@@ -58,7 +58,7 @@ npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:
 CI、审计或版本复现可固定版本：
 
 ```bash
-npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@0.12.0 install
+npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@0.13.0 install
 ```
 
 不要使用 `npm i @gitcode-cli/cli` 或 `npm install @gitcode-cli/cli` 安装全局 CLI；这两条命令只会把包加入当前项目的 `node_modules`，不会更新 PATH 中已有的 `gitcode`。需要由 npm global prefix 管理入口时，可改用：
@@ -114,10 +114,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 # 从 Releases 下载 .deb 包
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_0.12.0_amd64.deb
+wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gc_0.13.0_amd64.deb
 
 # 安装
-sudo dpkg -i gc_0.12.0_amd64.deb
+sudo dpkg -i gc_0.13.0_amd64.deb
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -126,10 +126,10 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 
 ```bash
 # 从 Releases 下载 .rpm 包
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc-0.12.0-1.x86_64.rpm
+wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gc-0.13.0-1.x86_64.rpm
 
 # 安装
-sudo rpm -i gc-0.12.0-1.x86_64.rpm
+sudo rpm -i gc-0.13.0-1.x86_64.rpm
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -145,7 +145,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 安装（一行命令）
-pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gitcode_cli-0.12.0-py3-none-any.whl
+pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gitcode_cli-0.13.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode，避免 gc 被内置 Get-Content 别名覆盖
 gitcode version
@@ -175,7 +175,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 固定版本安装，避免 PyPI 尚未同步时安装旧版本
-python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.12.0
+python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.13.0
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version

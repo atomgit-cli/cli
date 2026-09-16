@@ -1,6 +1,6 @@
 {
   "name": "@gitcode-cli/cli",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "GitCode CLI — the open-source command line tool for GitCode, distributed via npm with bundled multi-platform binaries.",
   "license": "MIT",
   "author": "GitCode CLI Contributors <support@gitcode.com>",
