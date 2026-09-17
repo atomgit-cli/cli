@@ -21,7 +21,7 @@
 - SIG 元数据真相源为 `spec/governance/sigs/<sig-name>.yaml`，其他位置（docs 介绍、CLI 输出）都必须从该 YAML 派生
 - SIG 治理变更（新增、合并、归档、调整范围）必须走 PR 流程，并标注 `sig/governance` label
 - 在 issue / PR 上使用 `sig/*` label 时，label 名必须与 YAML 中的 `name` 字段完全一致
-- SIG 内**日常议题**决策采用 lazy consensus：议题提出后**最短公示 ≥ 72 小时**内无人类明确反对即视为通过（Agent 表态不计入，见 §7）；SIG 内重大方向、跨 SIG 决策的决策方式见 §7，不适用本条
+- SIG 内**日常议题**决策采用 lazy consensus：**由人类发起**的议题在**最短公示 ≥ 72 小时**内无人类明确反对即视为通过（Agent 表态不计入、Agent 发起的议题须其 operator 追认，见 §7）；SIG 内重大方向、跨 SIG 决策的决策方式见 §7，不适用本条
 - SIG 例会、纪要、路线图等运行时产物使用 SIG 讨论通道承载（Phase 1 为带 `sig/<name>` label 的 issue；discussion 分类开通后迁移，见 §6.2），不进入 `spec/`
 
 ## 禁止
@@ -35,7 +35,8 @@
 ## 同步要求
 
 - 新增 SIG 时同步：创建 YAML → 创建对应 label → 更新 `docs/SIGS.md` → 在 SIG 讨论通道发出公告（Phase 1 为带 `sig/<name>` label 的 issue；discussion 分类开通后改为创建对应分类，见 §6.2）
-- 归档 SIG 时同步：更新 YAML `status: archived` → 更新 `docs/SIGS.md`（标注 archived）→ 在 SIG 讨论通道发出归档公告；label 本身保留不改名（历史 issue/PR 的 `sig/*` 标注仍可查询；GitCode label API 无 description 字段，归档状态以 YAML 为准）
+- 归档 SIG 时同步：更新 YAML `status: archived` → 更新 `docs/SIGS.md`（标注 archived）→ 在 SIG 讨论通道发出归档公告；label 本身保留不改名（历史 issue/PR 的 `sig/*` 标注仍可查询；GitCode label API 无 description 字段，归档状态以 YAML 为准）；YAML 的 `scope_labels` 置空或加注释标记 deprecated（避免后续 issue 的 `scope/*` 持续为已归档 SIG 计数）
+- 合并 SIG 时同步：存活方按"范围变化"处理（扩 `scope` / `scope_labels`、更新 `docs/SIGS.md`），被合并方按"归档"处理，在同一个 PR 中完成（见 §3 合并语义）
 - SIG 范围（`scope` / `scope_labels` 字段）变化时同步检查 `docs/SIGS.md` 与相关模块的 README
 
 ## 不负责什么
@@ -72,22 +73,39 @@
 
 ```
 propose → incubating → active ⇄ degraded → archived
-              └──────────────────────────→ archived（试点失败撤销）
 ```
 
-> `propose` 是 issue 阶段的讨论状态，不进入 YAML 的 `status` 枚举——YAML 创建时即为 `incubating`（见 §5.2）。
+> `propose` 是 issue 阶段的讨论状态，不进入 YAML 的 `status` 枚举——YAML 创建时即为 `incubating`（见 §5.2）。完整转换语义见下方转换表：任何非 archived 状态满足触发条件时均可进入 `degraded`；`incubating` 可因试点失败直接归档；`active` 可主动解散归档；`degraded` 恢复时回到进入前状态。
 
-| 状态           | 含义                                                                                          | 退出条件                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `propose`    | issue 阶段，讨论必要性与范围                                                                  | maintainer 批准进入 incubating                                                                    |
-| `incubating` | 试运行，YAML 与 `sig/<name>` label 已建并启用，处于归属数据观察期                          | ≥ 4 周内有 ≥ 5 个 issue / PR 归属该 SIG（`sig/<name>` label 或 `scope_labels` 映射，见下方统计口径），且无重大归属争议；试运行失败可直接转 `archived`（撤销） |
-| `active`     | 正式运行                                                                                      | 持续活跃                                                                                          |
-| `degraded`   | 连续 ≥ 8 周无任何关联活动（`sig/<name>` label 使用，或 `scope_labels` 映射的 issue/PR），或 lead 缺位 ≥ 2 周（对齐 §4.4），或豁免整改逾期（连续 2 个评估周期未整改，见 §4.2） | 补充 lead 或恢复活跃；连续 ≥ 8 周处于 degraded 且无恢复计划时，由 maintainer 决定转 archived |
-| `archived`   | 已归档                                                                                        | 不可恢复，如需重建须重新 propose                                                                  |
+| 状态           | 含义                                                                 |
+| -------------- | -------------------------------------------------------------------- |
+| `propose`    | issue 阶段，讨论必要性与范围                                        |
+| `incubating` | 试运行，YAML 与 `sig/<name>` label 已建并启用，处于归属数据观察期 |
+| `active`     | 正式运行                                                            |
+| `degraded`   | 活跃度不足、lead 缺位或豁免整改逾期的降级状态                      |
+| `archived`   | 已归档，不可恢复，如需重建须重新 propose                            |
 
-> **活跃度统计口径**：为避免"为了显得活跃而打 `sig/*` label"的循环激励（见 §6.1 打标策略），活跃度评估采用**双口径**——`sig/<name>` label 使用数 **加上** 该 SIG YAML `scope_labels` 字段映射的 `scope/*` label 对应 issue/PR 数。`scope_labels` 未映射的 `scope/*` label **不计入**任何 SIG 的活跃度。两者任一非零即视为有关联活动。
+**转换表**（guard 绑定源状态；同一 SIG 同时满足多个触发条件时，按 **归档 > degraded > 退出 active** 的优先序处理；未决的归属争议冻结孵化计时）：
 
-> **评估主体与节奏**：生命周期状态由 `sig/governance` lead 组织的**月度生命周期评估**统一核查（试点期内按 §9 的试点节奏），评估基于 `gc issue list --label` 的 issue 数据；PR 侧按 label 过滤的 CLI 能力暂缺（`gc pr list` 无 label flag），经 GitCode 平台 Web 端 label 过滤或 `gc api` 查询获取（`gc sig prs` 只读命令为 Phase 3 候选）；评估结论（含状态变更建议）记录在带 `sig/governance` label 的 issue 中，状态变更本身仍须走 PR 修改 YAML。
+| 源状态 | 目标状态 | 触发条件 | 确认方式 |
+|--------|----------|----------|----------|
+| propose | incubating | maintainer 批准（issue 阶段讨论完成） | PR 创建 YAML |
+| incubating | active | ≥ 4 周内 ≥ 5 个归属（下方统计口径）且无重大归属争议 | maintainer PR |
+| incubating | archived | 试点失败撤销（§9） | maintainer PR |
+| incubating / active | degraded | 连续 ≥ 8 周无关联活动；或 lead 缺位 ≥ 2 周（§4.4）；或豁免整改逾期（§4.2） | 月度评估建议 + maintainer PR |
+| degraded | 进入 degraded 前的状态 | 恢复判据（见下） | 月度评估确认 + maintainer PR |
+| active | archived | SIG 主动解散（SIG 讨论通道公告后） | maintainer PR |
+| degraded | archived | 连续 ≥ 8 周处于 degraded 且无恢复计划 | maintainer PR |
+| 合并中的被合并方 | archived | SIG 合并 PR | 同一 PR |
+| 合并中的存活方 | 状态不变 | SIG 合并 PR（按范围变化扩 `scope` / `scope_labels`） | 同一 PR |
+
+**恢复判据**：degraded 的 SIG 须同时满足——(a) lead 在位且响应；(b) 恢复期内产生 ≥ 2 个新归属产出（下方统计口径）；(c) 经一次月度评估确认。恢复目标为**进入 degraded 前的状态**（此前为 incubating 的 SIG 恢复后继续受孵化退出条件约束，不得经 degraded 路径绕过）。恢复计划须含可验证的里程碑并在每月评估中复审，连续 2 次未达里程碑视同无恢复计划。
+
+**SIG 合并**：合并 = 存活方按范围变化处理（扩 `scope` / `scope_labels`、更新 `docs/SIGS.md`）+ 被合并方按归档同步处理（见"同步要求"），在同一个 PR 中完成；合并产物沿用存活方 YAML 与状态，历史归属数据不迁移。
+
+> **活跃度统计口径**：为避免"为了显得活跃而打 `sig/*` label"的循环激励（见 §6.1 打标策略），活跃度评估采用**双口径**——`sig/<name>` label 使用数 **加上** 该 SIG YAML `scope_labels` 字段映射的 `scope/*` label 对应 issue/PR 数。`scope_labels` 未映射的 `scope/*` label **不计入**任何 SIG 的活跃度。同一 issue / PR 同时带 `sig/<name>` label 与映射的 `scope/*` label 时按 1 个计（去重）。活跃度报告须**分列**两个口径（`sig/*` 治理介入口径 / `scope/*` 流量口径），供生命周期评估与 §9 退出决策分别解读。
+
+> **评估主体与节奏**：生命周期状态由 `sig/governance` lead 组织的**月度生命周期评估**统一核查（试点期内按 §9 的试点节奏），评估基于 `gc issue list --label` 的 issue 数据；PR 侧按 label 过滤的 CLI 能力暂缺（`gc pr list` 无 label flag），经 GitCode 平台 Web 端 label 过滤或 `gc api` 查询获取（`gc sig prs` 只读命令为 Phase 3 候选）；评估结论（含状态变更建议）记录在带 `sig/governance` label 的 issue 中，状态变更本身仍须走 PR 修改 YAML。评估 checklist 须包含：分列口径的活跃度、本期 SIG 决策记录汇总（lazy consensus / lead 拍板事项索引）、lead 响应性、豁免状态（§4.2）、未映射 `scope/*` label 盘点。时间参数因评估周期产生的 ±1 个周期浮动属预期。
 
 ## 4. SIG 角色
 
@@ -99,6 +117,8 @@ propose → incubating → active ⇄ degraded → archived
 | `contributor` | 提交 issue / PR、参与讨论                                            | 人或 Agent            | 不限    |
 
 > 本项目把 Agent 视为一等开发者。详见下方"§4.3 Agent 在 SIG 中的位置"。
+
+> 注：本表的 `maintainer` 是 **SIG 角色**（YAML `maintainers` 字段）；§4.2 中的"仓库 maintainer"是 GitCode 平台成员角色，两者是不同概念（`lead` 必须兼任的是后者，见 §4.1）。
 
 ### 4.1 角色规则
 
@@ -133,6 +153,10 @@ propose → incubating → active ⇄ degraded → archived
 - **整改终态**：**全部**处于豁免状态的 SIG 均脱离豁免（新 maintainer 补充进 SIG 的 `maintainers` 列表，或调整 lead 人选）；仅部分 SIG 完成整改时，其余 SIG 的豁免注释保留至各自完成整改
 - **整改完成标志**：以对应 SIG 的 YAML 中移除豁免注释、`docs/SIGS.md` 中移除对应 ⚠️ 标记与豁免说明块为准
 - **逾期后果**：`sig/governance` lead 须在月度生命周期评估（§3）中将逾期 SIG 列入风险清单并升级到 maintainer 会议；**连续 2 个评估周期**未整改的 SIG，触发 §3 的 `degraded` 评估
+- **无法整改的出口**：SIG 在整改期限内确实无法获得第二名 maintainer 的，可在整改 PR 中声明维持豁免并说明原因，由仓库 maintainer 确认后豁免继续；该声明计入风险清单，在后续月度评估中复审
+- **名单变化的同步**：SIG 的 `maintainers` 名单变化导致与 `leads` 不再为同一单人列表时，须同步移除该 YAML 的豁免注释与 `docs/SIGS.md` 的 ⚠️ 标记（与 `scripts/validate-sig-yamls.sh` 的双向校验一致）
+
+**持续义务（独立时钟）**：豁免状态每满 6 个月，`sig/governance` lead 须在当期月度评估中记录一次 maintainer 招募动作或计划；连续 2 次无记录的，列入风险清单。本条款使豁免状态在"新增 maintainer 前"的整个存续期内都有可核查的推进记录，而不依赖整改时钟（整改时钟仅在触发条件消失后启动）。
 
 **Review 标准约束**：豁免状态本身不构成降低 PR review 标准的理由；SIG 内 PR 仍需遵循 `spec/workflows/review-workflow.md` 的独立评审原则。
 
@@ -163,6 +187,7 @@ propose → incubating → active ⇄ degraded → archived
 - 不能修改 `spec/` 目录的内容而不经人 review（Agent 可以提交修改 `spec/` 的 PR，但 merge 决策由人做出）
 - 不能任命或移除其他 SIG 角色（包括其他 Agent）
 - 不能单独发起 SIG 生命周期变更（propose / activate / archive）——必须由其 operator 或其他人 maintainer 发起
+- 不能超出自身 `agents[].scopes` 授权范围承接任务（`scopes` 为空列表或不设置表示授权整个 SIG 范围；Agent 开始任务前应核对所在 SIG YAML 中自身的授权范围）
 
 **标识**：
 
@@ -191,7 +216,8 @@ propose → incubating → active ⇄ degraded → archived
 **审计**：
 
 - SIG lead 应定期（建议每月）review 本 SIG 范围内 Agent 的产出质量与边界遵守情况
-- 发现 Agent 越界（如未经 review 修改 spec、未带 trailer 提交）时，由 operator 负责纠正；情节严重的可由仓库 maintainer 暂停该 Agent 在 SIG 内的活动
+- 发现 Agent 越界（如未经 review 修改 spec、未带 trailer 提交、超出 `agents[].scopes` 授权范围承接任务）时，由 operator 负责纠正；情节严重的可由仓库 maintainer 暂停该 Agent 在 SIG 内的活动
+- Agent 产出引发安全或质量事故时，处置遵循仓库 `SECURITY.md` 与既有 issue / PR 流程（fix-forward 或 revert PR），由 operator 负责发起修复
 
 ### 4.4 加入 SIG 与角色任命
 
@@ -217,7 +243,20 @@ propose → incubating → active ⇄ degraded → archived
 
 1. 先在该 SIG 讨论通道下提醒（Phase 1 为带 `sig/<name>` label 的 issue）
 2. 连续 ≥ 2 周无响应时，在 `sig/governance` 讨论通道提出（Phase 1 为带 `sig/governance` label 的 issue），由仓库 maintainer 介入
-3. 介入结果可能是补充 lead、指定代理 lead，或触发 §3 的 `degraded` 评估
+3. 介入结果可能是补充 lead、由仓库 maintainer 临时兼任 lead（不设"代理 lead"角色），或触发 §3 的 `degraded` 评估
+4. **停摆兜底**：介入请求发出 ≥ 2 周仍无任何仓库 maintainer 响应时，任何人（含 Agent）可在 `sig/governance` 讨论通道标记 blocked；该标记即视为 §3 的 degraded 触发条件成立，YAML 状态变更待任一仓库 maintainer 恢复后补执行——将停摆显式化，避免无限静默
+
+### 4.5 单人运行模式（n=1）的已知限制
+
+当仓库人类 maintainer 仅 1 人时（当前状态，§4.2 豁免期内），以下机制退化为自引用。本规范如实披露，不假装它们在多人模式下运作：
+
+- **Agent 审计**：§4.3 的"SIG lead 定期 review Agent 产出"退化为 operator 自审（operator 即全部 SIG 的 lead）
+- **月度评估**：评估组织者（sig/governance lead）同时是全部被评估 SIG 的 lead，含 sig/governance 自身（自评）
+- **lead 缺位处理**：介入者与缺位者为同一人，依赖 §4.4 停摆兜底条款将停摆显式化
+- **maintainer 会议**（§7 定义）：单人时为个人决定
+- **跨 SIG 协商与 RFC 多 SIG 表态**：全部 SIG lead 为同一人时，"协商""均须表态"由该人一次表态满足，独立性检查推迟到角色分离后补做
+
+**低置信度决策规则**：豁免期内做出的 SIG 生命周期转换（转 active / 归档）、scope 扩张、豁免维持声明，均视为低置信度决策；新增第二位仓库 maintainer 后，应在最近一次月度评估中复核一遍。
 
 ## 5. SIG 元数据
 
@@ -274,7 +313,7 @@ spec/governance/sigs/
 
 `sig/*` 与 `scope/*` 是**正交关系**，分别表达不同维度：
 
-- **`scope/*`** 标识**技术模块归属**（"这个 issue 涉及哪个模块"），用于 issue triage 默认打标，遵循 [spec/workflows/status-label-checklist.md](../workflows/status-label-checklist.md) 的四维标签要求
+- **`scope/*`** 标识**技术模块归属**（"这个 issue 涉及哪个模块"），用于 issue triage 默认打标，遵循 [spec/workflows/status-label-checklist.md](../workflows/status-label-checklist.md) 的标签维度要求（`sig/*` 为其中的可选第五维）
 - **`sig/*`** 标识**治理归属**（"这个 issue 需要哪个 SIG 介入"），仅在需要 SIG 治理介入时打标
 
 使用规则：
@@ -291,8 +330,8 @@ spec/governance/sigs/
 **`scope_labels` 映射的维护**：
 
 - 每个可选 `scope_labels` 字段显式声明"哪些 `scope/*` label 的活跃度计入本 SIG"（如 `sig/api` 映射 `scope/api`、`scope/http`）；`sig/<name>` 与 `scope/<name>` 同名不是隐式映射，必须在 `scope_labels` 中显式列出
-- 一个 `scope/*` label 原则上映射到至多 1 个 SIG（避免双计）；确需跨 SIG 统计时须在两个 SIG 的 YAML 中同时登记并在 charter 说明
-- 未被任何 SIG 的 `scope_labels` 映射的 `scope/*` label 不计入任何 SIG 的活跃度（§3 统计口径）
+- 一个 `scope/*` label 原则上映射到至多 1 个 SIG（避免双计）；确需跨 SIG 统计时须在两个 SIG 的 YAML 中同时登记并在 charter 说明，例外由 `sig/governance` 在 PR 评审中判定
+- 未被任何 SIG 的 `scope_labels` 映射的 `scope/*` label 不计入任何 SIG 的活跃度（§3 统计口径）；月度评估包含未映射 `scope/*` label 的盘点（见 §3 评估主体），避免活跃度静默漏计
 - 映射变更走 PR，评审时须核对新增映射的 label 真实存在
 
 ### 6.2 与 discussion 的关系
@@ -323,15 +362,18 @@ spec/governance/sigs/
 
 ## 7. 决策机制
 
+> **maintainer 会议**：全体仓库 maintainer 就特定议题的异步决策——在带 `sig/governance` label 的 issue 中发起，全体 maintainer 表态或发起满 72 小时即出结论，记录于该 issue。仅 1 名 maintainer 时为个人决定（见 §4.5）。
+
 | 范围                                  | 决策方式                                                   | 记录位置               |
 | ------------------------------------- | ---------------------------------------------------------- | ---------------------- |
-| SIG 内日常议题                        | lazy consensus（公示 ≥ 72h 无人类反对即通过，见上方"必须"） | issue / PR comment     |
-| SIG 内重大方向（如 API 客户端大版本） | SIG lead 拍板 + 异步公示 ≥ 3 天                           | SIG 讨论通道（§6.2）   |
+| SIG 内日常议题                        | lazy consensus：**由人类发起**的议题公示 ≥ 72h 无人类反对即通过；Agent 发起的议题须其 operator 在公示窗口内明确追认方计入公示 | issue / PR comment     |
+| SIG 内重大方向（如 API 客户端大版本） | SIG lead 拍板 + 异步公示 ≥ 3 天；公示期内任一人类仓库 maintainer 反对时升级 maintainer 会议裁决 | SIG 讨论通道（§6.2）   |
 | 跨 SIG 议题                           | 涉及的 SIG lead 协商，无法达成一致时升级到 maintainer 会议 | `sig/governance` 讨论通道 |
 | 跨 SIG / 全局性大设计（新抽象、非平凡 tradeoff） | RFC 流程（[spec/workflows/rfc-workflow.md](../workflows/rfc-workflow.md)），归属 SIG lead 参与 + PR review merge | RFC PR + `docs/rfcs/RFC-NNNN-*.md` |
 | SIG 新增 / 合并 / 归档                | maintainer PR review 通过                                  | PR + YAML 变更         |
+| SIG 治理规范自身（sig-governance.md）修订 | 公示 ≥ 7 天 + maintainer PR review；豁免期内无第二 maintainer 时按 §4.5 低置信度决策处理 | PR + `sig/governance` label |
 
-**Agent 与 consensus**：Agent 不参与 lazy consensus 的"无反对即通过"判定——只有人类的明确赞同或沉默计入 consensus。Agent 的"同意"或"反对"通过其 operator 的表态生效；Agent 自身在 issue / PR 中的表态视为参考意见，不计入 consensus 判定基数。
+**Agent 与 consensus**：Agent 不参与 lazy consensus 的"无反对即通过"判定——只有人类的明确赞同或沉默计入 consensus。Agent 的"同意"或"反对"通过其 operator 的表态生效；Agent 自身在 issue / PR 中的表态视为参考意见，不计入 consensus 判定基数。lazy consensus 议题由人类发起（Agent 发起须 operator 追认，见上表），避免"Agent 发起 + 人类沉默"的自动通过通道。
 
 **Agent 与 RFC**：登记 Agent 可以作为作者提交 RFC（`docs/rfcs/`），但 RFC 的接受与否由人决定（归属 SIG lead + PR review merge），与 §4.3 边界一致。
 
@@ -347,19 +389,23 @@ spec/governance/sigs/
 - **试点范围**：`sig/api`、`sig/cli-ux`、`sig/governance` 三个 SIG
 - **试点周期**：自本规范 merge 起 **4 周**（与 §3 incubating 最小观察窗对齐；第 2 周做一次中期检查点）
 - **观察指标**：
-  - 每个 SIG 在试运行期内的归属 issue/PR 数量（`sig/*` label + `scope_labels` 映射双口径，见 §3）
+  - 每个 SIG 在试运行期内的归属 issue/PR 数量（`sig/*` label + `scope_labels` 映射双口径**分列**报告，见 §3）
   - 是否出现归属争议（一个 issue 被多人反复改 SIG label）
   - 是否有 contributor 主动通过 SIG 归属讨论问题
+  - 元指标（框架自身有效性）：生命周期状态转换是否产生了可观测的行为 / 权利差异；SIG 决策记录是否被检索和引用（而非仅归档）；豁免持续义务（§4.2 独立时钟）与月度评估是否实际执行
   - 口径说明：豁免期内 lead 本人及其登记 Agent 的产出会计入活跃度，评估时应**单列**这部分数据作为参考基线。该口径是退出决策的**评估参考项**而非额外门槛——是否暂缓转 `active` 由 maintainer 在退出决策中结合单主体占比判断（如单主体占比 100% 时倾向延期一个观察窗）
 - **失败判定标准**（满足任一即判定试点失败）：
   - 试点期内出现 ≥ 2 次无法在 1 周内解决的归属争议
   - ≥ 2 个 SIG 在观察窗结束时活跃度为零
   - 发现规范条款与既有 `spec/` 规则产生实际冲突
+- **未达标 SIG 的处置**：观察窗结束时未达孵化退出条件但活跃度非零的 SIG，默认延长一个观察窗；连续 2 个观察窗未达标的，由 maintainer 决定收缩范围或撤销（走 §3 归档转换）
 - **回退动作清单**（按失败程度递进，均走 PR）：
   - 收缩：调整相关 SIG 的 `scope` / `scope_labels`，消除争议范围
-  - 撤销单个 SIG：YAML `status: archived`（走 §3 incubating → archived 路径），label 保留供历史查询（描述加 `[deprecated]`）
+  - 撤销单个 SIG：YAML `status: archived`（走 §3 转换表），label 保留供历史查询
   - 整体回退：归档全部试点 SIG，本规范标记为 `experimental` 冻结，待条件成熟重新 propose
-- **退出决策**：试点结束后由 maintainer 评估，决定是否扩展到 5 个 SIG、是否引入 `gc sig` 命令、是否引入例会机制
+- **退出决策**：试点结束后由 maintainer 评估，决定是否扩展到 5 个 SIG、是否引入 `gc sig` 命令、是否引入例会机制。退出决策须显式回答两个设计问题：
+  1. 生命周期状态是否附加实际权利（如仅 active SIG 的 lead 行使重大方向拍板权），或明确声明状态仅为观察 / 统计标记
+  2. 孵化退出条件是否要求 `sig/*` 治理介入口径非零（当前模块流量即可满足退出条件，治理介入口径实测为零）
 
 ## 10. 与 `gc` CLI 的关系（约束）
 

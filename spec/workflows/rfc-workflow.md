@@ -31,9 +31,9 @@
 
 1. 复制 `docs/rfcs/RFC-0000-template.md` 为 `RFC-NNNN-<short-name>.md`（`NNNN` = 目录中已存在的最大编号 + 1，4 位数字补零；编号以 merge 时目录现状为准，撞号时作者须重命名）
 2. 填写后提 PR（标题含 RFC 编号），按 [pr-workflow.md](./pr-workflow.md) 的状态机推进
-3. 评审与共识：归属 SIG lead 必须参与；涉及多个 SIG 时相关 SIG lead 均须表态；讨论在 RFC PR 中进行；**无归属 SIG 的主题（如 testing、build、release）由 `sig/governance` 兜底参与**
+3. 评审与共识：归属 SIG lead 必须参与；涉及多个 SIG 时相关 SIG lead 均须表态；讨论在 RFC PR 中进行；**无归属 SIG 的主题（如 testing、build、release）由 `sig/governance` 兜底参与**。参与时限与回避：RFC PR 提出后 **4 周内**无归属 SIG lead 表态的，在 `sig/governance` 讨论通道催办一次；lead 本人是 RFC 作者时，由 `sig/governance` lead 代行参与义务
 4. 结果判定：
-   - **PR merge = RFC 被接受**，文件即定稿（接受后的修改走新 PR）
+   - **PR merge = RFC 被接受**，文件即定稿（接受后的修改走新 PR）。merge 前置条件：PR 提出 ≥ **5 个自然日**（公示期）且归属 SIG lead 有明确的 approve 记录
    - **PR 关闭未 merge = 被拒绝**；如未来可能重启，在关闭 comment 中标注 `shelved` 及原因（shelved RFC 不落盘文件，登记表不记录；重启时另起编号）
 5. 实施：被接受的 RFC 须开追踪 issue（描述中关联 RFC 编号）；**作者不强制自己实施**，其他人可认领
 
