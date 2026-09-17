@@ -12,7 +12,7 @@ GitCode CLI 把这些工作带回终端：仓库、Issue、Pull Request、Commit
 
 ### 1. 安装
 
-GitCode CLI 通过多个官方源分发：Linux/macOS 支持 x64/ARM64，Windows 当前支持 x64。已安装 Node.js/npm 时优先使用 npm bootstrap 作为 Windows、Linux、macOS 与 AI 环境的通用入口；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。只让一个全局渠道拥有命令入口。
+GitCode CLI 通过多个官方源分发：Linux/macOS 支持 x64/ARM64，Windows 当前支持 x64，OpenHarmony 支持 arm64（复用静态 Linux arm64 二进制）。已安装 Node.js/npm 时优先使用 npm bootstrap 作为 Windows、Linux、macOS、OpenHarmony 与 AI 环境的通用入口；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。只让一个全局渠道拥有命令入口。
 
 ```bash
 # 推荐：npm 一行 bootstrap（https://www.npmjs.com/package/@gitcode-cli/cli）

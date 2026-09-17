@@ -61,6 +61,9 @@ GC_NO_UPDATE_CHECK=1 gitcode version
 | Linux | x64, arm64 |
 | macOS | x64, arm64 |
 | Windows | x64 |
+| OpenHarmony | arm64 |
+
+OpenHarmony (arm64) reuses the bundled `gc-linux-arm64` binary: the OpenHarmony standard system runs the Linux kernel and gc ships fully static binaries, so no separate download is needed. Node.js reports `process.platform === "openharmony"` there; official upstream support is experimental, so use a Node.js build for OpenHarmony.
 
 Windows arm64 is not shipped by npm, wheel, or release archives yet; build from source with Go for that target. On other unsupported combinations, use only a channel that explicitly lists the OS/architecture: https://gitcode.com/gitcode-cli/cli/releases
 
