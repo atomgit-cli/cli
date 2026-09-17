@@ -5,7 +5,7 @@
 #
 # 真相源位置（评审通过后）：spec/governance/sigs/cli-ux.yaml
 # 对应 label：sig/cli-ux
-# 对应 discussion 分类：SIG: CLI UX
+# 对应 discussion 分类：SIG: CLI UX（规划值，Phase 1 未开通）
 
 name: cli-ux
 display_name: CLI User Experience

@@ -18,10 +18,10 @@
 
 ## 必须
 
-- SIG 元数据真相源为 `spec/governance/sigs/<sig-name>.yaml`，其他位置（label 描述、docs 介绍、CLI 输出）都必须从该 YAML 派生
+- SIG 元数据真相源为 `spec/governance/sigs/<sig-name>.yaml`，其他位置（docs 介绍、CLI 输出）都必须从该 YAML 派生
 - SIG 治理变更（新增、合并、归档、调整范围）必须走 PR 流程，并标注 `sig/governance` label
 - 在 issue / PR 上使用 `sig/*` label 时，label 名必须与 YAML 中的 `name` 字段完全一致
-- SIG 内部决策采用 lazy consensus：议题提出后**最短公示 ≥ 72 小时**内无人类明确反对即视为通过（Agent 表态不计入，见 §7）；跨 SIG 决策升级到 maintainer 层面
+- SIG 内**日常议题**决策采用 lazy consensus：议题提出后**最短公示 ≥ 72 小时**内无人类明确反对即视为通过（Agent 表态不计入，见 §7）；SIG 内重大方向、跨 SIG 决策的决策方式见 §7，不适用本条
 - SIG 例会、纪要、路线图等运行时产物使用 SIG 讨论通道承载（Phase 1 为带 `sig/<name>` label 的 issue；discussion 分类开通后迁移，见 §6.2），不进入 `spec/`
 
 ## 禁止
@@ -35,7 +35,7 @@
 ## 同步要求
 
 - 新增 SIG 时同步：创建 YAML → 创建对应 label → 更新 `docs/SIGS.md` → 在 SIG 讨论通道发出公告（Phase 1 为带 `sig/<name>` label 的 issue；discussion 分类开通后改为创建对应分类，见 §6.2）
-- 归档 SIG 时同步：更新 YAML `status: archived` → 更新 label 描述加 `[deprecated]` 前缀（GitCode label 无独立 deprecated 属性，以描述标注为准）→ 更新 `docs/SIGS.md` → 在 SIG 讨论通道发出归档公告
+- 归档 SIG 时同步：更新 YAML `status: archived` → 更新 `docs/SIGS.md`（标注 archived）→ 在 SIG 讨论通道发出归档公告；label 本身保留不改名（历史 issue/PR 的 `sig/*` 标注仍可查询；GitCode label API 无 description 字段，归档状态以 YAML 为准）
 - SIG 范围（`scope` / `scope_labels` 字段）变化时同步检查 `docs/SIGS.md` 与相关模块的 README
 
 ## 不负责什么
@@ -64,7 +64,7 @@
 | `sig/cli-ux`     | incubating | `pkg/cmd/`、`pkg/cmdutil/`、`pkg/output/`、`pkg/iostreams/` | 命令交互、`--json` 输出、错误提示、退出码、帮助文案     |
 | `sig/governance` | incubating | `spec/`、`docs/`、`AGENTS.md`、`CLAUDE.md`、`CONTRIBUTING.md` | 规范演进、文档治理、AI 协作边界、SIG 治理自身             |
 
-> 下表范围为主要摘要，权威真相源以各 YAML 的 `scope` 字段为准。三个试点 SIG 自 `incubating` 起步，按 §3 退出条件达标后转 `active`。
+> 下表范围为主要摘要，权威真相源以各 YAML 的 `scope`（目录范围）与 `scope_labels`（活跃度映射，见 §6.1）字段为准。三个试点 SIG 自 `incubating` 起步，按 §3 退出条件达标后转 `active`。
 
 完整元数据见 `spec/governance/sigs/<sig-name>.yaml`。
 
@@ -82,12 +82,12 @@ propose → incubating → active ⇄ degraded → archived
 | `propose`    | issue 阶段，讨论必要性与范围                                                                  | maintainer 批准进入 incubating                                                                    |
 | `incubating` | 试运行，YAML 与 `sig/<name>` label 已建并启用，处于归属数据观察期                          | ≥ 4 周内有 ≥ 5 个 issue / PR 归属该 SIG（`sig/<name>` label 或 `scope_labels` 映射，见下方统计口径），且无重大归属争议；试运行失败可直接转 `archived`（撤销） |
 | `active`     | 正式运行                                                                                      | 持续活跃                                                                                          |
-| `degraded`   | 连续 ≥ 8 周无任何关联活动（`sig/<name>` label 使用，或 `scope_labels` 映射的 issue/PR），或 lead 缺位 ≥ 2 周（对齐 §4.4） | 补充 lead 或恢复活跃；连续 ≥ 8 周处于 degraded 且无恢复计划时，由 maintainer 决定转 archived |
+| `degraded`   | 连续 ≥ 8 周无任何关联活动（`sig/<name>` label 使用，或 `scope_labels` 映射的 issue/PR），或 lead 缺位 ≥ 2 周（对齐 §4.4），或豁免整改逾期（连续 2 个评估周期未整改，见 §4.2） | 补充 lead 或恢复活跃；连续 ≥ 8 周处于 degraded 且无恢复计划时，由 maintainer 决定转 archived |
 | `archived`   | 已归档                                                                                        | 不可恢复，如需重建须重新 propose                                                                  |
 
 > **活跃度统计口径**：为避免"为了显得活跃而打 `sig/*` label"的循环激励（见 §6.1 打标策略），活跃度评估采用**双口径**——`sig/<name>` label 使用数 **加上** 该 SIG YAML `scope_labels` 字段映射的 `scope/*` label 对应 issue/PR 数。`scope_labels` 未映射的 `scope/*` label **不计入**任何 SIG 的活跃度。两者任一非零即视为有关联活动。
 
-> **评估主体与节奏**：生命周期状态由 `sig/governance` lead 组织的**月度生命周期评估**统一核查（试点期内按 §9 的试点节奏），评估基于 `gc issue list --label` / `gc pr list --label` 的当期数据；评估结论（含状态变更建议）记录在带 `sig/governance` label 的 issue 中，状态变更本身仍须走 PR 修改 YAML。
+> **评估主体与节奏**：生命周期状态由 `sig/governance` lead 组织的**月度生命周期评估**统一核查（试点期内按 §9 的试点节奏），评估基于 `gc issue list --label` 的 issue 数据；PR 侧按 label 过滤的 CLI 能力暂缺（`gc pr list` 无 label flag），经 GitCode 平台 Web 端 label 过滤或 `gc api` 查询获取（`gc sig prs` 只读命令为 Phase 3 候选）；评估结论（含状态变更建议）记录在带 `sig/governance` label 的 issue 中，状态变更本身仍须走 PR 修改 YAML。
 
 ## 4. SIG 角色
 
@@ -267,7 +267,7 @@ spec/governance/sigs/
 ### 6.1 与 label 的关系
 
 - 每个 active / incubating SIG 必须有一个 `sig/<name>` label
-- label 描述应链接到对应 YAML 文件
+- label 与对应 YAML 的关联通过**命名约定**（`sig/<name>` ↔ `sigs/<name>.yaml`）与 `docs/SIGS.md` 导航发现；GitCode label API 仅支持 name/color（创建与更新均无 description 字段），不在 label 上承载链接
 - 一个 issue / PR 可以打多个 `sig/*` label（跨领域），但应有 1 个主 SIG
 
 **`sig/*` 与 `scope/*` 的关系**：
@@ -297,7 +297,7 @@ spec/governance/sigs/
 
 ### 6.2 与 discussion 的关系
 
-**Phase 1 现状**：GitCode 平台 repo 级 discussion 分类创建能力**未验证**（`gc` 当前只提供组织级 discussion 的只读命令，且本仓库 discussion 尚无内容）。因此 Phase 1 试点期间：
+**Phase 1 现状**：GitCode 平台 repo 级 discussion 分类创建能力**未验证**（`gc` 当前只提供 discussion 的部分读取与删除操作：org 级 `gc discussions list/view/delete`、repo 级只读 `gc discussions project list/view`，无 create、无分类管理；本仓库 discussion 尚无内容）。因此 Phase 1 试点期间：
 
 - SIG 的讨论通道**降级为 issue 承载**：带 `sig/<name>` label 的 issue 即该 SIG 的讨论与决策记录载体
 - YAML 的 `discussion_category` 字段保留为规划值，不生效
@@ -310,7 +310,7 @@ spec/governance/sigs/
 ### 6.3 与 issue / PR workflow 的关系
 
 - 现状不变（以下为**核心主干**，完整状态机以 [spec/workflows/issue-workflow.md](../workflows/issue-workflow.md) 与 [spec/workflows/pr-workflow.md](../workflows/pr-workflow.md) 为准，label 语义详见 [status-label-checklist.md](../workflows/status-label-checklist.md)）：
-  - **Issue 主干**：`status/triage` → `status/verified` → `status/in-progress` → `status/merged`
+  - **Issue 主干**：`status/triage` → `status/verified` → `status/in-progress` → `status/ready-for-review` → `status/merged`
   - **PR 主干**：`status/draft` → `status/self-checked` → `status/ready-for-review` → `status/approved` → `status/merged`
 - SIG 介入点：triage 阶段由对应 SIG 决定是否接收，以及由谁跟进
 - SIG 不替代 `spec/workflows/issue-workflow.md` 与 `spec/workflows/pr-workflow.md`
@@ -350,7 +350,7 @@ spec/governance/sigs/
   - 每个 SIG 在试运行期内的归属 issue/PR 数量（`sig/*` label + `scope_labels` 映射双口径，见 §3）
   - 是否出现归属争议（一个 issue 被多人反复改 SIG label）
   - 是否有 contributor 主动通过 SIG 归属讨论问题
-  - 口径说明：豁免期内 lead 本人及其登记 Agent 的产出会计入活跃度，评估时应**单列**这部分数据作为参考基线，不以单主体产出作为转 `active` 的充分依据
+  - 口径说明：豁免期内 lead 本人及其登记 Agent 的产出会计入活跃度，评估时应**单列**这部分数据作为参考基线。该口径是退出决策的**评估参考项**而非额外门槛——是否暂缓转 `active` 由 maintainer 在退出决策中结合单主体占比判断（如单主体占比 100% 时倾向延期一个观察窗）
 - **失败判定标准**（满足任一即判定试点失败）：
   - 试点期内出现 ≥ 2 次无法在 1 周内解决的归属争议
   - ≥ 2 个 SIG 在观察窗结束时活跃度为零

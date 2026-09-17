@@ -5,7 +5,7 @@
 #
 # 真相源位置（评审通过后）：spec/governance/sigs/api.yaml
 # 对应 label：sig/api
-# 对应 discussion 分类：SIG: API
+# 对应 discussion 分类：SIG: API（规划值，Phase 1 未开通）
 
 name: api
 display_name: API & Integration

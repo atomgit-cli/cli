@@ -47,6 +47,8 @@ spec/
 │   ├── issue-workflow.md
 │   ├── pr-workflow.md
 │   ├── review-workflow.md
+│   ├── rfc-workflow.md
+│   ├── status-label-checklist.md
 │   └── test-workflow.md
 ├── delivery/                # 构建与交付
 │   ├── build-and-package.md

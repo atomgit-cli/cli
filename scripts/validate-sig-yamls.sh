@@ -13,21 +13,24 @@
 #
 # 校验覆盖范围（对应 spec/governance/sig-governance.md §5.2/§5.3）：
 #   本脚本只覆盖"机器可判的必须项"，包括：
-#     - 必需字段存在性、status 枚举、labels 含 sig/<name>（行级精确匹配）
+#     - 必需字段存在性与非空、status 枚举、labels 含 sig/<name>（labels 段内精确匹配）
 #     - name 的 kebab-case 格式
 #     - created_at / agents[].since 的 YYYY-MM-DD 日期格式
 #     - leads / maintainers 非空且条目带 @
 #     - 豁免注释双向一致性（leads 与 maintainers 为同一单人列表 <=> 顶部含 "# note: 单人维护豁免期内" 前缀注释）
 #     - agents 每个条目均含 id / operator / since，id 为 kebab-case，operator 带 @
-#     - scope_labels（可选字段）存在时条目必须为 scope/<kebab> 形式，且跨文件不重复映射
+#     - scope_labels（可选字段）存在时条目必须为 scope/<kebab> 形式；跨文件重复映射输出 WARN
 #
 # 已知缺口（脚本不校验，由 PR review 人工兜底，见 sig-governance.md §5.3）：
 #     - 仅支持 YAML block 风格列表（如 "leads: [\"@a\"]" 的 flow 风格不支持，会误报）
+#     - 仓库人类 maintainer ≥ 2 时 leads/maintainers 单人重叠属 §4.1 违规而非 §4.2 豁免场景，
+#       脚本会引导添加 §4.2 下无效的豁免注（必要条件反转，人工兜底）
 #     - agents[].scopes 是否为 scope 字段的子集
 #     - agents[].operator 是否在本 YAML 的 leads/maintainers 列表中（更严格的"必须是仓库 maintainer"无注册表可查）
 #     - scope 路径是否真实存在于仓库
 #     - scope_labels 映射的 label 是否真实存在于远端仓库 label 列表
 #     - leads/maintainers 条目非空值（仅检查列表非空与 @ 前缀）
+#     - CRLF 行尾文件对标量字段产生误报（pre-commit mixed-line-ending 兜底）
 
 set -euo pipefail
 shopt -s nullglob
@@ -62,20 +65,20 @@ file_count=0
 # 跨文件收集 scope_labels 映射，用于查重
 all_scope_labels=""
 
-# 提取顶级标量字段值（容错：字段缺失时输出空串，不中断脚本）
+# 提取顶级标量字段值（容错：字段缺失时输出空串，不中断脚本；剥离行内注释与尾随空白）
 get_field() {
   local field="$1" file="$2"
-  grep -E "^${field}:" "$file" | head -n1 | sed -E "s/^${field}:[[:space:]]*//" | tr -d '"'"'"'' || true
+  grep -E "^${field}:" "$file" | head -n1 | sed -E "s/^${field}:[[:space:]]*//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//" | tr -d '"'"'"'' || true
 }
 
-# 提取某个 block 列表字段的条目（每行一个，去掉引号；容错：字段缺失时输出空串）
+# 提取某个 block 列表字段的条目（每行一个，去引号、剥离行内注释与尾随空白；容错：字段缺失时输出空串）
 get_list_entries() {
   local field="$1" file="$2"
   awk -v f="^${field}:" '
     $0 ~ f { in_section=1; next }
     /^[a-zA-Z_]+:/ && in_section { in_section=0 }
     in_section && /^[[:space:]]*-/ { print }
-  ' "$file" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/["'"'"']//g' || true
+  ' "$file" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/["'"'"']//g' || true
 }
 
 err() {
@@ -100,6 +103,14 @@ for yaml_file in "$SIGS_DIR"/*.yaml; do
     fi
   done
 
+  # 必需标量字段不得为空值（如 "status:" 后无值）
+  for field in name display_name status created_at; do
+    if grep -qE "^${field}:" "$yaml_file" && [[ -z "$(get_field "$field" "$yaml_file")" ]]; then
+      err "required field must not be empty: $field"
+      fail_count=$((fail_count + 1))
+    fi
+  done
+
   # 检查 status 值
   status_value="$(get_field status "$yaml_file")"
   if [[ -n "$status_value" ]] && ! [[ "$status_value" =~ ^($ALLOWED_STATUS)$ ]]; then
@@ -107,11 +118,12 @@ for yaml_file in "$SIGS_DIR"/*.yaml; do
     fail_count=$((fail_count + 1))
   fi
 
-  # 检查 labels 中是否包含 sig/<name>（行级精确匹配，防 sig/<name>-xx 绕过）
+  # 检查 labels 中是否包含 sig/<name>（labels 段内精确匹配，防 sig/<name>-xx 绕过与 charter 等块内容误匹配）
   name_value="$(get_field name "$yaml_file")"
   if [[ -n "$name_value" ]]; then
     expected_label="sig/$name_value"
-    if ! grep -qE "^[[:space:]]*-[[:space:]]*[\"']?${expected_label}[\"']?([[:space:]]*(#.*)?)?\$" "$yaml_file"; then
+    labels_entries="$(get_list_entries labels "$yaml_file")"
+    if ! printf '%s\n' "$labels_entries" | grep -qxF "$expected_label"; then
       err "labels must include $expected_label"
       fail_count=$((fail_count + 1))
     fi
@@ -186,7 +198,7 @@ for yaml_file in "$SIGS_DIR"/*.yaml; do
     fi
     while IFS= read -r entry; do
       [[ -z "$entry" ]] && continue
-      if ! [[ "$entry" =~ ^scope/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+      if ! [[ "$entry" =~ ^scope/[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
         err "scope_labels entry must be 'scope/<kebab-case>': got '$entry'"
         fail_count=$((fail_count + 1))
       fi
@@ -265,13 +277,13 @@ for yaml_file in "$SIGS_DIR"/*.yaml; do
   fi
 done
 
-# 跨文件 scope_labels 查重（sig-governance.md §6.1：一个 scope/* 原则上映射至多 1 个 SIG）
+# 跨文件 scope_labels 重复映射检查（sig-governance.md §6.1：一个 scope/* 原则上映射至多 1 个 SIG；
+# 确需跨 SIG 统计时允许在两个 SIG 的 YAML 同时登记并在 charter 说明——故为 WARN 而非 ERROR，人工评审兜底）
 dup_scope_labels=$(printf '%s' "$all_scope_labels" | grep -v '^$' | sort | uniq -d || true)
 if [[ -n "$dup_scope_labels" ]]; then
   while IFS= read -r dup; do
     [[ -z "$dup" ]] && continue
-    echo "  ERROR: [cross-file] scope label mapped by multiple SIGs: $dup (see sig-governance.md §6.1)" >&2
-    fail_count=$((fail_count + 1))
+    echo "  WARN: [cross-file] scope label mapped by multiple SIGs: $dup (requires charter justification, see sig-governance.md §6.1)" >&2
   done <<< "$dup_scope_labels"
 fi
 
