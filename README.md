@@ -38,7 +38,7 @@ GitCode CLI 把仓库、Issue、PR、Release 和 Actions 带回终端，让开�
 
 ## 安装
 
-推荐只让一个全局安装渠道拥有 `gc` / `gitcode`。已安装 Node.js/npm 的 Windows、Linux、macOS 与 AI 环境优先使用下方 npm bootstrap；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。CI 建议固定版本并校验 checksum。
+推荐只让一个全局安装渠道拥有 `gc` / `gitcode`。已安装 Node.js/npm 的 Windows、Linux、macOS、OpenHarmony（arm64）与 AI 环境优先使用下方 npm bootstrap；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。CI 建议固定版本并校验 checksum。
 
 ### 推荐：npm 一行 bootstrap（跨平台）
 
