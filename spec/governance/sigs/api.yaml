@@ -1,0 +1,54 @@
+# SIG: API & Integration
+# 负责 GitCode API 客户端演进、endpoint 对齐、api-doc submodule 同步
+#
+# note: 单人维护豁免期内（仓库 maintainer 总人数 < 2，lead 与 maintainer 暂时重叠）
+#
+# 真相源位置（评审通过后）：spec/governance/sigs/api.yaml
+# 对应 label：sig/api
+# 对应 discussion 分类：SIG: API
+
+name: api
+display_name: API & Integration
+status: incubating
+created_at: 2026-09-14
+
+leads:
+  - "@aflyingto"
+
+maintainers:
+  - "@aflyingto"
+
+# 参与本 SIG 的 Agent 列表（详见 spec/governance/sig-governance.md §4.3）
+agents:
+  - id: claude-code
+    operator: "@aflyingto"
+    scopes: []          # 空列表表示授权整个 SIG 范围（api/、api-doc/）
+    since: 2026-09-14
+  - id: trae-ai
+    operator: "@aflyingto"
+    scopes: []
+    since: 2026-09-14
+
+scope:
+  - api/
+  - api-doc/
+
+labels:
+  - sig/api
+
+discussion_category: "SIG: API"
+
+charter: |
+  负责本仓库与 GitCode 平台 API 的对接质量：
+  - api/ 包中 HTTP 客户端、查询函数、重试、时间处理等基础设施演进
+  - api-doc/ submodule 的同步节奏与端点差异跟进
+  - 新增 endpoint 接入前的契约评审（path / body / 错误码）
+  - 与 GitCode 平台 API 变更的应急预案
+
+  不负责：
+  - 具体命令的用户体验细节（属于 sig/cli-ux）
+  - CI / 打包 / 发布（属于 spec/delivery/，无需 SIG）
+
+meeting:
+  cadence: async        # Phase 1 试点期间不强制例会
+  notes: "使用 discussion 分类 'SIG: API' 异步记录"
