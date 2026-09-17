@@ -10,6 +10,7 @@ const { resolveBinaryName, isSupported, ARCH_MAP, PLATFORM_MAP } = require("../l
 test("resolveBinaryName maps common combos", () => {
   assert.strictEqual(resolveBinaryName("linux", "x64"), "gc-linux-amd64");
   assert.strictEqual(resolveBinaryName("linux", "arm64"), "gc-linux-arm64");
+  assert.strictEqual(resolveBinaryName("openharmony", "arm64"), "gc-linux-arm64");
   assert.strictEqual(resolveBinaryName("darwin", "x64"), "gc-darwin-amd64");
   assert.strictEqual(resolveBinaryName("darwin", "arm64"), "gc-darwin-arm64");
   assert.strictEqual(resolveBinaryName("win32", "x64"), "gc-windows-amd64.exe");
@@ -26,6 +27,7 @@ test("isSupported returns true for shipped combos and false otherwise", () => {
   for (const combo of [
     ["linux", "x64"],
     ["linux", "arm64"],
+    ["openharmony", "arm64"],
     ["darwin", "x64"],
     ["darwin", "arm64"],
     ["win32", "x64"],
@@ -43,8 +45,9 @@ test("arch map normalizes x64 to amd64", () => {
   assert.strictEqual(ARCH_MAP.arm64, "arm64");
 });
 
-test("platform map covers linux/darwin/win32", () => {
+test("platform map covers linux/darwin/win32 and the openharmony alias", () => {
   assert.strictEqual(PLATFORM_MAP.linux, "linux");
+  assert.strictEqual(PLATFORM_MAP.openharmony, "linux");
   assert.strictEqual(PLATFORM_MAP.darwin, "darwin");
   assert.strictEqual(PLATFORM_MAP.win32, "windows");
 });

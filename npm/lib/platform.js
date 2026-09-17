@@ -13,9 +13,13 @@ const ARCH_MAP = {
   arm64: "arm64",
 };
 
-// Node platform -> gc platform segment.
+// Node platform -> gc platform segment. OpenHarmony reuses the bundled
+// Linux binary: the OpenHarmony standard system runs the Linux kernel and
+// gc ships fully static binaries (CGO_ENABLED=0), so gc-linux-* runs there
+// unmodified. Node reports process.platform === "openharmony" on that OS.
 const PLATFORM_MAP = {
   linux: "linux",
+  openharmony: "linux",
   darwin: "darwin",
   win32: "windows",
 };
@@ -31,7 +35,7 @@ function resolveBinaryName(platform, arch) {
   if (!p || !a || (p === "windows" && a !== "amd64")) {
     throw new Error(
       `unsupported platform/arch: ${platform}/${arch}; ` +
-        `supported: linux/x64, linux/arm64, darwin/x64, darwin/arm64, win32/x64`
+        `supported: linux/x64, linux/arm64, openharmony/arm64, darwin/x64, darwin/arm64, win32/x64`
     );
   }
   const name = `gc-${p}-${a}`;
