@@ -45,6 +45,8 @@ Before contributing, please read the following documentation:
 | [docs/AI-GUIDE.md](./docs/AI-GUIDE.md) | External-project AI usage guide for `gc` |
 | [docs/AI-TEMPLATES.md](./docs/AI-TEMPLATES.md) | Internal gitcode-cli issue/PR comment templates |
 | [source-of-truth-matrix.md](./spec/governance/source-of-truth-matrix.md) | What can and cannot be used as a fact source |
+| [sig-governance.md](./spec/governance/sig-governance.md) | SIG governance: roles, lifecycle, decision rules |
+| [rfc-workflow.md](./spec/workflows/rfc-workflow.md) | RFC process for large design proposals |
 
 > **Important**: When modifying command-related code, you MUST sync updates to `docs/COMMANDS.md`.
 >

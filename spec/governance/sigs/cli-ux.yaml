@@ -38,6 +38,18 @@ scope:
 labels:
   - sig/cli-ux
 
+# 活跃度统计映射的 scope/* label（见 sig-governance.md §3 统计口径与 §6.1；
+# 未被映射的 scope/* 不计入本 SIG 活跃度）
+scope_labels:
+  - scope/cli
+  - scope/commands
+  - scope/cmdutil
+  - scope/output
+  - scope/iostreams
+  - scope/help
+  - scope/naming
+
+# Phase 1 未开通（平台 repo 级 discussion 分类能力未验证，见 sig-governance.md §6.2），保留为规划值
 discussion_category: "SIG: CLI UX"
 
 charter: |
@@ -55,4 +67,4 @@ charter: |
 
 meeting:
   cadence: async
-  notes: "使用 discussion 分类 'SIG: CLI UX' 异步记录"
+  notes: "Phase 1 试点期间使用带 sig/cli-ux label 的 issue 异步记录（discussion 分类开通后迁移，见 sig-governance.md §6.2）"

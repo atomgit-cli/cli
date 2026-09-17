@@ -20,6 +20,8 @@
 |------|------|------|------|
 | 项目正式规则 | `spec/` | 是 | 项目规则唯一正式来源 |
 | 命令行为 | `docs/COMMANDS.md` | 是 | `gc` 命令行为唯一真相源 |
+| SIG 元数据（SIG 列表、角色、范围、`scope_labels` 映射、Agent 登记与授权） | `spec/governance/sigs/*.yaml` | 是 | SIG 治理变更走 PR；`docs/SIGS.md`、label 描述均须从 YAML 派生 |
+| RFC 流程规则 | `spec/workflows/rfc-workflow.md` | 是 | RFC 文件存放于 `docs/rfcs/`，但流程规则以 spec 为准 |
 | 测试、门禁、评审规则 | `spec/foundations/*`、`spec/workflows/*` | 是 | 包括测试、状态机、门禁、评审边界 |
 | 构建与打包规则 | `spec/delivery/*` | 是 | 当前本地构建与打包规则以此为准 |
 | GitCode CLI Skills | [gitcode-cli/skills](https://gitcode.com/gitcode-cli/skills) | 有条件地是 | 定义可安装的命令与工作流 Skill，不得覆盖本仓库 `spec/` |

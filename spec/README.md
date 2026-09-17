@@ -87,6 +87,7 @@ spec/
 | [AI 协作规范](./governance/ai-collaboration.md) | Codex / Claude 入口关系、共享源与适配层边界 |
 | [SIG 治理规范](./governance/sig-governance.md) | SIG 角色与生命周期、决策机制、Agent 在 SIG 中的位置、sig/* label 与 scope/* 的关系 |
 | [开发工作流程](./workflows/development-workflow.md) | 完整流程、分支规范、禁止行为、检查清单 |
+| [RFC 工作流程](./workflows/rfc-workflow.md) | 大型设计提案（RFC）的触发判断、编号、流程与结果判定 |
 | [AI 本地开发流程](./workflows/ai-local-development-workflow.md) | 仓库内 AI 从接任务到本地验证到评审前的编排流程 |
 | [本地构建与打包规范](./delivery/build-and-package.md) | 标准构建命令、打包方式、产物边界和验证要求 |
 | [发布流程规范](./delivery/release-process.md) | 版本规则、发布步骤、release notes 和发布后验证 |

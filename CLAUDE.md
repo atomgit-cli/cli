@@ -35,6 +35,7 @@
 - 改 API / auth / config：`spec/foundations/coding-standards.md`、`spec/foundations/security.md`、`spec/foundations/testing-guide.md`
 - 补测试或做真实命令验证：`spec/foundations/testing-guide.md`、`spec/workflows/test-workflow.md`
 - 提交 PR / 做 review：`spec/workflows/pr-workflow.md`、`spec/workflows/review-workflow.md`
+- 改 SIG 治理 / 发起大型设计提案（RFC）：`spec/governance/sig-governance.md`、`spec/workflows/rfc-workflow.md`
 - 改构建 / 打包 / 发布：`spec/delivery/build-and-package.md`、`spec/delivery/release-process.md`
 - 改 CI 工作流：`spec/delivery/ci-workflows.md`、`spec/foundations/code-quality-gates.md`
 

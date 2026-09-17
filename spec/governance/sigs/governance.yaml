@@ -39,6 +39,13 @@ scope:
 labels:
   - sig/governance
 
+# 活跃度统计映射的 scope/* label（见 sig-governance.md §3 统计口径与 §6.1；
+# 未被映射的 scope/* 不计入本 SIG 活跃度）
+scope_labels:
+  - scope/governance
+  - scope/docs
+
+# Phase 1 未开通（平台 repo 级 discussion 分类能力未验证，见 sig-governance.md §6.2），保留为规划值
 discussion_category: "SIG: Governance"
 
 charter: |
@@ -56,4 +63,4 @@ charter: |
 
 meeting:
   cadence: async
-  notes: "使用 discussion 分类 'SIG: Governance' 异步记录；跨 SIG 议题放 General"
+  notes: "Phase 1 试点期间使用带 sig/governance label 的 issue 异步记录（discussion 分类开通后迁移，见 sig-governance.md §6.2）；跨 SIG 议题由本 SIG 协调"

@@ -142,7 +142,7 @@ validate-ai-record:
 	@python3 scripts/validate-ai-record.py --mode record --kind "$(KIND)" "$(FILE)"
 
 validate-sigs:
-	@bash scripts/validate-sig-yamls.sh
+	@bash scripts/validate-sig-yamls.sh $(SIGS_DIR)
 
 classify-change-risk:
 	@test -n "$(BASE)" || (echo "Usage: make classify-change-risk BASE=origin/main" && exit 2)
