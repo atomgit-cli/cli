@@ -2317,7 +2317,7 @@ gc precommit check --json
 
 ### actions setting - 启用或停用 Actions
 
-启用或停用单个仓库，或组织下的全部仓库 Actions。使用 `-R`/`--repo` 指定单个仓库（必须为 `owner/repo`），或使用 `--org` 指定组织以批量操作组织下的全部仓库；两者互斥且必须提供其一。命令会先读取每个仓库当前的 Actions 权限配置，PUT 时只修改 `action_enabled`，保留 `block_all_new_pipelines`、`block_cross_repo_pr_triggers` 等其余已读取字段。
+启用或停用单个仓库，或组织下的全部仓库 Actions。使用 `-R`/`--repo` 指定单个仓库（必须为 `owner/repo`），或使用 `--org` 指定组织以批量操作组织下的全部仓库；两者互斥，均未提供时按 `actions` 命令族惯例推断当前目录仓库。命令会先读取每个仓库当前的 Actions 权限配置，PUT 时只修改 `action_enabled`，保留 `block_all_new_pipelines`、`block_cross_repo_pr_triggers` 等其余已读取字段。
 
 Actions setting 接口位于 GitCode Web API（`web-api.gitcode.com`），需要 GitCode 网页会话 JWT，经典个人访问令牌（PAT）不适用于该接口。执行命令前，请按以下步骤获取 JWT：
 
@@ -2329,7 +2329,7 @@ Actions setting 接口位于 GitCode Web API（`web-api.gitcode.com`），需要
 
 交互式终端输入使用隐藏回显，JWT 不会显示在屏幕上；JWT 只在本次命令内存中使用，不写入日志或磁盘。命令会本地校验 JWT 格式与 `exp` 过期时间。仓库与组织列表仍使用常规 CLI 凭证（PAT/GC_TOKEN）读取。
 
-这是危险操作。默认会列出将发生变化的仓库，并要求交互式输入精确的 `y`；当部分仓库已处于目标状态时，预览会列出这些仓库及跳过原因；确认提示以 `!` 警告标识开头，并声明该命令调用的是官方 API 文档未收录的 GitCode Web API，使用风险由执行者自行承担；非交互环境必须显式传 `--yes`。如果目标仓库已经处于目标状态，确认后不会发送 PUT 请求。
+这是危险操作。默认会列出将发生变化的仓库，并要求交互式输入 `{enable|disable} Actions for {仓库或组织名}` 确认短语（`actions` 写操作命令族惯例）；当部分仓库已处于目标状态时，预览会列出这些仓库及跳过原因；确认提示以 `!` 警告标识开头，并声明该命令调用的是官方 API 文档未收录的 GitCode Web API，使用风险由执行者自行承担；非交互环境必须显式传 `--yes`。如果没有仓库需要变更，命令不会发送 PUT 请求，也不会要求确认。
 
 批量操作遇到单个仓库失败时不会中止：命令会继续处理其余仓库，保留已成功的变更，并在结果中逐仓列出 `updated`/`unchanged`/`failed` 状态；失败原因写入 stderr，退出码返回 `1` 以反映部分失败。
 
@@ -2355,7 +2355,7 @@ gc actions setting enable -R owner/repo --yes --json
 
 说明：
 
-- `-R`/`--repo` 与 `--org` 互斥且必须提供其一。`-R`/`--repo` 仅接受 `owner/repo`（两段均非空，支持 CLI 通用的 HTTPS/SSH 仓库地址格式）；组织批量操作请使用 `--org <name>`。
+- `-R`/`--repo` 与 `--org` 互斥；均未提供时推断当前目录仓库。`-R`/`--repo` 仅接受 `owner/repo`（两段均非空，支持 CLI 通用的 HTTPS/SSH 仓库地址格式）；组织批量操作请使用 `--org <name>`。
 - 组织模式按 `GET /api/v5/orgs/{org}/repos` 分页读取组织下的全部仓库，再逐个读取 Actions setting；分页以首个空页作为终止条件（不假设短页即末页），并设置页数上限防止异常服务端导致循环。
 - Actions setting 读取和更新使用 `GET/PUT /api/v2/projects/{project_id}/actions/setting`；请求体不发送 `project_id`。
 - `--with-token` 从 stdin 首行读取 web JWT；交互式终端下未提供该 flag 时提示粘贴。非 TTY 且未提供 `--with-token` 时在发起任何 API 请求前立即报错（退出码 `2`），不会阻塞等待输入，也不会先跑读取请求。

@@ -58,6 +58,7 @@ command. Do not share it or save it to a file.`
 type SettingOptions struct {
 	IO         *iostreams.IOStreams
 	HttpClient func() (*http.Client, error)
+	BaseRepo   func() (string, error)
 
 	Repository string
 	Org        string
@@ -104,6 +105,7 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 	opts := &SettingOptions{
 		IO:         f.IOStreams,
 		HttpClient: f.HttpClient,
+		BaseRepo:   f.BaseRepo,
 	}
 
 	cmd := &cobra.Command{
@@ -112,12 +114,16 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		Long: heredoc.Doc(`
 			Enable or disable GitCode Actions for one repository or for every
 			repository in an organization. Use -R owner/repo for one repository,
-			or --org <name> for all repositories in an organization.
+			or --org <name> for all repositories in an organization. When neither
+			is given, the repository is inferred from the current git repository,
+			like the rest of the actions command family.
 
 			The command reads each repository's current Actions permission first,
 			then changes only action_enabled and preserves the other permission
-			fields. This is a dangerous operation: type y to confirm, or use
-			--yes in a non-interactive environment.
+			fields. This is a dangerous operation: type the repository or
+			organization name to confirm, or use --yes in a non-interactive
+			environment. When no repository needs a change, the command reports
+			the result without asking for confirmation.
 			Before confirmation, the command warns that it uses a Web API endpoint
 			not documented in the official GitCode API reference.
 
@@ -130,21 +136,24 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		`),
 		Example: heredoc.Doc(`
 			# Enable Actions for one repository
-			$ gitcode actions setting enable -R owner/repo
+			$ gc actions setting enable -R owner/repo
+
+			# Enable Actions for the current repository
+			$ gc actions setting enable
 
 			# Disable Actions for one repository without an interactive prompt
-			$ gitcode actions setting disable -R owner/repo --yes
+			$ gc actions setting disable -R owner/repo --yes
 
 			# Enable Actions for every repository in an organization
-			$ gitcode actions setting enable --org my-org
+			$ gc actions setting enable --org my-org
 
 			# Enable all repositories and return structured output
-			$ gitcode actions setting enable --org my-org --yes --json
+			$ gc actions setting enable --org my-org --yes --json
 
 			# Non-interactive: pipe the web session JWT. Never echo or cat a
 			# token literal (it leaks to shell history or disk); pipe it from
 			# a secret manager instead.
-			$ <print-token-from-secret-manager> | gitcode actions setting disable -R owner/repo --with-token --yes
+			$ <print-token-from-secret-manager> | gc actions setting disable -R owner/repo --with-token --yes
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -159,7 +168,7 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
+	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo, defaults to the current repository)")
 	cmd.Flags().StringVar(&opts.Org, "org", "", "Organization name; batch every repository in it (mutually exclusive with -R)")
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in non-interactive mode)")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read the gitcode.com web session JWT from standard input")
@@ -178,6 +187,9 @@ func settingRun(opts *SettingOptions) error {
 	if err := validateTarget(opts); err != nil {
 		return err
 	}
+	if err := applyRepositoryDefault(opts); err != nil {
+		return err
+	}
 
 	// Resolve the web JWT before any API call: the non-interactive check is a
 	// parameter validation, so a missing JWT must fail fast instead of running
@@ -192,22 +204,25 @@ func settingRun(opts *SettingOptions) error {
 		return err
 	}
 
-	targets, organization, err := resolveTargets(client, opts)
+	targets, organization, err := resolveTargets(opts.IO, client, opts)
 	if err != nil {
 		return err
 	}
 
 	client.SetToken(jwt, "web-jwt")
 
-	states, err := readStates(client, targets)
+	states, err := readStates(opts.IO, client, targets)
 	if err != nil {
 		return err
 	}
 
 	changed := countChanged(states, desired)
 	writePreview(opts.IO, action, states, desired, changed)
-	if err := confirmSettingChange(opts); err != nil {
-		return err
+	// Nothing to change means no write happens, so there is nothing to confirm.
+	if changed > 0 {
+		if err := confirmSettingChange(opts, confirmationTarget(organization, targets)); err != nil {
+			return err
+		}
 	}
 
 	failures := applyStates(client, states, desired, action)
@@ -224,15 +239,19 @@ func settingRun(opts *SettingOptions) error {
 }
 
 // resolveWebJWT obtains the web session JWT required by the Actions setting
-// API. With --with-token the JWT is read from standard input; otherwise an
-// interactive terminal is required, and non-interactive runs fail fast
-// instead of blocking on stdin.
+// API. With --with-token the JWT is read from standard input; if that input is
+// still an interactive terminal, the typed value is read hidden so it does not
+// echo. Otherwise an interactive terminal is required, and non-interactive runs
+// fail fast instead of blocking on stdin.
 func resolveWebJWT(opts *SettingOptions) (string, error) {
-	if opts.WithToken {
+	if opts.WithToken && !opts.IO.CanPrompt() {
 		return validateWebJWT(readLineFrom(opts.IO))
 	}
 	if !opts.IO.CanPrompt() {
 		return "", cmdutil.NewUsageError("the Actions setting API requires the gitcode.com web session JWT; run in an interactive terminal to paste it, or provide it via --with-token")
+	}
+	if opts.WithToken {
+		fmt.Fprintln(opts.IO.ErrOut, "--with-token is reading from an interactive terminal; input stays hidden.")
 	}
 	fmt.Fprintln(opts.IO.ErrOut, webJWTHelpText)
 	fmt.Fprint(opts.IO.ErrOut, "Web session JWT (input hidden; press Enter when complete): ")
@@ -333,7 +352,12 @@ func decodeJWTPayload(segment string) (map[string]any, error) {
 	return payload, nil
 }
 
-func readStates(client *api.Client, targets []repositoryTarget) ([]repositoryState, error) {
+func readStates(ioStreams *iostreams.IOStreams, client *api.Client, targets []repositoryTarget) ([]repositoryState, error) {
+	// A batch read issues one request per repository; announce it so the
+	// operator is not left staring at a silent terminal.
+	if ioStreams != nil && ioStreams.ErrOut != nil && len(targets) > 1 {
+		fmt.Fprintf(ioStreams.ErrOut, "Reading current Actions settings for %d repositories...\n", len(targets))
+	}
 	states := make([]repositoryState, 0, len(targets))
 	for _, target := range targets {
 		setting, err := api.GetActionsSetting(client, target.ProjectID)
@@ -348,13 +372,26 @@ func readStates(client *api.Client, targets []repositoryTarget) ([]repositorySta
 	return states, nil
 }
 
-func confirmSettingChange(opts *SettingOptions) error {
+// confirmationTarget returns the identifier the operator must type to confirm,
+// matching the actions command family convention of typing the affected target.
+func confirmationTarget(organization string, targets []repositoryTarget) string {
+	if strings.TrimSpace(organization) != "" {
+		return organization
+	}
+	if len(targets) > 0 {
+		return targets[0].Name
+	}
+	return ""
+}
+
+func confirmSettingChange(opts *SettingOptions, target string) error {
 	cs := opts.IO.ColorScheme()
+	expected := fmt.Sprintf("%s Actions for %s", opts.Action, target)
 	return cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
 		Yes:      opts.Yes,
-		Expected: "y",
-		Prompt:   fmt.Sprintf("%s %s: %s\n%s Type y to confirm: ", cs.WarningIcon(), cs.Yellow("Warning"), actionsSettingRiskMessage, cs.WarningIcon()),
+		Expected: expected,
+		Prompt:   fmt.Sprintf("%s %s: %s\n%s Type %q to confirm: ", cs.WarningIcon(), cs.Yellow("Warning"), actionsSettingRiskMessage, cs.WarningIcon(), expected),
 	})
 }
 
@@ -385,18 +422,21 @@ func applyStates(client *api.Client, states []repositoryState, desired bool, act
 	return failures
 }
 
+// validateTarget checks the explicit target flags. An empty target is allowed
+// here: settingRun fills it in from the current repository, matching the rest
+// of the actions command family.
 func validateTarget(opts *SettingOptions) error {
 	repository := strings.TrimSpace(opts.Repository)
 	organization := strings.TrimSpace(opts.Org)
 	switch {
-	case repository == "" && organization == "":
-		return cmdutil.NewUsageError("either -R/--repo (owner/repo) or --org (organization) is required")
 	case repository != "" && organization != "":
 		return cmdutil.NewUsageError("-R/--repo and --org are mutually exclusive")
 	case organization != "":
 		if strings.Contains(organization, "/") {
 			return cmdutil.NewUsageError("--org takes an organization name without '/'")
 		}
+		return nil
+	case repository == "":
 		return nil
 	}
 
@@ -410,6 +450,21 @@ func validateTarget(opts *SettingOptions) error {
 	return nil
 }
 
+// applyRepositoryDefault fills in the current repository when neither -R nor
+// --org was given. Resolution only reads local git state, so it still runs
+// before any network call or JWT prompt.
+func applyRepositoryDefault(opts *SettingOptions) error {
+	if strings.TrimSpace(opts.Repository) != "" || strings.TrimSpace(opts.Org) != "" {
+		return nil
+	}
+	repository, err := cmdutil.ResolveRepo("", opts.BaseRepo)
+	if err != nil {
+		return err
+	}
+	opts.Repository = repository
+	return nil
+}
+
 func actionEnabledValue(action string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "enable":
@@ -417,14 +472,14 @@ func actionEnabledValue(action string) (bool, error) {
 	case "disable":
 		return false, nil
 	default:
-		return false, cmdutil.NewUsageError("action must be enable or disable")
+		return false, cmdutil.NewUsageError(fmt.Sprintf("invalid action %q: must be enable or disable", action))
 	}
 }
 
-func resolveTargets(client *api.Client, opts *SettingOptions) ([]repositoryTarget, string, error) {
+func resolveTargets(ioStreams *iostreams.IOStreams, client *api.Client, opts *SettingOptions) ([]repositoryTarget, string, error) {
 	organization := strings.TrimSpace(opts.Org)
 	if organization != "" {
-		repositories, err := listAllOrganizationRepositories(client, organization)
+		repositories, err := listAllOrganizationRepositories(ioStreams, client, organization)
 		if err != nil {
 			return nil, "", err
 		}
@@ -463,9 +518,14 @@ func resolveTargets(client *api.Client, opts *SettingOptions) ([]repositoryTarge
 // server that clamps per_page below the requested size would otherwise make the
 // first page look like the last one and silently drop repositories. The page
 // cap guards against a server that keeps returning entries forever.
-func listAllOrganizationRepositories(client *api.Client, organization string) ([]api.Repository, error) {
+func listAllOrganizationRepositories(ioStreams *iostreams.IOStreams, client *api.Client, organization string) ([]api.Repository, error) {
 	repositories := make([]api.Repository, 0)
 	for page := 1; page <= organizationRepoMaxPages; page++ {
+		// Listing a large organization takes several round trips; report each
+		// page so the operator sees progress instead of a silent terminal.
+		if ioStreams != nil && ioStreams.ErrOut != nil {
+			fmt.Fprintf(ioStreams.ErrOut, "Fetching repositories in organization %s (page %d)...\n", organization, page)
+		}
 		pageRepos, err := api.ListOrgRepos(client, organization, &api.RepoListOptions{
 			Page:    page,
 			PerPage: organizationRepoPageSize,

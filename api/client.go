@@ -237,7 +237,14 @@ func (c *Client) RawRESTToHost(method, host, endpoint string, body io.Reader, he
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, decodeAPIError(respBody, resp.StatusCode, resp.Status)
+		err := decodeAPIError(respBody, resp.StatusCode, resp.Status)
+		// Endpoints on the web API host authenticate with the browser session
+		// JWT, so the generic "run gc auth login" advice would send the user
+		// after a credential that cannot work here.
+		if resp.StatusCode == http.StatusUnauthorized && host == WebAPIHost {
+			return nil, fmt.Errorf("%w\n\nThe %s web API rejected the credential. This host authenticates with the gitcode.com web session JWT, not a classic personal access token: refresh gitcode.com, run copy(localStorage.getItem('access_token')) in the browser Console, and pass the value with --with-token.", err, host)
+		}
+		return nil, err
 	}
 
 	return &RawResponse{

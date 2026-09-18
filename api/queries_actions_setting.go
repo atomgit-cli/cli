@@ -7,8 +7,6 @@ import (
 	"net/url"
 )
 
-const actionsSettingWebReferer = "https://gitcode.com/"
-
 // ActionsSetting represents the repository-level Actions permission settings.
 // Pointer fields preserve false values and allow fields absent from a response
 // to remain absent from an update request.
@@ -25,7 +23,7 @@ type ActionsSetting struct {
 // object envelope containing it in data.
 func GetActionsSetting(client *Client, projectID string) (*ActionsSetting, error) {
 	endpoint := actionsSettingEndpoint(projectID)
-	resp, err := client.RawRESTToHost("GET", WebAPIHost, endpoint, nil, map[string]string{"Referer": actionsSettingWebReferer})
+	resp, err := client.RawRESTToHost("GET", WebAPIHost, endpoint, nil, webAPIHeaders())
 	if err != nil {
 		return nil, err
 	}
@@ -44,12 +42,18 @@ func GetActionsSetting(client *Client, projectID string) (*ActionsSetting, error
 
 // UpdateActionsSetting updates the repository-level Actions permission
 // settings without sending a project_id in the request body.
+//
+// The PUT body is built only from the modelled fields above. The endpoint
+// replaces the whole setting object, so a field the server returns but this
+// struct does not model is not echoed back and will fall back to the server
+// default. That is a known trade-off: the alternative would be to round-trip
+// unknown fields verbatim, which risks sending back stale or read-only values.
 func UpdateActionsSetting(client *Client, projectID string, setting *ActionsSetting) error {
 	body, err := json.Marshal(setting)
 	if err != nil {
 		return fmt.Errorf("failed to marshal actions setting: %w", err)
 	}
-	_, err = client.RawRESTToHost("PUT", WebAPIHost, actionsSettingEndpoint(projectID), bytes.NewReader(body), map[string]string{"Referer": actionsSettingWebReferer})
+	_, err = client.RawRESTToHost("PUT", WebAPIHost, actionsSettingEndpoint(projectID), bytes.NewReader(body), webAPIHeaders())
 	return err
 }
 

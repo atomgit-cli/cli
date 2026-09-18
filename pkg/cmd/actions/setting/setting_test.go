@@ -3,6 +3,7 @@ package setting
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -19,8 +20,7 @@ func TestSettingRunSingleRepositoryReadsBeforeConfirmingAndPreservesFields(t *te
 	t.Setenv("GC_TOKEN", "test-token")
 	jwt := futureWebJWT(t)
 	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString(jwt + "\n")
-	_, _ = in.WriteString("y\n")
+	_, _ = in.WriteString(confirmationPhrase("enable", "owner/repo") + "\n")
 
 	var putBody map[string]any
 	var requests []string
@@ -53,11 +53,11 @@ func TestSettingRunSingleRepositoryReadsBeforeConfirmingAndPreservesFields(t *te
 	}
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Repository: "owner/repo",
-		Action:     "enable",
-		WithToken:  true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Repository:   "owner/repo",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
 	})
 	if err != nil {
 		t.Fatalf("settingRun() error = %v", err)
@@ -77,7 +77,7 @@ func TestSettingRunSingleRepositoryReadsBeforeConfirmingAndPreservesFields(t *te
 	if _, ok := putBody["project_id"]; ok {
 		t.Fatalf("PUT body unexpectedly contains project_id: %#v", putBody)
 	}
-	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "! Type y to confirm:") {
+	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "! Type \"enable Actions for owner/repo\" to confirm:") {
 		t.Fatalf("confirmation prompt = %q", errOut.String())
 	}
 	if !strings.Contains(out.String(), "Actions enabled for 1/1 repositories") {
@@ -89,7 +89,7 @@ func TestSettingRunPromptsForWebJWTInInteractiveMode(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 	jwt := futureWebJWT(t)
 	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString("y\n")
+	_, _ = in.WriteString(confirmationPhrase("enable", "owner/repo") + "\n")
 	passwordRead := false
 
 	var settingAuth []string
@@ -140,9 +140,9 @@ func TestSettingRunPromptsForWebJWTInInteractiveMode(t *testing.T) {
 
 func TestSettingRunOrganizationUpdatesOnlyChangedRepositories(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
+	jwt := futureWebJWT(t)
 	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString(futureWebJWT(t) + "\n")
-	_, _ = in.WriteString("y\n")
+	_, _ = in.WriteString(confirmationPhrase("enable", "acme") + "\n")
 
 	var putIDs []string
 	clientFactory := func() (*http.Client, error) {
@@ -168,11 +168,11 @@ func TestSettingRunOrganizationUpdatesOnlyChangedRepositories(t *testing.T) {
 	}
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Org:        "acme",
-		Action:     "enable",
-		WithToken:  true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Org:          "acme",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
 	})
 	if err != nil {
 		t.Fatalf("settingRun() error = %v", err)
@@ -187,13 +187,18 @@ func TestSettingRunOrganizationUpdatesOnlyChangedRepositories(t *testing.T) {
 	if !strings.Contains(preview, "Actions will be enabled for 1 of 2 repositories:") || !strings.Contains(preview, "acme/first: skipped (Actions already enabled)") {
 		t.Fatalf("preview = %q, want changed count and skipped reason", preview)
 	}
+	// A batch read must not leave the operator staring at a silent terminal.
+	if !strings.Contains(preview, "Fetching repositories in organization acme (page 1)...") ||
+		!strings.Contains(preview, "Reading current Actions settings for 2 repositories...") {
+		t.Fatalf("preview = %q, want batch progress messages", preview)
+	}
 }
 
 func TestSettingRunDoesNotWriteWhenConfirmationIsRejected(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
-	ioStreams, in, _, _ := iostreams.TestTTY()
-	_, _ = in.WriteString(futureWebJWT(t) + "\n")
-	_, _ = in.WriteString("n\n")
+	jwt := futureWebJWT(t)
+	ioStreams, in, _, errOut := iostreams.TestTTY()
+	_, _ = in.WriteString("no\n")
 	putCalled := false
 	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -210,25 +215,27 @@ func TestSettingRunDoesNotWriteWhenConfirmationIsRejected(t *testing.T) {
 	})
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Repository: "owner/repo",
-		Action:     "enable",
-		WithToken:  true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Repository:   "owner/repo",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
 	})
 	if err == nil || !strings.Contains(err.Error(), "confirmation did not match") {
 		t.Fatalf("settingRun() error = %v, want rejected confirmation", err)
+	}
+	if !strings.Contains(errOut.String(), "! Type \"enable Actions for owner/repo\" to confirm:") {
+		t.Fatalf("confirmation prompt = %q, want the family-style confirmation phrase", errOut.String())
 	}
 	if putCalled {
 		t.Fatal("PUT called after rejected confirmation")
 	}
 }
 
-func TestSettingRunSkipsWriteButStillConfirmsWhenAlreadyDesired(t *testing.T) {
+func TestSettingRunSkipsWriteAndConfirmationWhenAlreadyDesired(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
-	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString(futureWebJWT(t) + "\n")
-	_, _ = in.WriteString("y\n")
+	jwt := futureWebJWT(t)
+	ioStreams, _, out, errOut := iostreams.TestTTY()
 	putCalled := false
 	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -245,11 +252,11 @@ func TestSettingRunSkipsWriteButStillConfirmsWhenAlreadyDesired(t *testing.T) {
 	})
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Repository: "owner/repo",
-		Action:     "enable",
-		WithToken:  true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Repository:   "owner/repo",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
 	})
 	if err != nil {
 		t.Fatalf("settingRun() error = %v", err)
@@ -257,8 +264,13 @@ func TestSettingRunSkipsWriteButStillConfirmsWhenAlreadyDesired(t *testing.T) {
 	if putCalled {
 		t.Fatal("PUT called even though Actions was already enabled")
 	}
-	if !strings.Contains(errOut.String(), "! Warning: This command calls a GitCode Web API endpoint") || !strings.Contains(errOut.String(), "owner/repo: skipped (Actions already enabled)") || !strings.Contains(errOut.String(), "! Type y to confirm:") {
-		t.Fatalf("confirmation prompt = %q", errOut.String())
+	if !strings.Contains(errOut.String(), "owner/repo: skipped (Actions already enabled)") {
+		t.Fatalf("preview output = %q", errOut.String())
+	}
+	// With nothing to change there is no destructive action, so the command
+	// must not ask the operator to confirm.
+	if strings.Contains(errOut.String(), "to confirm:") {
+		t.Fatalf("confirmation prompt = %q, want no confirmation when nothing changes", errOut.String())
 	}
 	if !strings.Contains(out.String(), "Actions enabled for 0/1 repositories") {
 		t.Fatalf("output = %q", out.String())
@@ -405,13 +417,18 @@ func TestNewCmdSettingParsesWithTokenFlag(t *testing.T) {
 	}
 }
 
-func TestNewCmdSettingRequiresOneTarget(t *testing.T) {
-	cmd := NewCmdSetting(cmdutil.TestFactory(), func(opts *SettingOptions) error {
+func TestNewCmdSettingAllowsDefaultRepository(t *testing.T) {
+	var opts *SettingOptions
+	cmd := NewCmdSetting(cmdutil.TestFactory(), func(received *SettingOptions) error {
+		opts = received
 		return nil
 	})
 	cmd.SetArgs([]string{"enable"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "-R/--repo") {
-		t.Fatalf("Execute() error = %v, want target validation", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, want no error when the repository is inferred", err)
+	}
+	if opts == nil || opts.Repository != "" || opts.Org != "" {
+		t.Fatalf("opts = %#v, want empty explicit target", opts)
 	}
 }
 
@@ -459,7 +476,7 @@ func TestValidateTarget(t *testing.T) {
 	}{
 		{name: "repository", repo: "owner/repo"},
 		{name: "organization", org: "acme"},
-		{name: "missing target", wantErr: "-R/--repo"},
+		{name: "missing target is inferred later", wantErr: ""},
 		{name: "both targets", repo: "owner/repo", org: "acme", wantErr: "mutually exclusive"},
 		{name: "organization with slash", org: "acme/team", wantErr: "without '/'"},
 		{name: "empty owner", repo: "/repo", wantErr: "both segments non-empty"},
@@ -502,7 +519,7 @@ func TestListAllOrganizationRepositoriesPaginates(t *testing.T) {
 		}
 	})))
 
-	repositories, err := listAllOrganizationRepositories(client, "acme")
+	repositories, err := listAllOrganizationRepositories(nil, client, "acme")
 	if err != nil {
 		t.Fatalf("listAllOrganizationRepositories() error = %v", err)
 	}
@@ -532,7 +549,7 @@ func TestListAllOrganizationRepositoriesContinuesPastShortPage(t *testing.T) {
 		}
 	})))
 
-	repositories, err := listAllOrganizationRepositories(client, "acme")
+	repositories, err := listAllOrganizationRepositories(nil, client, "acme")
 	if err != nil {
 		t.Fatalf("listAllOrganizationRepositories() error = %v", err)
 	}
@@ -551,7 +568,7 @@ func TestListAllOrganizationRepositoriesCapsPages(t *testing.T) {
 		writeJSONValue(w, []api.Repository{{ID: 1}})
 	})))
 
-	_, err := listAllOrganizationRepositories(client, "acme")
+	_, err := listAllOrganizationRepositories(nil, client, "acme")
 	if err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("listAllOrganizationRepositories() error = %v, want page cap error", err)
 	}
@@ -562,9 +579,9 @@ func TestListAllOrganizationRepositoriesCapsPages(t *testing.T) {
 // confirmation prompt stay on stderr.
 func TestSettingRunEmitsJSONSummaryToStdout(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
+	jwt := futureWebJWT(t)
 	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString(futureWebJWT(t) + "\n")
-	_, _ = in.WriteString("y\n")
+	_, _ = in.WriteString(confirmationPhrase("enable", "owner/repo") + "\n")
 
 	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -580,12 +597,12 @@ func TestSettingRunEmitsJSONSummaryToStdout(t *testing.T) {
 	})
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Repository: "owner/repo",
-		Action:     "enable",
-		WithToken:  true,
-		JSON:       true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Repository:   "owner/repo",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
+		JSON:         true,
 	})
 	if err != nil {
 		t.Fatalf("settingRun() error = %v", err)
@@ -610,7 +627,7 @@ func TestSettingRunEmitsJSONSummaryToStdout(t *testing.T) {
 		t.Fatalf("stdout leaked prompt/preview text: %q", out.String())
 	}
 	if !strings.Contains(errOut.String(), "Actions will be enabled for 1 of 1 repositories:") ||
-		!strings.Contains(errOut.String(), "! Type y to confirm:") {
+		!strings.Contains(errOut.String(), "! Type \"enable Actions for owner/repo\" to confirm:") {
 		t.Fatalf("stderr = %q, want preview and confirmation prompt", errOut.String())
 	}
 }
@@ -620,9 +637,9 @@ func TestSettingRunEmitsJSONSummaryToStdout(t *testing.T) {
 // and the exit code reflects the partial failure.
 func TestSettingRunReportsPartialFailure(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
+	jwt := futureWebJWT(t)
 	ioStreams, in, out, errOut := iostreams.TestTTY()
-	_, _ = in.WriteString(futureWebJWT(t) + "\n")
-	_, _ = in.WriteString("y\n")
+	_, _ = in.WriteString(confirmationPhrase("enable", "acme") + "\n")
 
 	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -646,12 +663,12 @@ func TestSettingRunReportsPartialFailure(t *testing.T) {
 	})
 
 	err := settingRun(&SettingOptions{
-		IO:         ioStreams,
-		HttpClient: clientFactory,
-		Org:        "acme",
-		Action:     "enable",
-		WithToken:  true,
-		JSON:       true,
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Org:          "acme",
+		Action:       "enable",
+		readPassword: hiddenJWTReader(t, jwt),
+		JSON:         true,
 	})
 	if err == nil {
 		t.Fatal("settingRun() error = nil, want a partial failure error")
@@ -673,6 +690,21 @@ func TestSettingRunReportsPartialFailure(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "acme/second") {
 		t.Fatalf("stderr = %q, want the failing repository detail", errOut.String())
+	}
+}
+
+// confirmationPhrase builds the family-style confirmation phrase that the
+// command expects the operator to type for the given action and target.
+func confirmationPhrase(action, target string) string {
+	return fmt.Sprintf("%s Actions for %s", action, target)
+}
+
+// hiddenJWTReader returns a terminalPasswordReader that yields the given JWT
+// without touching a real terminal, so tests exercise the hidden-input path.
+func hiddenJWTReader(t *testing.T, jwt string) terminalPasswordReader {
+	t.Helper()
+	return func(fd int) ([]byte, error) {
+		return []byte(jwt), nil
 	}
 }
 
