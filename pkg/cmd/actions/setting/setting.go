@@ -24,6 +24,17 @@ import (
 
 const organizationRepoPageSize = 100
 
+// organizationRepoMaxPages bounds organization listing so a server that keeps
+// returning non-empty pages cannot make the command loop forever.
+const organizationRepoMaxPages = 1000
+
+// Per-repository result statuses reported in the summary output.
+const (
+	statusUnchanged = "unchanged"
+	statusUpdated   = "updated"
+	statusFailed    = "failed"
+)
+
 const actionsSettingRiskMessage = "This command calls a GitCode Web API endpoint that is not documented in the official GitCode API reference. Use of this command is at your own risk."
 
 type terminalPasswordReader func(int) ([]byte, error)
@@ -49,6 +60,7 @@ type SettingOptions struct {
 	HttpClient func() (*http.Client, error)
 
 	Repository string
+	Org        string
 	Action     string
 	WithToken  bool
 	Yes        bool
@@ -80,8 +92,11 @@ type repositoryTarget struct {
 }
 
 type repositoryState struct {
-	target  repositoryTarget
-	setting *api.ActionsSetting
+	target   repositoryTarget
+	setting  *api.ActionsSetting
+	previous bool
+	status   string
+	err      error
 }
 
 // NewCmdSetting creates the actions setting command.
@@ -95,9 +110,9 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		Use:   "setting <enable|disable>",
 		Short: "Enable or disable repository Actions",
 		Long: heredoc.Doc(`
-			Enable or disable GitCode Actions for one repository or every
+			Enable or disable GitCode Actions for one repository or for every
 			repository in an organization. Use -R owner/repo for one repository,
-			or -R organization for all repositories in an organization.
+			or --org <name> for all repositories in an organization.
 
 			The command reads each repository's current Actions permission first,
 			then changes only action_enabled and preserves the other permission
@@ -121,10 +136,10 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 			$ gitcode actions setting disable -R owner/repo --yes
 
 			# Enable Actions for every repository in an organization
-			$ gitcode actions setting enable -R my-org
+			$ gitcode actions setting enable --org my-org
 
 			# Enable all repositories and return structured output
-			$ gitcode actions setting enable -R my-org --yes --json
+			$ gitcode actions setting enable --org my-org --yes --json
 
 			# Non-interactive: pipe the web session JWT. Never echo or cat a
 			# token literal (it leaks to shell history or disk); pipe it from
@@ -134,7 +149,7 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Action = args[0]
-			if err := validateTarget(opts.Repository); err != nil {
+			if err := validateTarget(opts); err != nil {
 				return err
 			}
 			if runF != nil {
@@ -144,7 +159,8 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo) or organization")
+	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
+	cmd.Flags().StringVar(&opts.Org, "org", "", "Organization name; batch every repository in it (mutually exclusive with -R)")
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in non-interactive mode)")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read the gitcode.com web session JWT from standard input")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
@@ -159,7 +175,15 @@ func settingRun(opts *SettingOptions) error {
 		return err
 	}
 	opts.Action = action
-	if err := validateTarget(opts.Repository); err != nil {
+	if err := validateTarget(opts); err != nil {
+		return err
+	}
+
+	// Resolve the web JWT before any API call: the non-interactive check is a
+	// parameter validation, so a missing JWT must fail fast instead of running
+	// all the read requests first.
+	jwt, err := resolveWebJWT(opts)
+	if err != nil {
 		return err
 	}
 
@@ -168,15 +192,11 @@ func settingRun(opts *SettingOptions) error {
 		return err
 	}
 
-	targets, organization, err := resolveTargets(client, opts.Repository)
+	targets, organization, err := resolveTargets(client, opts)
 	if err != nil {
 		return err
 	}
 
-	jwt, err := resolveWebJWT(opts)
-	if err != nil {
-		return err
-	}
 	client.SetToken(jwt, "web-jwt")
 
 	states, err := readStates(client, targets)
@@ -184,25 +204,23 @@ func settingRun(opts *SettingOptions) error {
 		return err
 	}
 
-	summary := buildSummary(action, organization, states, desired)
 	changed := countChanged(states, desired)
 	writePreview(opts.IO, action, states, desired, changed)
 	if err := confirmSettingChange(opts); err != nil {
 		return err
 	}
-	if changed == 0 {
-		return writeSummary(opts, summary)
-	}
-	if err := updateStates(client, states, desired, action); err != nil {
+
+	failures := applyStates(client, states, desired, action)
+	summary := buildSummary(action, organization, states, desired)
+	if err := writeSummary(opts, summary); err != nil {
 		return err
 	}
-
-	for i := range summary.Repositories {
-		if summary.Repositories[i].PreviousActionEnabled != desired {
-			summary.Repositories[i].Status = "updated"
-		}
+	if failures > 0 {
+		writeFailureDetails(opts.IO, states)
+		return cmdutil.NewCLIError(cmdutil.ExitError,
+			fmt.Sprintf("failed to %s Actions for %d of %d repositories; see the per-repository status above", action, failures, len(states)), nil)
 	}
-	return writeSummary(opts, summary)
+	return nil
 }
 
 // resolveWebJWT obtains the web session JWT required by the Actions setting
@@ -325,7 +343,7 @@ func readStates(client *api.Client, targets []repositoryTarget) ([]repositorySta
 		if setting.ActionEnabled == nil {
 			return nil, fmt.Errorf("Actions permission for %s does not contain action_enabled", target.Name)
 		}
-		states = append(states, repositoryState{target: target, setting: setting})
+		states = append(states, repositoryState{target: target, setting: setting, previous: *setting.ActionEnabled})
 	}
 	return states, nil
 }
@@ -340,23 +358,54 @@ func confirmSettingChange(opts *SettingOptions) error {
 	})
 }
 
-func updateStates(client *api.Client, states []repositoryState, desired bool, action string) error {
+// applyStates updates every state that is not already at the desired value. A
+// failure is recorded on the state and the loop continues, so a batch run still
+// reports the outcome of every repository instead of stopping at the first
+// error; already applied changes are kept. The failure count drives the exit
+// code.
+func applyStates(client *api.Client, states []repositoryState, desired bool, action string) int {
+	failures := 0
 	for i := range states {
 		if *states[i].setting.ActionEnabled == desired {
+			states[i].status = statusUnchanged
 			continue
 		}
+		previous := *states[i].setting.ActionEnabled
 		updated := desired
 		states[i].setting.ActionEnabled = &updated
 		if err := api.UpdateActionsSetting(client, states[i].target.ProjectID, states[i].setting); err != nil {
-			return fmt.Errorf("failed to %s Actions for %s: %w", action, states[i].target.Name, err)
+			states[i].setting.ActionEnabled = &previous
+			states[i].status = statusFailed
+			states[i].err = fmt.Errorf("failed to %s Actions for %s: %w", action, states[i].target.Name, err)
+			failures++
+			continue
 		}
+		states[i].status = statusUpdated
 	}
-	return nil
+	return failures
 }
 
-func validateTarget(repository string) error {
-	if strings.TrimSpace(repository) == "" {
-		return cmdutil.NewUsageError("-R/--repo is required (owner/repo or organization)")
+func validateTarget(opts *SettingOptions) error {
+	repository := strings.TrimSpace(opts.Repository)
+	organization := strings.TrimSpace(opts.Org)
+	switch {
+	case repository == "" && organization == "":
+		return cmdutil.NewUsageError("either -R/--repo (owner/repo) or --org (organization) is required")
+	case repository != "" && organization != "":
+		return cmdutil.NewUsageError("-R/--repo and --org are mutually exclusive")
+	case organization != "":
+		if strings.Contains(organization, "/") {
+			return cmdutil.NewUsageError("--org takes an organization name without '/'")
+		}
+		return nil
+	}
+
+	owner, name, err := cmdutil.ParseRepo(repository)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {
+		return cmdutil.NewUsageError(fmt.Sprintf("invalid repository %q: expected owner/repo with both segments non-empty", repository))
 	}
 	return nil
 }
@@ -372,46 +421,51 @@ func actionEnabledValue(action string) (bool, error) {
 	}
 }
 
-func resolveTargets(client *api.Client, repository string) ([]repositoryTarget, string, error) {
-	repository = strings.TrimSpace(repository)
-	if strings.Contains(repository, "/") {
-		owner, name, err := cmdutil.ParseRepo(repository)
+func resolveTargets(client *api.Client, opts *SettingOptions) ([]repositoryTarget, string, error) {
+	organization := strings.TrimSpace(opts.Org)
+	if organization != "" {
+		repositories, err := listAllOrganizationRepositories(client, organization)
 		if err != nil {
 			return nil, "", err
 		}
-		repo, err := api.GetRepo(client, owner, name)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to read repository %s/%s: %w", owner, name, err)
+		targets := make([]repositoryTarget, 0, len(repositories))
+		for _, repo := range repositories {
+			projectID, err := projectIDFromRepository(&repo)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to determine project id for %s: %w", repositoryDisplayName(organization, repo), err)
+			}
+			targets = append(targets, repositoryTarget{
+				Name:      repositoryDisplayName(organization, repo),
+				ProjectID: projectID,
+			})
 		}
-		projectID, err := projectIDFromRepository(repo)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to determine project id for %s/%s: %w", owner, name, err)
-		}
-		return []repositoryTarget{{Name: owner + "/" + name, ProjectID: projectID}}, "", nil
+		return targets, organization, nil
 	}
 
-	organization := repository
-	repositories, err := listAllOrganizationRepositories(client, organization)
+	owner, name, err := cmdutil.ParseRepo(strings.TrimSpace(opts.Repository))
 	if err != nil {
 		return nil, "", err
 	}
-	targets := make([]repositoryTarget, 0, len(repositories))
-	for _, repo := range repositories {
-		projectID, err := projectIDFromRepository(&repo)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to determine project id for %s: %w", repositoryDisplayName(organization, repo), err)
-		}
-		targets = append(targets, repositoryTarget{
-			Name:      repositoryDisplayName(organization, repo),
-			ProjectID: projectID,
-		})
+	repo, err := api.GetRepo(client, owner, name)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read repository %s/%s: %w", owner, name, err)
 	}
-	return targets, organization, nil
+	projectID, err := projectIDFromRepository(repo)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to determine project id for %s/%s: %w", owner, name, err)
+	}
+	return []repositoryTarget{{Name: owner + "/" + name, ProjectID: projectID}}, "", nil
 }
 
+// listAllOrganizationRepositories lists every repository in an organization.
+//
+// Pagination stops on the first empty page rather than the first short page: a
+// server that clamps per_page below the requested size would otherwise make the
+// first page look like the last one and silently drop repositories. The page
+// cap guards against a server that keeps returning entries forever.
 func listAllOrganizationRepositories(client *api.Client, organization string) ([]api.Repository, error) {
-	var repositories []api.Repository
-	for page := 1; ; page++ {
+	repositories := make([]api.Repository, 0)
+	for page := 1; page <= organizationRepoMaxPages; page++ {
 		pageRepos, err := api.ListOrgRepos(client, organization, &api.RepoListOptions{
 			Page:    page,
 			PerPage: organizationRepoPageSize,
@@ -419,11 +473,12 @@ func listAllOrganizationRepositories(client *api.Client, organization string) ([
 		if err != nil {
 			return nil, fmt.Errorf("failed to list repositories for organization %s: %w", organization, err)
 		}
-		repositories = append(repositories, pageRepos...)
-		if len(pageRepos) < organizationRepoPageSize {
+		if len(pageRepos) == 0 {
 			return repositories, nil
 		}
+		repositories = append(repositories, pageRepos...)
 	}
+	return nil, fmt.Errorf("failed to list repositories for organization %s: exceeded %d pages", organization, organizationRepoMaxPages)
 }
 
 func projectIDFromRepository(repository *api.Repository) (string, error) {
@@ -473,16 +528,15 @@ func countChanged(states []repositoryState, desired bool) int {
 func buildSummary(action, organization string, states []repositoryState, desired bool) SettingSummary {
 	repositories := make([]SettingResult, 0, len(states))
 	for _, state := range states {
-		previous := *state.setting.ActionEnabled
-		status := "unchanged"
-		if previous != desired {
-			status = "pending"
+		status := state.status
+		if status == "" {
+			status = statusUnchanged
 		}
 		repositories = append(repositories, SettingResult{
 			Repository:            state.target.Name,
 			ProjectID:             state.target.ProjectID,
-			PreviousActionEnabled: previous,
-			ActionEnabled:         desired,
+			PreviousActionEnabled: state.previous,
+			ActionEnabled:         *state.setting.ActionEnabled,
 			Status:                status,
 		})
 	}
@@ -523,10 +577,26 @@ func writeSummary(opts *SettingOptions, summary SettingSummary) error {
 	}
 	updated := 0
 	for _, repository := range summary.Repositories {
-		if repository.Status == "updated" {
+		if repository.Status == statusUpdated {
 			updated++
 		}
 	}
 	fmt.Fprintf(opts.IO.Out, "Actions %sd for %d/%d repositories\n", summary.Action, updated, len(summary.Repositories))
+	for _, repository := range summary.Repositories {
+		fmt.Fprintf(opts.IO.Out, "  %s: %s\n", repository.Repository, repository.Status)
+	}
 	return nil
+}
+
+// writeFailureDetails reports why each repository failed on stderr so a batch
+// run leaves an actionable trace for every repository.
+func writeFailureDetails(ioStreams *iostreams.IOStreams, states []repositoryState) {
+	if ioStreams == nil {
+		return
+	}
+	for _, state := range states {
+		if state.err != nil {
+			fmt.Fprintln(ioStreams.ErrOut, state.err)
+		}
+	}
 }

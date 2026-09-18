@@ -149,7 +149,11 @@ func TestSettingRunOrganizationUpdatesOnlyChangedRepositories(t *testing.T) {
 		return testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v5/orgs/acme/repos":
-				writeJSON(w, `[{"id":101,"name":"first","full_name":"acme/first"},{"id":102,"name":"second","full_name":"acme/second"}]`)
+				if r.URL.Query().Get("page") == "1" {
+					writeJSON(w, `[{"id":101,"name":"first","full_name":"acme/first"},{"id":102,"name":"second","full_name":"acme/second"}]`)
+					return
+				}
+				writeJSON(w, `[]`)
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/101/actions/setting":
 				writeJSON(w, `{"action_enabled":true,"block_all_new_pipelines":false}`)
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/102/actions/setting":
@@ -166,7 +170,7 @@ func TestSettingRunOrganizationUpdatesOnlyChangedRepositories(t *testing.T) {
 	err := settingRun(&SettingOptions{
 		IO:         ioStreams,
 		HttpClient: clientFactory,
-		Repository: "acme",
+		Org:        "acme",
 		Action:     "enable",
 		WithToken:  true,
 	})
@@ -392,7 +396,7 @@ func TestNewCmdSettingParsesWithTokenFlag(t *testing.T) {
 		opts = received
 		return nil
 	})
-	cmd.SetArgs([]string{"enable", "-R", "acme", "--with-token"})
+	cmd.SetArgs([]string{"enable", "-R", "owner/repo", "--with-token"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -411,18 +415,71 @@ func TestNewCmdSettingRequiresOneTarget(t *testing.T) {
 	}
 }
 
-func TestNewCmdSettingAcceptsOrganizationWithRepositoryFlag(t *testing.T) {
-	var gotTarget string
+func TestNewCmdSettingAcceptsOrganizationFlag(t *testing.T) {
+	var gotOrg string
 	cmd := NewCmdSetting(cmdutil.TestFactory(), func(opts *SettingOptions) error {
-		gotTarget = opts.Repository
+		gotOrg = opts.Org
 		return nil
 	})
-	cmd.SetArgs([]string{"enable", "-R", "acme"})
+	cmd.SetArgs([]string{"enable", "--org", "acme"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if gotTarget != "acme" {
-		t.Fatalf("repository target = %q, want organization target", gotTarget)
+	if gotOrg != "acme" {
+		t.Fatalf("organization target = %q, want acme", gotOrg)
+	}
+}
+
+func TestNewCmdSettingRejectsOrganizationInRepoFlag(t *testing.T) {
+	cmd := NewCmdSetting(cmdutil.TestFactory(), func(opts *SettingOptions) error {
+		return nil
+	})
+	cmd.SetArgs([]string{"enable", "-R", "acme"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "invalid repository format") {
+		t.Fatalf("Execute() error = %v, want -R to reject a bare organization name", err)
+	}
+}
+
+func TestNewCmdSettingRejectsRepoAndOrgTogether(t *testing.T) {
+	cmd := NewCmdSetting(cmdutil.TestFactory(), func(opts *SettingOptions) error {
+		return nil
+	})
+	cmd.SetArgs([]string{"enable", "-R", "owner/repo", "--org", "acme"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("Execute() error = %v, want mutual exclusion error", err)
+	}
+}
+
+func TestValidateTarget(t *testing.T) {
+	cases := []struct {
+		name    string
+		repo    string
+		org     string
+		wantErr string
+	}{
+		{name: "repository", repo: "owner/repo"},
+		{name: "organization", org: "acme"},
+		{name: "missing target", wantErr: "-R/--repo"},
+		{name: "both targets", repo: "owner/repo", org: "acme", wantErr: "mutually exclusive"},
+		{name: "organization with slash", org: "acme/team", wantErr: "without '/'"},
+		{name: "empty owner", repo: "/repo", wantErr: "both segments non-empty"},
+		{name: "empty name", repo: "owner/", wantErr: "both segments non-empty"},
+		{name: "only slash", repo: "/", wantErr: "both segments non-empty"},
+		{name: "bare name", repo: "acme", wantErr: "invalid repository format"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateTarget(&SettingOptions{Repository: testCase.repo, Org: testCase.org})
+			if testCase.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateTarget() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {
+				t.Fatalf("validateTarget() error = %v, want error containing %q", err, testCase.wantErr)
+			}
+		})
 	}
 }
 
@@ -435,11 +492,14 @@ func TestListAllOrganizationRepositoriesPaginates(t *testing.T) {
 	var paths []string
 	client := api.NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.RequestURI())
-		if r.URL.Query().Get("page") == "1" {
+		switch r.URL.Query().Get("page") {
+		case "1":
 			writeJSONValue(w, firstPage)
-			return
+		case "2":
+			writeJSONValue(w, secondPage)
+		default:
+			writeJSONValue(w, []api.Repository{})
 		}
-		writeJSONValue(w, secondPage)
 	})))
 
 	repositories, err := listAllOrganizationRepositories(client, "acme")
@@ -449,8 +509,170 @@ func TestListAllOrganizationRepositoriesPaginates(t *testing.T) {
 	if len(repositories) != 101 {
 		t.Fatalf("repository count = %d, want 101", len(repositories))
 	}
-	if len(paths) != 2 || !strings.Contains(paths[0], "page=1") || !strings.Contains(paths[1], "page=2") {
-		t.Fatalf("paths = %v, want pages 1 and 2", paths)
+	if len(paths) != 3 || !strings.Contains(paths[0], "page=1") || !strings.Contains(paths[1], "page=2") || !strings.Contains(paths[2], "page=3") {
+		t.Fatalf("paths = %v, want pages 1 to 3", paths)
+	}
+}
+
+// TestListAllOrganizationRepositoriesContinuesPastShortPage covers a server
+// that clamps per_page below the requested size: a short first page must not be
+// mistaken for the last page.
+func TestListAllOrganizationRepositoriesContinuesPastShortPage(t *testing.T) {
+	var pages []string
+	client := api.NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		switch page {
+		case "1":
+			writeJSONValue(w, []api.Repository{{ID: 1}, {ID: 2}})
+		case "2":
+			writeJSONValue(w, []api.Repository{{ID: 3}})
+		default:
+			writeJSONValue(w, []api.Repository{})
+		}
+	})))
+
+	repositories, err := listAllOrganizationRepositories(client, "acme")
+	if err != nil {
+		t.Fatalf("listAllOrganizationRepositories() error = %v", err)
+	}
+	if len(repositories) != 3 {
+		t.Fatalf("repository count = %d, want 3", len(repositories))
+	}
+	if len(pages) != 3 {
+		t.Fatalf("pages = %v, want the listing to continue past the short first page", pages)
+	}
+}
+
+// TestListAllOrganizationRepositoriesCapsPages guards against a server that
+// keeps returning non-empty pages forever.
+func TestListAllOrganizationRepositoriesCapsPages(t *testing.T) {
+	client := api.NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONValue(w, []api.Repository{{ID: 1}})
+	})))
+
+	_, err := listAllOrganizationRepositories(client, "acme")
+	if err == nil || !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("listAllOrganizationRepositories() error = %v, want page cap error", err)
+	}
+}
+
+// TestSettingRunEmitsJSONSummaryToStdout asserts the machine contract of
+// --json: stdout carries only the structured summary, while the preview and the
+// confirmation prompt stay on stderr.
+func TestSettingRunEmitsJSONSummaryToStdout(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, in, out, errOut := iostreams.TestTTY()
+	_, _ = in.WriteString(futureWebJWT(t) + "\n")
+	_, _ = in.WriteString("y\n")
+
+	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v5/repos/owner/repo":
+			writeJSON(w, `{"id":"project-1"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/project-1/actions/setting":
+			writeJSON(w, `{"action_enabled":false,"block_all_new_pipelines":true}`)
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	err := settingRun(&SettingOptions{
+		IO:         ioStreams,
+		HttpClient: clientFactory,
+		Repository: "owner/repo",
+		Action:     "enable",
+		WithToken:  true,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("settingRun() error = %v", err)
+	}
+
+	var summary SettingSummary
+	if err := json.Unmarshal(out.Bytes(), &summary); err != nil {
+		t.Fatalf("stdout is not a single JSON document: %v\nstdout = %q", err, out.String())
+	}
+	if summary.Action != "enable" || !summary.ActionEnabled || summary.Organization != "" {
+		t.Fatalf("summary = %#v, want enable with no organization", summary)
+	}
+	if len(summary.Repositories) != 1 {
+		t.Fatalf("repositories = %#v, want exactly one entry", summary.Repositories)
+	}
+	got := summary.Repositories[0]
+	if got.Repository != "owner/repo" || got.ProjectID != "project-1" || got.Status != statusUpdated ||
+		got.PreviousActionEnabled || !got.ActionEnabled {
+		t.Fatalf("repository result = %#v, want an updated owner/repo entry", got)
+	}
+	if strings.Contains(out.String(), "Actions will be") || strings.Contains(out.String(), "Warning") {
+		t.Fatalf("stdout leaked prompt/preview text: %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "Actions will be enabled for 1 of 1 repositories:") ||
+		!strings.Contains(errOut.String(), "! Type y to confirm:") {
+		t.Fatalf("stderr = %q, want preview and confirmation prompt", errOut.String())
+	}
+}
+
+// TestSettingRunReportsPartialFailure covers a batch run where one repository
+// fails: every repository result is reported, changes already applied are kept,
+// and the exit code reflects the partial failure.
+func TestSettingRunReportsPartialFailure(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, in, out, errOut := iostreams.TestTTY()
+	_, _ = in.WriteString(futureWebJWT(t) + "\n")
+	_, _ = in.WriteString("y\n")
+
+	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v5/orgs/acme/repos":
+			if r.URL.Query().Get("page") == "1" {
+				writeJSON(w, `[{"id":101,"name":"first","full_name":"acme/first"},{"id":102,"name":"second","full_name":"acme/second"}]`)
+				return
+			}
+			writeJSON(w, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/101/actions/setting":
+			writeJSON(w, `{"action_enabled":false}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/102/actions/setting":
+			writeJSON(w, `{"action_enabled":false}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v2/projects/101/actions/setting":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v2/projects/102/actions/setting":
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	err := settingRun(&SettingOptions{
+		IO:         ioStreams,
+		HttpClient: clientFactory,
+		Org:        "acme",
+		Action:     "enable",
+		WithToken:  true,
+		JSON:       true,
+	})
+	if err == nil {
+		t.Fatal("settingRun() error = nil, want a partial failure error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d (ExitError)", cmdutil.ExitCode(err), cmdutil.ExitError)
+	}
+
+	var summary SettingSummary
+	if jsonErr := json.Unmarshal(out.Bytes(), &summary); jsonErr != nil {
+		t.Fatalf("stdout is not a single JSON document: %v\nstdout = %q", jsonErr, out.String())
+	}
+	statuses := map[string]string{}
+	for _, repository := range summary.Repositories {
+		statuses[repository.Repository] = repository.Status
+	}
+	if statuses["acme/first"] != statusUpdated || statuses["acme/second"] != statusFailed {
+		t.Fatalf("statuses = %v, want acme/first updated and acme/second failed", statuses)
+	}
+	if !strings.Contains(errOut.String(), "acme/second") {
+		t.Fatalf("stderr = %q, want the failing repository detail", errOut.String())
 	}
 }
 
