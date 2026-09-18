@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 	"gitcode.com/gitcode-cli/cli/pkg/output"
@@ -444,5 +445,74 @@ func TestListRunContentPaginationUsesServerMetadata(t *testing.T) {
 	}
 	if len(entries) != 3 || entries[2]["name"] != "p3" {
 		t.Fatalf("entries = %v, want three entries including p3", entries)
+	}
+}
+
+func paginationEntries(count int) []json.RawMessage {
+	entries := make([]json.RawMessage, 0, count)
+	for i := 0; i < count; i++ {
+		entries = append(entries, json.RawMessage(`{"name":"p"}`))
+	}
+	return entries
+}
+
+func TestShouldStopPagination(t *testing.T) {
+	tests := []struct {
+		name             string
+		page             int
+		response         *api.ActionsPluginsPage
+		requestedPerPage int
+		want             bool
+	}{
+		{
+			name:             "server page count reached",
+			page:             2,
+			response:         &api.ActionsPluginsPage{PageCount: 2},
+			requestedPerPage: 100,
+			want:             true,
+		},
+		{
+			name:             "server page count not reached",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageCount: 3},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "server page size wins over requested per page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageSize: 50, Entries: paginationEntries(50)},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "server page size stops on short page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageSize: 50, Entries: paginationEntries(49)},
+			requestedPerPage: 100,
+			want:             true,
+		},
+		{
+			name:             "requested per page used when server omits metadata",
+			page:             1,
+			response:         &api.ActionsPluginsPage{Entries: paginationEntries(100)},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "requested per page stops on short page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{Entries: paginationEntries(30)},
+			requestedPerPage: 100,
+			want:             true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldStopPagination(tt.page, tt.response, tt.requestedPerPage); got != tt.want {
+				t.Fatalf("shouldStopPagination() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

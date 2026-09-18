@@ -257,6 +257,29 @@ func TestParseActionsPluginsPageContentMetadata(t *testing.T) {
 	}
 }
 
+func TestParseActionsPluginsPageNullWrappers(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "null content only", raw: `{"page_num":1,"page_size":50,"total":0,"page_count":0,"content":null}`, want: 0},
+		{name: "null content keeps probing", raw: `{"content":null,"plugins":[{"name":"a"}]}`, want: 1},
+		{name: "all wrappers null", raw: `{"content":null,"plugins":null,"list":null,"data":null}`, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, err := ParseActionsPluginsPage([]byte(tt.raw))
+			if err != nil {
+				t.Fatalf("ParseActionsPluginsPage() error = %v", err)
+			}
+			if len(page.Entries) != tt.want {
+				t.Fatalf("entries = %d, want %d", len(page.Entries), tt.want)
+			}
+		})
+	}
+}
+
 func TestParseActionsPluginsListInvalid(t *testing.T) {
 	_, err := ParseActionsPluginsList([]byte(`{invalid json`))
 	if err == nil {

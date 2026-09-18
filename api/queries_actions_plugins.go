@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -157,20 +158,34 @@ func ParseActionsPluginsPage(raw []byte) (*ActionsPluginsPage, error) {
 	}, nil
 }
 
+// parsePluginListField returns the entries of the first recognized wrapper
+// field that carries a list. A recognized field whose value is null is skipped
+// instead of ending the probe, so a null wrapper cannot mask entries held by
+// another field; a response whose recognized fields are all null is treated as
+// a legitimately empty page. A response without any recognized field is an
+// error, never a silent empty list.
 func parsePluginListField(fields map[string]json.RawMessage) ([]json.RawMessage, error) {
+	recognized := false
 	for _, field := range []string{"content", "plugins", "list", "data"} {
 		raw, ok := fields[field]
 		if !ok {
 			continue
 		}
-		if string(raw) == "null" {
-			return []json.RawMessage{}, nil
+		recognized = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
 		}
 		var entries []json.RawMessage
 		if err := json.Unmarshal(raw, &entries); err != nil {
 			return nil, fmt.Errorf("failed to parse plugins list response field %s: %w", field, err)
 		}
+		if entries == nil {
+			entries = []json.RawMessage{}
+		}
 		return entries, nil
+	}
+	if recognized {
+		return []json.RawMessage{}, nil
 	}
 	return nil, fmt.Errorf("failed to parse plugins list response: missing plugin list field")
 }
