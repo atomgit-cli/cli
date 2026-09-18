@@ -176,9 +176,11 @@ func fetchPlugins(client *api.Client, project string, opts *ListOptions) ([]json
 	return fetchAllPlugins(client, project, opts)
 }
 
+// fetchPluginsPage fetches exactly one page of plugins (selected by
+// opts.Page) and applies the command's limit/trim options to the result.
 func fetchPluginsPage(client *api.Client, project string, opts *ListOptions) ([]json.RawMessage, error) {
 	perPage := resolvePerPage(opts)
-	page, err := fetchPluginPage(client, project, opts.Page, perPage)
+	page, err := requestPluginsAPIPage(client, project, opts.Page, perPage)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +194,7 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 	}
 	var all []json.RawMessage
 	for page := 1; ; page++ {
-		response, err := fetchPluginPage(client, project, page, perPage)
+		response, err := requestPluginsAPIPage(client, project, page, perPage)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +209,10 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 	return trimEntries(all, opts), nil
 }
 
-func fetchPluginPage(client *api.Client, project string, page, perPage int) (*api.ActionsPluginsPage, error) {
+// requestPluginsAPIPage performs one raw API page request and parses the
+// paginated envelope. Unlike fetchPluginsPage it neither trims nor applies
+// the command's limit options, so pagination can inspect the server metadata.
+func requestPluginsAPIPage(client *api.Client, project string, page, perPage int) (*api.ActionsPluginsPage, error) {
 	raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
 		PerPage: perPage,
 		Page:    page,

@@ -448,6 +448,82 @@ func TestListRunContentPaginationUsesServerMetadata(t *testing.T) {
 	}
 }
 
+// TestListRunPaginationErrorPropagates covers the fetchAllPlugins error path:
+// an API failure on a later page must surface as an error instead of silently
+// returning the partial result already collected.
+func TestListRunPaginationErrorPropagates(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	page1 := `{"page_num":1,"page_size":1,"total":2,"page_count":2,"content":[{"name":"p1"}]}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					parsed, _ := url.Parse(req.URL.String())
+					if parsed.Query().Get("page") == "2" {
+						return listTestResponse(http.StatusInternalServerError, `{"message":"boom"}`), nil
+					}
+					return listTestResponse(http.StatusOK, page1), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      0,
+	}
+
+	err := listRun(opts)
+	if err == nil {
+		t.Fatal("expected error when a later page fails")
+	}
+	if !strings.Contains(err.Error(), "failed to list actions plugins") {
+		t.Fatalf("error = %v, want it to wrap 'failed to list actions plugins'", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2 (page 1 then the failing page 2)", callCount)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want no partial output on error", stdout.String())
+	}
+}
+
+// TestListRunNullContentFallsBackToPluginsWrapper covers a multi-wrapper
+// response whose first recognized field is null: the null wrapper must not
+// mask entries held by a later field.
+func TestListRunNullContentFallsBackToPluginsWrapper(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	response := `{"page_num":1,"page_size":1,"total":1,"page_count":1,"content":null,"plugins":[{"name":"checkout"}],"list":null,"data":null}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					return listTestResponse(http.StatusOK, response), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      0,
+	}
+
+	if err := listRun(opts); err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("callCount = %d, want 1 (page_count=1 stops pagination)", callCount)
+	}
+	if !strings.Contains(stdout.String(), "checkout") {
+		t.Fatalf("stdout = %q, want the entry from the plugins wrapper", stdout.String())
+	}
+}
+
 func paginationEntries(count int) []json.RawMessage {
 	entries := make([]json.RawMessage, 0, count)
 	for i := 0; i < count; i++ {
