@@ -10,7 +10,7 @@
 
 ## 1. 安装 GitCode CLI
 
-主渠道建议：已安装 Node.js/npm 的 Windows、Linux、macOS 与 AI 环境优先使用 npm bootstrap；没有 Node.js 时再使用 Homebrew、DEB/RPM，wheel 只放入 pipx/venv。不要让多个全局渠道同时争用 `gc` / `gitcode`。
+主渠道建议：已安装 Node.js/npm 的 Windows、Linux、macOS、OpenHarmony（arm64）与 AI 环境优先使用 npm bootstrap；没有 Node.js 时再使用 Homebrew、DEB/RPM，wheel 只放入 pipx/venv。不要让多个全局渠道同时争用 `gc` / `gitcode`。
 
 **npm（Windows 和跨平台 Node 环境推荐）:**
 

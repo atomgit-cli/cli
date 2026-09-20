@@ -38,6 +38,7 @@ test("isSupported returns true for shipped combos and false otherwise", () => {
   assert.strictEqual(isSupported("linux", "ia32"), false);
   assert.strictEqual(isSupported("linux", "arm"), false);
   assert.strictEqual(isSupported("win32", "arm64"), false);
+  assert.strictEqual(isSupported("openharmony", "x64"), false);
 });
 
 test("arch map normalizes x64 to amd64", () => {
