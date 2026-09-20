@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 	"gitcode.com/gitcode-cli/cli/pkg/output"
@@ -403,5 +404,258 @@ func TestListRunPaginationLimit(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "p1") || !strings.Contains(out, "p3") {
 		t.Fatalf("stdout = %q, want p1 and p3", out)
+	}
+}
+
+func TestListRunContentPaginationUsesServerMetadata(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	page1 := `{"page_num":1,"page_size":2,"total":3,"page_count":2,"content":[{"name":"p1"},{"name":"p2"}]}`
+	page2 := `{"page_num":2,"page_size":2,"total":3,"page_count":2,"content":[{"name":"p3"}]}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					parsed, _ := url.Parse(req.URL.String())
+					if parsed.Query().Get("page") == "2" {
+						return listTestResponse(http.StatusOK, page2), nil
+					}
+					return listTestResponse(http.StatusOK, page1), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		JSON:       true,
+	}
+
+	if err := listRun(opts); err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &entries); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2", callCount)
+	}
+	if len(entries) != 3 || entries[2]["name"] != "p3" {
+		t.Fatalf("entries = %v, want three entries including p3", entries)
+	}
+}
+
+// TestListRunPaginationErrorPropagates covers the fetchAllPlugins error path:
+// an API failure on a later page must surface as an error instead of silently
+// returning the partial result already collected.
+func TestListRunPaginationErrorPropagates(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	page1 := `{"page_num":1,"page_size":1,"total":2,"page_count":2,"content":[{"name":"p1"}]}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					parsed, _ := url.Parse(req.URL.String())
+					if parsed.Query().Get("page") == "2" {
+						return listTestResponse(http.StatusInternalServerError, `{"message":"boom"}`), nil
+					}
+					return listTestResponse(http.StatusOK, page1), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      0,
+	}
+
+	err := listRun(opts)
+	if err == nil {
+		t.Fatal("expected error when a later page fails")
+	}
+	if !strings.Contains(err.Error(), "failed to list actions plugins") {
+		t.Fatalf("error = %v, want it to wrap 'failed to list actions plugins'", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2 (page 1 then the failing page 2)", callCount)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want no partial output on error", stdout.String())
+	}
+}
+
+// TestListRunNullContentFallsBackToPluginsWrapper covers a multi-wrapper
+// response whose first recognized field is null: the null wrapper must not
+// mask entries held by a later field.
+func TestListRunNullContentFallsBackToPluginsWrapper(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	response := `{"page_num":1,"page_size":1,"total":1,"page_count":1,"content":null,"plugins":[{"name":"checkout"}],"list":null,"data":null}`
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					return listTestResponse(http.StatusOK, response), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      0,
+	}
+
+	if err := listRun(opts); err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("callCount = %d, want 1 (page_count=1 stops pagination)", callCount)
+	}
+	if !strings.Contains(stdout.String(), "checkout") {
+		t.Fatalf("stdout = %q, want the entry from the plugins wrapper", stdout.String())
+	}
+}
+
+// TestListRunPaginationPageCapIsEnforced covers the bound on automatic
+// pagination: a server that keeps returning full pages without a page count
+// must not make the command loop forever.
+func TestListRunPaginationPageCapIsEnforced(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					// Every page is full and carries no page_count, so only the cap
+					// can end the loop.
+					return listTestResponse(http.StatusOK, `{"page_size":1,"content":[{"name":"p"}]}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		PerPage:    1,
+		PerPageSet: true,
+	}
+
+	err := listRun(opts)
+	if err == nil {
+		t.Fatal("expected an error when pagination exceeds the page cap")
+	}
+	if !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("error = %v, want it to report the exceeded page cap", err)
+	}
+	if callCount != pluginListMaxPages {
+		t.Fatalf("callCount = %d, want %d (the cap)", callCount, pluginListMaxPages)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want no partial output on error", stdout.String())
+	}
+}
+
+func TestTrimEntriesTrimsToLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []json.RawMessage
+		limit   int
+		want    int
+	}{
+		{name: "last page overshoots the limit", entries: paginationEntries(4), limit: 3, want: 3},
+		{name: "exactly the limit", entries: paginationEntries(3), limit: 3, want: 3},
+		{name: "under the limit", entries: paginationEntries(2), limit: 3, want: 2},
+		{name: "no limit keeps every entry", entries: paginationEntries(4), limit: 0, want: 4},
+		{name: "nil entries become an empty list", entries: nil, limit: 5, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimEntries(tt.entries, &ListOptions{Limit: tt.limit})
+			if len(got) != tt.want {
+				t.Fatalf("len = %d, want %d", len(got), tt.want)
+			}
+			if got == nil {
+				t.Fatal("trimEntries() returned nil, want a non-nil slice")
+			}
+		})
+	}
+}
+
+func paginationEntries(count int) []json.RawMessage {
+	entries := make([]json.RawMessage, 0, count)
+	for i := 0; i < count; i++ {
+		entries = append(entries, json.RawMessage(`{"name":"p"}`))
+	}
+	return entries
+}
+
+func TestShouldStopPagination(t *testing.T) {
+	tests := []struct {
+		name             string
+		page             int
+		response         *api.ActionsPluginsPage
+		requestedPerPage int
+		want             bool
+	}{
+		{
+			name:             "server page count reached",
+			page:             2,
+			response:         &api.ActionsPluginsPage{PageCount: 2},
+			requestedPerPage: 100,
+			want:             true,
+		},
+		{
+			name:             "server page count not reached",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageCount: 3},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "server page size wins over requested per page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageSize: 50, Entries: paginationEntries(50)},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "server page size stops on short page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{PageSize: 50, Entries: paginationEntries(49)},
+			requestedPerPage: 100,
+			want:             true,
+		},
+		{
+			name:             "requested per page used when server omits metadata",
+			page:             1,
+			response:         &api.ActionsPluginsPage{Entries: paginationEntries(100)},
+			requestedPerPage: 100,
+			want:             false,
+		},
+		{
+			name:             "requested per page stops on short page",
+			page:             1,
+			response:         &api.ActionsPluginsPage{Entries: paginationEntries(30)},
+			requestedPerPage: 100,
+			want:             true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldStopPagination(tt.page, tt.response, tt.requestedPerPage); got != tt.want {
+				t.Fatalf("shouldStopPagination() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

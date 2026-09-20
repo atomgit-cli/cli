@@ -219,6 +219,7 @@ func TestParseActionsPluginsListWrapper(t *testing.T) {
 		{name: "plugins wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
 		{name: "list wrapper", raw: `{"list":[{"name":"b"}]}`, want: 1},
 		{name: "data wrapper", raw: `{"data":[{"name":"c"}]}`, want: 1},
+		{name: "content wrapper", raw: `{"content":[{"name":"d"}]}`, want: 1},
 		{name: "empty array", raw: `[]`, want: 0},
 		{name: "empty wrapper", raw: `{"plugins":[]}`, want: 0},
 	}
@@ -236,12 +237,59 @@ func TestParseActionsPluginsListWrapper(t *testing.T) {
 }
 
 func TestParseActionsPluginsListUnrecognized(t *testing.T) {
-	plugins, err := ParseActionsPluginsList([]byte(`{"unrelated":"field"}`))
-	if err != nil {
-		t.Fatalf("ParseActionsPluginsList() error = %v", err)
+	_, err := ParseActionsPluginsList([]byte(`{"unrelated":"field"}`))
+	if err == nil {
+		t.Fatal("expected an error for an unrecognized response object")
 	}
-	if len(plugins) != 0 {
-		t.Fatalf("len = %d, want 0", len(plugins))
+}
+
+// TestParseActionsPluginsPageRejectsNonArrayField pins the error branch for a
+// recognized wrapper field whose value is not an array: it must be reported
+// rather than silently flattened into an empty list.
+func TestParseActionsPluginsPageRejectsNonArrayField(t *testing.T) {
+	_, err := ParseActionsPluginsPage([]byte(`{"page_num":1,"page_size":10,"content":{"a":1}}`))
+	if err == nil {
+		t.Fatal("expected an error for a recognized field that is not an array")
+	}
+	if !strings.Contains(err.Error(), "content") {
+		t.Fatalf("error = %v, want it to name the offending field", err)
+	}
+}
+
+func TestParseActionsPluginsPageContentMetadata(t *testing.T) {
+	raw := []byte(`{"page_num":2,"page_size":50,"total":51,"page_count":2,"content":[{"name":"official_shell"}]}`)
+	page, err := ParseActionsPluginsPage(raw)
+	if err != nil {
+		t.Fatalf("ParseActionsPluginsPage() error = %v", err)
+	}
+	if page.PageNum != 2 || page.PageSize != 50 || page.Total != 51 || page.PageCount != 2 {
+		t.Fatalf("metadata = %+v, want page 2/50 total 51 count 2", page)
+	}
+	if len(page.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(page.Entries))
+	}
+}
+
+func TestParseActionsPluginsPageNullWrappers(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "null content only", raw: `{"page_num":1,"page_size":50,"total":0,"page_count":0,"content":null}`, want: 0},
+		{name: "null content keeps probing", raw: `{"content":null,"plugins":[{"name":"a"}]}`, want: 1},
+		{name: "all wrappers null", raw: `{"content":null,"plugins":null,"list":null,"data":null}`, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, err := ParseActionsPluginsPage([]byte(tt.raw))
+			if err != nil {
+				t.Fatalf("ParseActionsPluginsPage() error = %v", err)
+			}
+			if len(page.Entries) != tt.want {
+				t.Fatalf("entries = %d, want %d", len(page.Entries), tt.want)
+			}
+		})
 	}
 }
 
@@ -279,6 +327,7 @@ func TestCountPluginsEntries(t *testing.T) {
 		{name: "plain array 3", raw: `[{"name":"a"},{"name":"b"},{"name":"c"}]`, want: 3},
 		{name: "empty", raw: `[]`, want: 0},
 		{name: "wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
+		{name: "content wrapper", raw: `{"content":[{"name":"a"}]}`, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

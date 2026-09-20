@@ -19,6 +19,11 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/output"
 )
 
+// pluginListMaxPages bounds automatic pagination so a server that keeps
+// returning full pages without a page count cannot make the command loop
+// forever. It mirrors the cap used by the organization repository listing.
+const pluginListMaxPages = 1000
+
 // ListOptions configures the actions plugin list command.
 type ListOptions struct {
 	IO         *iostreams.IOStreams
@@ -176,20 +181,15 @@ func fetchPlugins(client *api.Client, project string, opts *ListOptions) ([]json
 	return fetchAllPlugins(client, project, opts)
 }
 
+// fetchPluginsPage fetches exactly one page of plugins (selected by
+// opts.Page) and applies the command's limit/trim options to the result.
 func fetchPluginsPage(client *api.Client, project string, opts *ListOptions) ([]json.RawMessage, error) {
 	perPage := resolvePerPage(opts)
-	raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
-		PerPage: perPage,
-		Page:    opts.Page,
-	})
+	page, err := requestPluginsAPIPage(client, project, opts.Page, perPage)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := api.ParseActionsPluginsListRaw(raw)
-	if err != nil {
-		return nil, err
-	}
-	return trimEntries(entries, opts), nil
+	return trimEntries(page.Entries, opts), nil
 }
 
 func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]json.RawMessage, error) {
@@ -198,27 +198,45 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 		perPage = 100
 	}
 	var all []json.RawMessage
-	for page := 1; ; page++ {
-		raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
-			PerPage: perPage,
-			Page:    page,
-		})
+	for page := 1; page <= pluginListMaxPages; page++ {
+		response, err := requestPluginsAPIPage(client, project, page, perPage)
 		if err != nil {
 			return nil, err
 		}
-		entries, err := api.ParseActionsPluginsListRaw(raw)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, entries...)
+		all = append(all, response.Entries...)
 		if opts.Limit > 0 && len(all) >= opts.Limit {
 			return trimEntries(all, opts), nil
 		}
-		if len(entries) < perPage {
-			break
+		if shouldStopPagination(page, response, perPage) {
+			return trimEntries(all, opts), nil
 		}
 	}
-	return trimEntries(all, opts), nil
+	return nil, fmt.Errorf("exceeded %d pages without reaching the last page", pluginListMaxPages)
+}
+
+// requestPluginsAPIPage performs one raw API page request and parses the
+// paginated envelope. Unlike fetchPluginsPage it neither trims nor applies
+// the command's limit options, so pagination can inspect the server metadata.
+func requestPluginsAPIPage(client *api.Client, project string, page, perPage int) (*api.ActionsPluginsPage, error) {
+	raw, err := api.ListActionsPlugins(client, project, &api.ActionsListPluginsOptions{
+		PerPage: perPage,
+		Page:    page,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return api.ParseActionsPluginsPage(raw)
+}
+
+func shouldStopPagination(page int, response *api.ActionsPluginsPage, requestedPerPage int) bool {
+	if response.PageCount > 0 {
+		return page >= response.PageCount
+	}
+	pageSize := response.PageSize
+	if pageSize == 0 {
+		pageSize = requestedPerPage
+	}
+	return len(response.Entries) < pageSize
 }
 
 func resolvePerPage(opts *ListOptions) int {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -27,6 +28,15 @@ type ActionsPluginDetail struct {
 	DisplayName   string                      `json:"display_name"`
 	Description   string                      `json:"description"`
 	VisionContent []ActionsPluginVersionEntry `json:"vision_content"`
+}
+
+// ActionsPluginsPage represents a paginated Actions plugin list response.
+type ActionsPluginsPage struct {
+	PageNum   int
+	PageSize  int
+	Total     int
+	PageCount int
+	Entries   []json.RawMessage
 }
 
 // ActionsListPluginsOptions controls pagination for ListActionsPlugins.
@@ -83,54 +93,101 @@ func ViewActionsPlugin(client *Client, project, name string) ([]byte, error) {
 
 // ParseActionsPluginsList parses the raw list response into typed plugin
 // entries. It handles both a plain JSON array and a paginated wrapper object
-// with common field names ("plugins", "list", or "data").
+// with common field names ("content", "plugins", "list", or "data").
 func ParseActionsPluginsList(raw []byte) ([]ActionsPlugin, error) {
-	var plugins []ActionsPlugin
-	if err := json.Unmarshal(raw, &plugins); err == nil {
-		return plugins, nil
+	entries, err := ParseActionsPluginsListRaw(raw)
+	if err != nil {
+		return nil, err
 	}
-
-	var wrapper struct {
-		Plugins []ActionsPlugin `json:"plugins"`
-		List    []ActionsPlugin `json:"list"`
-		Data    []ActionsPlugin `json:"data"`
+	plugins := make([]ActionsPlugin, 0, len(entries))
+	for _, entry := range entries {
+		var plugin ActionsPlugin
+		if err := json.Unmarshal(entry, &plugin); err != nil {
+			return nil, fmt.Errorf("failed to parse plugin entry: %w", err)
+		}
+		plugins = append(plugins, plugin)
 	}
-	if err := json.Unmarshal(raw, &wrapper); err != nil {
-		return nil, fmt.Errorf("failed to parse plugins list response: %w", err)
-	}
-	if len(wrapper.Plugins) > 0 {
-		return wrapper.Plugins, nil
-	}
-	if len(wrapper.List) > 0 {
-		return wrapper.List, nil
-	}
-	return wrapper.Data, nil
+	return plugins, nil
 }
 
 // ParseActionsPluginsListRaw parses the raw list response into raw JSON
 // entries, preserving full API fields for --json output. It handles both a
-// plain JSON array and a paginated wrapper object.
+// plain JSON array and a paginated wrapper object with server metadata.
 func ParseActionsPluginsListRaw(raw []byte) ([]json.RawMessage, error) {
+	page, err := ParseActionsPluginsPage(raw)
+	if err != nil {
+		return nil, err
+	}
+	return page.Entries, nil
+}
+
+// ParseActionsPluginsPage parses a plain or paginated Actions plugin list
+// response and retains the server pagination metadata.
+func ParseActionsPluginsPage(raw []byte) (*ActionsPluginsPage, error) {
 	var entries []json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err == nil {
-		return entries, nil
+		return &ActionsPluginsPage{
+			Entries: entries,
+		}, nil
 	}
 
-	var wrapper struct {
-		Plugins []json.RawMessage `json:"plugins"`
-		List    []json.RawMessage `json:"list"`
-		Data    []json.RawMessage `json:"data"`
+	var metadata struct {
+		PageNum   int `json:"page_num"`
+		PageSize  int `json:"page_size"`
+		Total     int `json:"total"`
+		PageCount int `json:"page_count"`
 	}
-	if err := json.Unmarshal(raw, &wrapper); err != nil {
+	if err := json.Unmarshal(raw, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to parse plugins list response: %w", err)
 	}
-	if len(wrapper.Plugins) > 0 {
-		return wrapper.Plugins, nil
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("failed to parse plugins list response: %w", err)
 	}
-	if len(wrapper.List) > 0 {
-		return wrapper.List, nil
+	entries, err := parsePluginListField(fields)
+	if err != nil {
+		return nil, err
 	}
-	return wrapper.Data, nil
+	return &ActionsPluginsPage{
+		PageNum:   metadata.PageNum,
+		PageSize:  metadata.PageSize,
+		Total:     metadata.Total,
+		PageCount: metadata.PageCount,
+		Entries:   entries,
+	}, nil
+}
+
+// parsePluginListField returns the entries of the first recognized wrapper
+// field that carries a list. A recognized field whose value is null is skipped
+// instead of ending the probe, so a null wrapper cannot mask entries held by
+// another field; a response whose recognized fields are all null is treated as
+// a legitimately empty page. A response without any recognized field is an
+// error, never a silent empty list.
+func parsePluginListField(fields map[string]json.RawMessage) ([]json.RawMessage, error) {
+	recognized := false
+	for _, field := range []string{"content", "plugins", "list", "data"} {
+		raw, ok := fields[field]
+		if !ok {
+			continue
+		}
+		recognized = true
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		var entries []json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("failed to parse plugins list response field %s: %w", field, err)
+		}
+		if entries == nil {
+			entries = []json.RawMessage{}
+		}
+		return entries, nil
+	}
+	if recognized {
+		return []json.RawMessage{}, nil
+	}
+	return nil, fmt.Errorf("failed to parse plugins list response: missing plugin list field")
 }
 
 // CountPluginsEntries returns the number of plugin entries in a raw list
