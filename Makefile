@@ -26,7 +26,7 @@ GOMOD := $(GOCMD) mod
 .PHONY: all build build-all clean test system-test system-test-write install fmt lint help
 .PHONY: docker docker-build docker-push docker-run
 .PHONY: release release-local release-snapshot
-.PHONY: completions validate-ai-template validate-ai-record validate-ai-templates
+.PHONY: completions validate-ai-template validate-ai-record validate-ai-templates validate-sigs
 .PHONY: classify-change-risk verify-remote-facts
 .PHONY: deps update-deps dev-setup dev-doctor install uninstall
 
@@ -140,6 +140,9 @@ validate-ai-record:
 	@test -n "$(FILE)" || (echo "Usage: make validate-ai-record FILE=/path/to/file.md KIND=pr-self-check" && exit 2)
 	@test -n "$(KIND)" || (echo "KIND is required" && exit 2)
 	@python3 scripts/validate-ai-record.py --mode record --kind "$(KIND)" "$(FILE)"
+
+validate-sigs:
+	@bash scripts/validate-sig-yamls.sh $(SIGS_DIR)
 
 classify-change-risk:
 	@test -n "$(BASE)" || (echo "Usage: make classify-change-risk BASE=origin/main" && exit 2)

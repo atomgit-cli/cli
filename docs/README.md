@@ -54,6 +54,8 @@
 | [REGRESSION.md](./REGRESSION.md) | 核心回归矩阵说明 |
 | [PACKAGING.md](./PACKAGING.md) | 本地打包与发布使用说明 |
 | [AI-GUIDE.md](./AI-GUIDE.md) | 外部项目使用 AI 操作 GitCode 的场景指南 |
+| [SIGS.md](./SIGS.md) | SIG（Special Interest Group）机制介绍与参与指南（规则见 `spec/governance/sig-governance.md`） |
+| [rfcs/](./rfcs/) | 大型设计提案（RFC）目录与模板（流程规则见 `spec/workflows/rfc-workflow.md`） |
 | [LOOP_ENGINEERING_MAINLINE_ANALYSIS.md](./LOOP_ENGINEERING_MAINLINE_ANALYSIS.md) | 当前主干 Loop Engineering 基因分析与演进计划 |
 | [AI-TEMPLATES.md](./AI-TEMPLATES.md) | gitcode-cli 仓库内部协作的固定模板 |
 | [LOOP-GOAL-GUIDE.md](./LOOP-GOAL-GUIDE.md) | Claude Code /loop 与 /goal 命令在本项目开发流程中的使用指南 |

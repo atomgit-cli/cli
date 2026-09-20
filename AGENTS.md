@@ -73,9 +73,11 @@
 
 | 文档 | 角色 |
 |------|------|
-| `spec/` | 项目正式规范唯一来源（编码、测试、安全、门禁、流程、交付、治理） |
+| `spec/` | 项目正式规范唯一来源（编码、测试、安全、门禁、流程、交付、治理，含 SIG 治理与 RFC 流程） |
+| `spec/governance/sigs/*.yaml` | SIG 元数据唯一真相源（角色、范围、scope_labels 映射、Agent 登记） |
 | `docs/COMMANDS.md` | 命令行为唯一真相源 |
 | `docs/AUTH.md`、`docs/PACKAGING.md`、`docs/REGRESSION.md` | 认证、打包、回归说明 |
+| `docs/SIGS.md`、`docs/rfcs/` | SIG 与 RFC 的贡献者导航（规则本体在 `spec/governance/sig-governance.md`、`spec/workflows/rfc-workflow.md`） |
 | `docs/AI-GUIDE.md` | 外部项目通过 AI 使用 `gc` 的说明，不定义本仓库内部流程 |
 | `README.md`、`AGENTS.md`、`CLAUDE.md` | 入口导航，非规则源 |
 | `issues-plan/PROGRESS.md` | 阶段说明，可能滞后 |
@@ -300,6 +302,7 @@ gh run view <run-id> --log --job=<job-id>
 - 改 API / auth / config：`spec/foundations/coding-standards.md`、`spec/foundations/security.md`、`spec/foundations/testing-guide.md`
 - 补测试或做真实命令验证：`spec/foundations/testing-guide.md`、`spec/workflows/test-workflow.md`
 - 提交 PR / 做 review：`spec/workflows/pr-workflow.md`、`spec/workflows/review-workflow.md`
+- 改 SIG 治理 / 发起大型设计提案（RFC）：`spec/governance/sig-governance.md`、`spec/workflows/rfc-workflow.md`
 - 改构建 / 打包 / 发布：`spec/delivery/build-and-package.md`、`spec/delivery/release-process.md`
 
 具体流程任务再进入：
