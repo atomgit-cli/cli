@@ -467,6 +467,16 @@ func TestNewCmdSettingRejectsRepoAndOrgTogether(t *testing.T) {
 	}
 }
 
+func TestNewCmdSettingRejectsBlankOrganizationFlag(t *testing.T) {
+	cmd := NewCmdSetting(cmdutil.TestFactory(), func(opts *SettingOptions) error {
+		return nil
+	})
+	cmd.SetArgs([]string{"enable", "--org", "   "})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "blank value") {
+		t.Fatalf("Execute() error = %v, want a blank --org rejection", err)
+	}
+}
+
 func TestValidateTarget(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -483,6 +493,8 @@ func TestValidateTarget(t *testing.T) {
 		{name: "empty name", repo: "owner/", wantErr: "both segments non-empty"},
 		{name: "only slash", repo: "/", wantErr: "both segments non-empty"},
 		{name: "bare name", repo: "acme", wantErr: "invalid repository format"},
+		{name: "blank repository flag", repo: "   ", wantErr: "blank value"},
+		{name: "blank organization flag", org: "\t ", wantErr: "blank value"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -690,6 +702,105 @@ func TestSettingRunReportsPartialFailure(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "acme/second") {
 		t.Fatalf("stderr = %q, want the failing repository detail", errOut.String())
+	}
+}
+
+// TestSettingRunDisablesActionsForOneRepository covers the disable branch end
+// to end, including the family-style confirmation phrase for that action.
+func TestSettingRunDisablesActionsForOneRepository(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	jwt := futureWebJWT(t)
+	ioStreams, in, out, errOut := iostreams.TestTTY()
+	_, _ = in.WriteString(confirmationPhrase("disable", "owner/repo") + "\n")
+
+	var putBody map[string]any
+	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v5/repos/owner/repo":
+			writeJSON(w, `{"id":"project-1"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/project-1/actions/setting":
+			writeJSON(w, `{"action_enabled":true,"block_all_new_pipelines":true}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v2/projects/project-1/actions/setting":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read PUT body: %v", err)
+				return
+			}
+			if err := json.Unmarshal(body, &putBody); err != nil {
+				t.Errorf("decode PUT body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	err := settingRun(&SettingOptions{
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Repository:   "owner/repo",
+		Action:       "disable",
+		readPassword: hiddenJWTReader(t, jwt),
+	})
+	if err != nil {
+		t.Fatalf("settingRun() error = %v", err)
+	}
+	if putBody["action_enabled"] != false {
+		t.Fatalf("PUT body = %#v, want action_enabled false", putBody)
+	}
+	if putBody["block_all_new_pipelines"] != true {
+		t.Fatalf("PUT body = %#v, want the unrelated field preserved", putBody)
+	}
+	if !strings.Contains(errOut.String(), "! Type \"disable Actions for owner/repo\" to confirm:") {
+		t.Fatalf("confirmation prompt = %q, want the disable phrase", errOut.String())
+	}
+	if !strings.Contains(out.String(), "Actions disabled for 1/1 repositories") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// TestSettingRunAbortsBeforeWritingWhenReadFails covers a read failure in the
+// middle of a batch: the command stops and writes nothing, so a repository whose
+// current permission is unknown is never modified.
+func TestSettingRunAbortsBeforeWritingWhenReadFails(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	jwt := futureWebJWT(t)
+	ioStreams, _, _, _ := iostreams.TestTTY()
+
+	var puts []string
+	clientFactory := settingTestClient(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v5/orgs/acme/repos":
+			if r.URL.Query().Get("page") == "1" {
+				writeJSON(w, `[{"id":101,"name":"first","full_name":"acme/first"},{"id":102,"name":"second","full_name":"acme/second"}]`)
+				return
+			}
+			writeJSON(w, `[]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/101/actions/setting":
+			writeJSON(w, `{"action_enabled":false}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/projects/102/actions/setting":
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		case r.Method == http.MethodPut:
+			puts = append(puts, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	err := settingRun(&SettingOptions{
+		IO:           ioStreams,
+		HttpClient:   clientFactory,
+		Org:          "acme",
+		Action:       "enable",
+		Yes:          true,
+		readPassword: hiddenJWTReader(t, jwt),
+	})
+	if err == nil || !strings.Contains(err.Error(), "acme/second") {
+		t.Fatalf("settingRun() error = %v, want the unreadable repository named", err)
+	}
+	if len(puts) != 0 {
+		t.Fatalf("PUT paths = %v, want no write while a repository state is unknown", puts)
 	}
 }
 

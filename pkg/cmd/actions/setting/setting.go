@@ -120,10 +120,11 @@ func NewCmdSetting(f *cmdutil.Factory, runF func(*SettingOptions) error) *cobra.
 
 			The command reads each repository's current Actions permission first,
 			then changes only action_enabled and preserves the other permission
-			fields. This is a dangerous operation: type the repository or
-			organization name to confirm, or use --yes in a non-interactive
-			environment. When no repository needs a change, the command reports
-			the result without asking for confirmation.
+			fields. This is a dangerous operation: it asks you to type
+			"<action> Actions for <target>" (for example,
+			"enable Actions for owner/repo") to confirm, or use --yes in a
+			non-interactive environment. When no repository needs a change, the
+			command reports the result without asking for confirmation.
 			Before confirmation, the command warns that it uses a Web API endpoint
 			not documented in the official GitCode API reference.
 
@@ -422,13 +423,19 @@ func applyStates(client *api.Client, states []repositoryState, desired bool, act
 	return failures
 }
 
-// validateTarget checks the explicit target flags. An empty target is allowed
-// here: settingRun fills it in from the current repository, matching the rest
-// of the actions command family.
+// validateTarget checks the explicit target flags. An omitted target is allowed
+// here: settingRun fills it in from the current repository, matching the rest of
+// the actions command family. A flag that was given but holds only whitespace is
+// rejected so it cannot silently fall back to the inferred repository, which
+// would operate on a repository the operator did not name.
 func validateTarget(opts *SettingOptions) error {
 	repository := strings.TrimSpace(opts.Repository)
 	organization := strings.TrimSpace(opts.Org)
 	switch {
+	case opts.Repository != "" && repository == "":
+		return cmdutil.NewUsageError("-R/--repo was given a blank value; omit it to use the current repository")
+	case opts.Org != "" && organization == "":
+		return cmdutil.NewUsageError("--org was given a blank value; omit it to use the current repository")
 	case repository != "" && organization != "":
 		return cmdutil.NewUsageError("-R/--repo and --org are mutually exclusive")
 	case organization != "":
