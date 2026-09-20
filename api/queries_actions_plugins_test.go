@@ -243,6 +243,19 @@ func TestParseActionsPluginsListUnrecognized(t *testing.T) {
 	}
 }
 
+// TestParseActionsPluginsPageRejectsNonArrayField pins the error branch for a
+// recognized wrapper field whose value is not an array: it must be reported
+// rather than silently flattened into an empty list.
+func TestParseActionsPluginsPageRejectsNonArrayField(t *testing.T) {
+	_, err := ParseActionsPluginsPage([]byte(`{"page_num":1,"page_size":10,"content":{"a":1}}`))
+	if err == nil {
+		t.Fatal("expected an error for a recognized field that is not an array")
+	}
+	if !strings.Contains(err.Error(), "content") {
+		t.Fatalf("error = %v, want it to name the offending field", err)
+	}
+}
+
 func TestParseActionsPluginsPageContentMetadata(t *testing.T) {
 	raw := []byte(`{"page_num":2,"page_size":50,"total":51,"page_count":2,"content":[{"name":"official_shell"}]}`)
 	page, err := ParseActionsPluginsPage(raw)

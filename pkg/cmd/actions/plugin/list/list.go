@@ -19,6 +19,11 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/output"
 )
 
+// pluginListMaxPages bounds automatic pagination so a server that keeps
+// returning full pages without a page count cannot make the command loop
+// forever. It mirrors the cap used by the organization repository listing.
+const pluginListMaxPages = 1000
+
 // ListOptions configures the actions plugin list command.
 type ListOptions struct {
 	IO         *iostreams.IOStreams
@@ -193,7 +198,7 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 		perPage = 100
 	}
 	var all []json.RawMessage
-	for page := 1; ; page++ {
+	for page := 1; page <= pluginListMaxPages; page++ {
 		response, err := requestPluginsAPIPage(client, project, page, perPage)
 		if err != nil {
 			return nil, err
@@ -203,10 +208,10 @@ func fetchAllPlugins(client *api.Client, project string, opts *ListOptions) ([]j
 			return trimEntries(all, opts), nil
 		}
 		if shouldStopPagination(page, response, perPage) {
-			break
+			return trimEntries(all, opts), nil
 		}
 	}
-	return trimEntries(all, opts), nil
+	return nil, fmt.Errorf("exceeded %d pages without reaching the last page", pluginListMaxPages)
 }
 
 // requestPluginsAPIPage performs one raw API page request and parses the

@@ -524,6 +524,73 @@ func TestListRunNullContentFallsBackToPluginsWrapper(t *testing.T) {
 	}
 }
 
+// TestListRunPaginationPageCapIsEnforced covers the bound on automatic
+// pagination: a server that keeps returning full pages without a page count
+// must not make the command loop forever.
+func TestListRunPaginationPageCapIsEnforced(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, stdout, _ := iostreams.Test()
+	callCount := 0
+	opts := &ListOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					// Every page is full and carries no page_count, so only the cap
+					// can end the loop.
+					return listTestResponse(http.StatusOK, `{"page_size":1,"content":[{"name":"p"}]}`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		PerPage:    1,
+		PerPageSet: true,
+	}
+
+	err := listRun(opts)
+	if err == nil {
+		t.Fatal("expected an error when pagination exceeds the page cap")
+	}
+	if !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("error = %v, want it to report the exceeded page cap", err)
+	}
+	if callCount != pluginListMaxPages {
+		t.Fatalf("callCount = %d, want %d (the cap)", callCount, pluginListMaxPages)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want no partial output on error", stdout.String())
+	}
+}
+
+func TestTrimEntriesTrimsToLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []json.RawMessage
+		limit   int
+		want    int
+	}{
+		{name: "last page overshoots the limit", entries: paginationEntries(4), limit: 3, want: 3},
+		{name: "exactly the limit", entries: paginationEntries(3), limit: 3, want: 3},
+		{name: "under the limit", entries: paginationEntries(2), limit: 3, want: 2},
+		{name: "no limit keeps every entry", entries: paginationEntries(4), limit: 0, want: 4},
+		{name: "nil entries become an empty list", entries: nil, limit: 5, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimEntries(tt.entries, &ListOptions{Limit: tt.limit})
+			if len(got) != tt.want {
+				t.Fatalf("len = %d, want %d", len(got), tt.want)
+			}
+			if got == nil {
+				t.Fatal("trimEntries() returned nil, want a non-nil slice")
+			}
+		})
+	}
+}
+
 func paginationEntries(count int) []json.RawMessage {
 	entries := make([]json.RawMessage, 0, count)
 	for i := 0; i < count; i++ {
