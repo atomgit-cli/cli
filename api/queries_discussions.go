@@ -314,10 +314,11 @@ func ReplyOrgDiscussionComment(client *Client, org string, number int, commentID
 }
 
 // CreateRepoDiscussionOptions specifies the parameters for creating a
-// repository discussion.
+// repository discussion. Per the official OpenAPI all fields are required.
 type CreateRepoDiscussionOptions struct {
-	Title     string `json:"title"`
-	MdContent string `json:"md_content,omitempty"`
+	Title        string `json:"title"`
+	MdContent    string `json:"md_content,omitempty"`
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 // CreateRepoDiscussion creates a new discussion in a repository.
@@ -332,18 +333,19 @@ func CreateRepoDiscussion(client *Client, owner, repo string, opts *CreateRepoDi
 }
 
 // UpdateRepoDiscussionOptions specifies the parameters for updating a
-// repository discussion.
+// repository discussion. Per the official OpenAPI all fields are optional.
 type UpdateRepoDiscussionOptions struct {
-	Title     string `json:"title,omitempty"`
-	MdContent string `json:"md_content,omitempty"`
+	Title        string `json:"title,omitempty"`
+	MdContent    string `json:"md_content,omitempty"`
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 // UpdateRepoDiscussion updates an existing repository discussion.
-// PATCH /api/v5/repos/{owner}/{repo}/discuss/{number}
+// PUT /api/v5/repos/{owner}/{repo}/discuss/{number}
 func UpdateRepoDiscussion(client *Client, owner, repo string, number int, opts *UpdateRepoDiscussionOptions) (*Discussion, error) {
 	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/discuss/" + strconv.Itoa(number)
 	var d Discussion
-	if err := client.Patch(endpoint, opts, &d); err != nil {
+	if err := client.Put(endpoint, opts, &d); err != nil {
 		return nil, fmt.Errorf("failed to update repo discussion: %w", err)
 	}
 	return &d, nil
