@@ -73,11 +73,13 @@ ATOMGIT_CLI_COMMAND_NAME
 - **Python wheel**：PyPI 包名 `atomgit-cli` 与旧包并行发布，console scripts 提供全部四个入口；`gc_cli/wrapper.py` 按调用名自适配
 - **Docker**：镜像标签增加 atomgit 命名别名，原标签保留
 
-### 6. fork 仓与模块路径
+### 6. 仓库与模块路径
 
-- **开发真相源不变**：`gitcode-cli/cli`（本仓）继续承载 issue / PR / CI / spec；`atomgit-cli/cli` 为 AtomGit 品牌分发 fork，跟随本仓 main 同步（复用既有镜像同步机制，release 时推送 tag）
-- **Go module path 保持 `gitcode.com/gitcode-cli/cli` 不变**：CLI 应用不是可导入库，module path 仅是标识符；改写 500+ 文件 import 是纯噪声高风险动作
-- fork 仓 README 指向本仓作为贡献入口
+- **仓库已 rename**（2026-09-21 维护者操作）：`gitcode-cli/cli` → `atomgit-cli/cli`，`gc-api-doc` 随迁 `atomgit-cli/gc-api-doc`。PR / issue / CI 历史随仓库对象完整保留；git 层旧路径（SSH/HTTPS clone/fetch）经平台重定向仍可用，**API 层不重定向**——所有 `-R gitcode-cli/cli` 调用须改用 `-R atomgit-cli/cli`
+- 仓内引用更新（实施 PR-5 范围）：`.gitmodules`、CI workflows、scripts、docs、AGENTS/CLAUDE 中的 `gitcode.com/gitcode-cli/*` 路径改为 `atomgit-cli/*`；Go module path 除外（见下）
+- **Go module path 保持 `gitcode.com/gitcode-cli/cli` 不变**：CLI 应用不是可导入库，module path 仅是标识符；改写 500+ 文件 import 是纯噪声高风险动作。旧路径重定向失效（如旧 org 路径被重新注册）不影响本地构建
+- 风险与对策：旧路径重定向的持久性不可控——文档与脚本一律改用新路径，不依赖重定向；本地/CI remote 同步更新
+- GitHub 镜像 org（github.com/gitcode-cli）与 homebrew tap 是否改名另行决策（涉及 release 下载 URL 链，属实施 PR-6 范围）
 
 ### 7. 品牌文案
 
@@ -99,7 +101,7 @@ ATOMGIT_CLI_COMMAND_NAME
 - 双名/双包/双环境变量的长期维护成本：每个新增环境变量须双份（`AG_*` + `GC_*`）
 - 捆绑二进制内部文件名仍为 `gc-*`，与新品牌不一致（内部细节，不影响用户交互面）
 - 配置目录双位置判定规则需要清晰文档，误建双目录的用户需重新认证一次
-- fork 同步链路增加发布复杂度（多一环推送与校验）
+- 仓库 rename 后旧路径依赖平台重定向，其持久性不可控；API 层无重定向需全量改用新 slug
 
 ## 回滚策略（Rollout / Rollback）
 
@@ -123,6 +125,6 @@ ATOMGIT_CLI_COMMAND_NAME
 | 3 | 打包渠道 | goreleaser、nfpm、scoop、homebrew、Makefile、completions | 1 |
 | 4 | Python wheel | PyPI `atomgit-cli`、entry points、wrapper 适配 | 1 |
 | 5 | 文档与规范 | README、COMMANDS、AUTH、PACKAGING、spec、AGENTS/CLAUDE、Docker 文档 | 1–4 |
-| 6 | release 工程 | release workflow 双包发布、统一 checksum、fork 同步、CI workflow + spec/delivery 更新 | 2–4 |
+| 6 | release 工程 | release workflow 双包发布、统一 checksum、GitHub 镜像与 tap 归属决策、CI workflow + spec/delivery 更新 | 2–4 |
 
 回归：`./scripts/regression-core.sh` + 全渠道冒烟（双 npm 包安装、deb/rpm、brew、scoop、wheel、双命令名补全加载）。
