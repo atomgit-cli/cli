@@ -1771,8 +1771,11 @@ gc pr edit 1 --add-tester tester1 -R infra-test/gctest1
 # 设置 PR 合并人（PUT，整体替换已有合并人集合）
 gc pr edit 1 --mergers user1,user2 -R infra-test/gctest1
 
+# 清空 PR 合并人（空值提交空集合）
+gc pr edit 1 --mergers "" -R infra-test/gctest1
+
 # 设置合并人并输出 JSON
-gc pr edit 1 --mergers user1 --repo infra-test/gctest1 --json
+gc pr edit 1 --mergers user1 -R infra-test/gctest1 --json
 ```
 
 说明：
@@ -1783,8 +1786,9 @@ gc pr edit 1 --mergers user1 --repo infra-test/gctest1 --json
 - `--add-assignee`/`--remove-assignee`：添加/移除审查人（POST/DELETE /pulls/{number}/assignees）。
 - `--add-reviewer`/`--remove-reviewer`：添加/移除评审人（POST/DELETE /pulls/{number}/reviewers）。
 - `--add-tester`/`--remove-tester`：添加/移除测试人（POST/DELETE /pulls/{number}/testers）。
-- 以上 6 个 flag 可与 `--title`/`--body` 等基础编辑 flag 同时使用。
-- `--json` 会在更新成功后读取并输出完整的最终 PR 状态，`id`、`number`、`labels` 等字段可直接供脚本和 AI 代理判断结果。
+- `--mergers`：设置合并人（PUT /pulls/{number}/mergers，逗号分隔），整体替换已有合并人集合；空值 `--mergers ""` 提交空集合用于清空全部合并人。
+- 以上 7 个 flag 可与 `--title`/`--body` 等基础编辑 flag 同时使用。
+- `--json` 会在更新成功后读取并输出完整的最终 PR 状态，`id`、`number`、`labels` 等字段可直接供脚本和 AI 代理判断结果；使用 `--mergers` 时输出为 `{"pull_request": …, "mergers": […]}` 包装对象，`mergers` 为设置后的合并人列表。
 
 ### pr label - 管理 PR 标签
 

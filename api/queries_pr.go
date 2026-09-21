@@ -735,7 +735,7 @@ type PRMerger struct {
 }
 
 // MergerRequest is the body for setting PR mergers. Per the official OpenAPI
-// the mergers field is a comma-separated list of user personal-space paths.
+// the mergers field is a comma-separated list of user login names.
 type MergerRequest struct {
 	Mergers string `json:"mergers"`
 }
