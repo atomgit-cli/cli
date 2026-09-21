@@ -56,6 +56,23 @@ func TestEditRunValidatesNoChanges(t *testing.T) {
 	}
 }
 
+func TestEditRunValidatesEmptyBody(t *testing.T) {
+	io, _, _, _ := iostreams.Test()
+	opts := &EditOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{}, nil
+		},
+		Org:      "my-org",
+		Number:   42,
+		Body:     "",
+		BodyFile: "-",
+	}
+	if err := editRun(opts); err == nil {
+		t.Errorf("editRun() expected usage error when body resolves to empty")
+	}
+}
+
 func TestEditRunUpdatesOrgDiscussion(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 

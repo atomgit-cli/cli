@@ -1220,7 +1220,7 @@ gc issue relations -R infra-test/gctest1 --state open --limit 50
 
 ## Discussions 命令 (discussions)
 
-只读访问 GitCode 组织级讨论（discuss）。当前覆盖组织讨论列表与详情，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss` 与 `/discuss/{number}`）。
+访问 GitCode 组织级讨论（discuss）：列表、详情、创建、编辑与删除，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss`、`POST /discuss`、`PUT /discuss/{number}` 等）。
 
 ### discussions list - 列出组织讨论
 
