@@ -7,8 +7,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments/create"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments/edit"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments/list"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments/replies"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project/comments/reply"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 )
 
@@ -29,6 +31,12 @@ func NewCmdComments(f *cmdutil.Factory) *cobra.Command {
 			# Create a comment
 			$ gc discussions project comments create 42 -R owner/repo --body "Great idea!"
 
+			# Edit a comment
+			$ gc discussions project comments edit 42 <comment-id> -R owner/repo --body "Updated text"
+
+			# Reply to a comment
+			$ gc discussions project comments reply 42 <comment-id> -R owner/repo --body "Reply text"
+
 			# List replies to a comment
 			$ gc discussions project comments replies 42 <comment-id> -R owner/repo
 		`),
@@ -37,6 +45,8 @@ func NewCmdComments(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(list.NewCmdList(f, nil))
 	cmd.AddCommand(replies.NewCmdReplies(f, nil))
 	cmd.AddCommand(create.NewCmdCreate(f, nil))
+	cmd.AddCommand(edit.NewCmdEdit(f, nil))
+	cmd.AddCommand(reply.NewCmdReply(f, nil))
 
 	return cmd
 }
