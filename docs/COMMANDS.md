@@ -1366,7 +1366,7 @@ gc discussions project comments reply 42 <comment-id> -R owner/repo --body-file 
 gc discussions project comments reply 42 <comment-id> -R owner/repo --body "回复内容" --json
 ```
 
-说明：两个位置参数（讨论编号 + comment-id）；`-R` 仓库（可省略自动推断）；`--body`（或 `--body-file`）必填；`--json` 原样输出创建的回复。
+说明：两个位置参数（讨论编号 + comment-id）；`-R` 仓库（可省略自动推断）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建的回复。
 
 评论与回复共享同一输出结构（`id`/`author`/`content`/`md_content`/`like_total`/`reply_total`/`created_at` 等）；404（讨论或评论不存在）返回 exit 3。
 
