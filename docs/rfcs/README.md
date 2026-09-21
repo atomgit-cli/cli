@@ -18,4 +18,8 @@
 
 ## 当前 RFC 列表
 
-（暂无。**仅 accepted 状态**的 RFC 在此登记一行：`RFC-NNNN | 标题 | 归属 SIG | accepted | 追踪 issue`；shelved 记录见对应关闭 PR 的 comment，不在此登记）
+（下表**仅 accepted 状态**的 RFC 登记；shelved 记录见对应关闭 PR 的 comment，不在此登记）
+
+| RFC | 标题 | 归属 SIG | 状态 | 追踪 issue |
+|-----|------|----------|------|------------|
+| RFC-0001 | AtomGit 品牌适配——ac/atomgit 命令名、并行分发与全渠道向后兼容 | sig/cli-ux | accepted | #588 |
