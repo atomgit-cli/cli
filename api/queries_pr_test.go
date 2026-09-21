@@ -675,3 +675,48 @@ func prCommitsJSON(count int, message string) string {
 	}
 	return string(data)
 }
+
+func TestSetPRMergersBuildsPutRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		gotBody = string(bodyBytes)
+		return authTestResponse(http.StatusOK, `[{"id":1,"login":"user1","name":"User One","object_id":"o1"},{"id":2,"login":"user2","name":"User Two","object_id":"o2"}]`), nil
+	})
+
+	mergers, err := SetPRMergers(client, "owner", "repo", 123, []string{"user1", "user2"})
+	if err != nil {
+		t.Fatalf("SetPRMergers() error = %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Fatalf("method = %q, want PUT", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/123/mergers" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/123/mergers", gotPath)
+	}
+	if !strings.Contains(gotBody, `"mergers":"user1,user2"`) {
+		t.Fatalf("body = %q, want mergers field with comma-separated users", gotBody)
+	}
+	if len(mergers) != 2 {
+		t.Fatalf("len(mergers) = %d, want 2", len(mergers))
+	}
+	if mergers[0].Login != "user1" || mergers[0].ObjectID != "o1" {
+		t.Fatalf("mergers[0] = %+v, want login user1 and object_id o1", mergers[0])
+	}
+}
+
+func TestSetPRMergersAPIError(t *testing.T) {
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		return authTestResponse(http.StatusNotFound, `{"message":"Not Found"}`), nil
+	})
+
+	_, err := SetPRMergers(client, "owner", "repo", 999, []string{"user1"})
+	if err == nil {
+		t.Fatalf("SetPRMergers() expected error for 404 response")
+	}
+}

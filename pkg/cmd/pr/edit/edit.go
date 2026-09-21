@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
@@ -50,6 +51,10 @@ type EditOptions struct {
 	RemoveReviewers []string
 	AddTesters      []string
 	RemoveTesters   []string
+
+	// Merger flags
+	Mergers    []string
+	MergersSet bool
 }
 
 // NewCmdEdit creates the edit command
@@ -96,6 +101,9 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 			# Set milestone
 			$ gc pr edit 123 -R owner/repo --milestone 5
 
+			# Set PR mergers (replaces the previous set)
+			$ gc pr edit 123 -R owner/repo --mergers user1,user2
+
 			# Output as JSON
 			$ gc pr edit 123 -R owner/repo --title "New title" --json
 		`),
@@ -110,6 +118,7 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 			opts.AddLabelsSet = cmd.Flags().Changed("add-label")
 			opts.RemoveLabelsSet = cmd.Flags().Changed("remove-label")
 			opts.ReplaceLabelsSet = cmd.Flags().Changed("replace-labels")
+			opts.MergersSet = cmd.Flags().Changed("mergers")
 
 			if runF != nil {
 				return runF(opts)
@@ -139,6 +148,7 @@ func NewCmdEdit(f *cmdutil.Factory, runF func(*EditOptions) error) *cobra.Comman
 	cmd.Flags().StringSliceVar(&opts.RemoveReviewers, "remove-reviewer", nil, "Remove reviewers (comma-separated usernames)")
 	cmd.Flags().StringSliceVar(&opts.AddTesters, "add-tester", nil, "Add testers (comma-separated usernames)")
 	cmd.Flags().StringSliceVar(&opts.RemoveTesters, "remove-tester", nil, "Remove testers (comma-separated usernames)")
+	cmd.Flags().StringSliceVar(&opts.Mergers, "mergers", nil, "Set PR mergers, replacing any previous set (comma-separated usernames)")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -230,7 +240,7 @@ func editRun(opts *EditOptions) error {
 		updateOpts.Base == "" && updateOpts.Draft == nil &&
 		!updateOpts.LabelsSet && updateOpts.MilestoneNumber == 0 &&
 		updateOpts.CloseRelatedIssue == nil &&
-		!hasAssigneeChanges(opts) {
+		!hasAssigneeChanges(opts) && !opts.MergersSet {
 		return cmdutil.NewUsageError("no changes specified. Use flags to specify what to edit")
 	}
 
@@ -249,12 +259,27 @@ func editRun(opts *EditOptions) error {
 		return err
 	}
 
+	// Merger operation (PUT, replaces the previous merger set)
+	var mergers []*api.PRMerger
+	if opts.MergersSet {
+		mergers, err = api.SetPRMergers(client, owner, repo, opts.Number, opts.Mergers)
+		if err != nil {
+			return fmt.Errorf("failed to set mergers: %w", err)
+		}
+	}
+
 	pr, err := api.GetPullRequest(client, owner, repo, opts.Number)
 	if err != nil {
 		return fmt.Errorf("failed to fetch updated PR: %w", err)
 	}
 
 	if opts.JSON {
+		if opts.MergersSet {
+			return cmdutil.WriteJSON(opts.IO.Out, map[string]interface{}{
+				"pull_request": pr,
+				"mergers":      mergers,
+			})
+		}
 		return cmdutil.WriteJSON(opts.IO.Out, pr)
 	}
 
@@ -265,6 +290,15 @@ func editRun(opts *EditOptions) error {
 	fmt.Fprintf(opts.IO.Out, "%s Updated PR #%d: %s\n", cs.Green("✓"), prNumber, pr.Title)
 	if pr.HTMLURL != "" {
 		fmt.Fprintf(opts.IO.Out, "  %s\n", pr.HTMLURL)
+	}
+	if opts.MergersSet {
+		logins := make([]string, 0, len(mergers))
+		for _, m := range mergers {
+			if m != nil {
+				logins = append(logins, m.Login)
+			}
+		}
+		fmt.Fprintf(opts.IO.Out, "  mergers: %s\n", strings.Join(logins, ","))
 	}
 	return nil
 }

@@ -1767,6 +1767,12 @@ gc pr edit 1 --add-assignee reviewer1 -R infra-test/gctest1
 
 # 添加测试人
 gc pr edit 1 --add-tester tester1 -R infra-test/gctest1
+
+# 设置 PR 合并人（PUT，整体替换已有合并人集合）
+gc pr edit 1 --mergers user1,user2 -R infra-test/gctest1
+
+# 设置合并人并输出 JSON
+gc pr edit 1 --mergers user1 --repo infra-test/gctest1 --json
 ```
 
 说明：
