@@ -237,7 +237,18 @@ func (c *Client) RawRESTToHost(method, host, endpoint string, body io.Reader, he
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, decodeAPIError(respBody, resp.StatusCode, resp.Status)
+		err := decodeAPIError(respBody, resp.StatusCode, resp.Status)
+		// Endpoints on the web API host authenticate with the browser session
+		// JWT, so the generic "run gc auth login" advice would send the user
+		// after a credential that cannot work here. Replace that advice instead
+		// of appending a second, contradictory instruction.
+		if resp.StatusCode == http.StatusUnauthorized && host == WebAPIHost {
+			if apiErr, ok := err.(*APIError); ok {
+				apiErr.Guidance = fmt.Sprintf("The %s web API rejected the credential. This host authenticates with the gitcode.com web session JWT, not a classic personal access token: refresh gitcode.com, run copy(localStorage.getItem('access_token')) in the browser Console, and pass the value with --with-token.", host)
+				return nil, apiErr
+			}
+		}
+		return nil, err
 	}
 
 	return &RawResponse{
@@ -506,6 +517,12 @@ type APIError struct {
 	ErrorMessage  string `json:"error_message"`
 	ErrorName     string `json:"error"`
 	ErrorCodeName string `json:"error_code_name"`
+
+	// Guidance replaces the status-specific guidance that Error appends. A
+	// caller sets it when the generic advice would be wrong for the endpoint,
+	// for example the personal-access-token hint on a 401 from a host that
+	// authenticates with a browser session JWT.
+	Guidance string `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -516,6 +533,12 @@ func (e *APIError) Error() string {
 		msg = e.ErrorMessage
 	} else {
 		msg = "unknown error"
+	}
+
+	// Caller-supplied guidance replaces the generic status guidance so the two
+	// never contradict each other.
+	if e.Guidance != "" {
+		return fmt.Sprintf("HTTP %d: %s\n\n%s", e.StatusCode, msg, e.Guidance)
 	}
 
 	// Add actionable guidance for permission errors

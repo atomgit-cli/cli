@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -400,6 +401,52 @@ func TestRawRESTToHostError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("error should mention not found: %v", err)
+	}
+}
+
+// TestRawRESTToHostWebAPIUnauthorizedReplacesPATGuidance asserts that a 401
+// from the web API host returns the session-JWT guidance instead of the generic
+// personal-access-token advice, so the two cannot contradict each other.
+func TestRawRESTToHostWebAPIUnauthorizedReplacesPATGuidance(t *testing.T) {
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		return authTestResponse(http.StatusUnauthorized, `{"message":"unauthorized"}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	_, err := client.RawRESTToHost("GET", WebAPIHost, "/api/v2/test", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for 401")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("error = %v, want an *APIError carrying status 401", err)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "web API rejected the credential") || !strings.Contains(message, "web session JWT") {
+		t.Fatalf("message = %q, want host-specific session JWT guidance", message)
+	}
+	if strings.Contains(message, "gc auth login") {
+		t.Fatalf("message = %q, must not keep the generic personal access token advice", message)
+	}
+}
+
+// TestRawRESTToHostDefaultHostKeepsPATGuidance pins the other side of the
+// branch: the default REST host still gets the generic authentication advice.
+func TestRawRESTToHostDefaultHostKeepsPATGuidance(t *testing.T) {
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		return authTestResponse(http.StatusUnauthorized, `{"message":"unauthorized"}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	_, err := client.RawRESTToHost("GET", DefaultHost, "/api/v2/test", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for 401")
+	}
+	if !strings.Contains(err.Error(), "gc auth login") {
+		t.Fatalf("message = %q, want the generic authentication advice", err.Error())
+	}
+	if strings.Contains(err.Error(), "web session JWT") {
+		t.Fatalf("message = %q, must not claim the default host needs a web session JWT", err.Error())
 	}
 }
 
