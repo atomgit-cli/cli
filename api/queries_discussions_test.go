@@ -345,8 +345,8 @@ func TestUpdateOrgDiscussionBuildsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
-	if gotMethod != http.MethodPatch {
-		t.Fatalf("method = %q, want PATCH", gotMethod)
+	if gotMethod != http.MethodPut {
+		t.Fatalf("method = %q, want PUT", gotMethod)
 	}
 	if gotPath != "/api/v5/orgs/my-org/discuss/7" {
 		t.Fatalf("path = %q, want /api/v5/orgs/my-org/discuss/7", gotPath)
