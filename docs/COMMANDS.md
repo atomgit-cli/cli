@@ -1350,7 +1350,7 @@ gc discussions comments edit 42 <comment-id> --org my-org --body-file comment.md
 gc discussions comments edit 42 <comment-id> --org my-org --body "新内容" --json
 ```
 
-说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`）必填；`--json` 原样输出更新结果。
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出更新结果。
 
 ### discussions comments reply - 回复组织讨论评论
 
@@ -1367,7 +1367,7 @@ gc discussions comments reply 42 <comment-id> --org my-org --body-file reply.md
 gc discussions comments reply 42 <comment-id> --org my-org --body "回复内容" --json
 ```
 
-说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`）必填；`--json` 原样输出创建的回复。
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建的回复。
 
 ### discussions project comments list - 列出仓库讨论评论
 
