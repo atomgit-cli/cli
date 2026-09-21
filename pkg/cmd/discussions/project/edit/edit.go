@@ -105,6 +105,9 @@ func editRun(opts *EditOptions) error {
 		if err != nil {
 			return err
 		}
+		if body == "" {
+			return cmdutil.NewUsageError("--body/--body-file must not be empty")
+		}
 		updateOpts.MdContent = body
 	}
 	if opts.CategoryName != "" {
