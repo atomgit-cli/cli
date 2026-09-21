@@ -276,11 +276,11 @@ type UpdateOrgDiscussionCommentOptions struct {
 }
 
 // UpdateOrgDiscussionComment updates a comment on an organization discussion.
-// PATCH /api/v5/orgs/{org}/discuss/{number}/comment/{id}
+// PUT /api/v5/orgs/{org}/discuss/{number}/comment/{id}
 func UpdateOrgDiscussionComment(client *Client, org string, number int, commentID string, opts *UpdateOrgDiscussionCommentOptions) (*DiscussionComment, error) {
 	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number) + "/comment/" + url.PathEscape(commentID)
 	var c DiscussionComment
-	if err := client.Patch(endpoint, opts, &c); err != nil {
+	if err := client.Put(endpoint, opts, &c); err != nil {
 		return nil, fmt.Errorf("failed to update org discussion comment: %w", err)
 	}
 	return &c, nil

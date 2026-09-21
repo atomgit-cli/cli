@@ -6,9 +6,12 @@ import (
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/create"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/delete"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/edit"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/list"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/replies"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments/reply"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 )
 
@@ -26,6 +29,15 @@ func NewCmdComments(f *cmdutil.Factory) *cobra.Command {
 			# List comments on an org discussion
 			$ gc discussions comments list 42 --org my-org
 
+			# Create a comment
+			$ gc discussions comments create 42 --org my-org --body "Great idea!"
+
+			# Edit a comment
+			$ gc discussions comments edit 42 <comment-id> --org my-org --body "Updated text"
+
+			# Reply to a comment
+			$ gc discussions comments reply 42 <comment-id> --org my-org --body "Reply text"
+
 			# Delete a comment
 			$ gc discussions comments delete 42 <comment-id> --org my-org
 
@@ -35,6 +47,9 @@ func NewCmdComments(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	cmd.AddCommand(list.NewCmdList(f, nil))
+	cmd.AddCommand(create.NewCmdCreate(f, nil))
+	cmd.AddCommand(edit.NewCmdEdit(f, nil))
+	cmd.AddCommand(reply.NewCmdReply(f, nil))
 	cmd.AddCommand(replies.NewCmdReplies(f, nil))
 	cmd.AddCommand(delete.NewCmdDelete(f, nil))
 
