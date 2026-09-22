@@ -66,6 +66,7 @@ func TestReleaseWorkflowPublishesAllNPMCoordinates(t *testing.T) {
 		`"@atomgit-cli/cli") printf 'atomgit-cli-cli-%s.tgz' "${VERSION_NUM}" ;;`,
 		`"atomgit-cli") printf 'atomgit-cli-%s.tgz' "${VERSION_NUM}" ;;`,
 		`for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do`,
+		`PACKAGE_FILE="$(realpath "release-assets/$(coordinate_tarball "${COORDINATE}")")"`,
 		`all three coordinates must publish ${VERSION_NUM}`,
 	} {
 		if !strings.Contains(workflow, required) {
