@@ -81,7 +81,7 @@ func TestREADMEPrioritizesBootstrapAndExplainsLocalInstall(t *testing.T) {
 	if bootstrap < 0 || sourceBuild < 0 || bootstrap > sourceBuild {
 		t.Fatal("README must show the short npm bootstrap before source installation")
 	}
-	if !strings.Contains(content, "`npm i @gitcode-cli/cli` 或 `npm install @gitcode-cli/cli`") {
+	if !strings.Contains(content, "`npm i atomgit-cli` 或 `npm install atomgit-cli`") {
 		t.Fatal("README must distinguish project-local npm dependencies from CLI installation")
 	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "@gitcode-cli/cli",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "AtomGit CLI (formerly GitCode CLI) — open-source command line tool with bundled multi-platform binaries. Recommended coordinate: atomgit-cli; @gitcode-cli/cli stays supported in parallel.",
   "license": "MIT",
   "author": "AtomGit CLI Contributors <support@gitcode.com>",
