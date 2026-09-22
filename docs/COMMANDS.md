@@ -1336,6 +1336,46 @@ gc discussions project view 42 -R owner/repo --json
 - `-R`（必填）：仓库。位置参数为讨论编号。
 - `--json`：原样输出讨论对象（含 `md_content` 正文）。
 
+### discussions project create - 创建仓库讨论
+
+调用 `POST /api/v5/repos/{owner}/{repo}/discuss`。
+
+```bash
+# 创建讨论
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body "描述内容"
+
+# 从文件读取正文
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body-file idea.md
+
+# 从 stdin 读取正文
+cat idea.md | gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body-file -
+
+# 输出 JSON
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body "描述" --json
+```
+
+说明：`--title`/`--category`/`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填，`-R` 仓库在当前 Git 仓库目录执行时可省略自动推断；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions project edit - 编辑仓库讨论
+
+调用 `PUT /api/v5/repos/{owner}/{repo}/discuss/{number}`。仅更新显式传入的字段。
+
+```bash
+# 修改标题
+gc discussions project edit 42 -R owner/repo --title "新标题"
+
+# 修改正文
+gc discussions project edit 42 -R owner/repo --body-file idea.md
+
+# 修改分类
+gc discussions project edit 42 -R owner/repo --category "Q&A"
+
+# 输出 JSON
+gc discussions project edit 42 -R owner/repo --title "新标题" --json
+```
+
+说明：`-R` 仓库（可省略自动推断）；位置参数为讨论编号；至少提供一个变更 flag（`--title`/`--body`/`--body-file`/`--category`），否则报参数错误；`--json` 原样输出更新结果。
+
 ### discussions comments list - 列出组织讨论评论
 
 组织讨论评论，调用 `GET /api/v5/orgs/{org}/discuss/{number}/comment`。
