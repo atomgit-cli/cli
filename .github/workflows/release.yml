@@ -496,39 +496,73 @@ jobs:
           set -euo pipefail
           cd release-assets
           sha256sum -c "gc_${VERSION_NUM}_checksums.txt"
-          test "$(find . -maxdepth 1 -name '*.tgz' -type f | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*.tgz' -type f | wc -l)" -eq 3
+          test -f "gitcode-cli-cli-${VERSION_NUM}.tgz"
+          test -f "atomgit-cli-cli-${VERSION_NUM}.tgz"
+          test -f "atomgit-cli-${VERSION_NUM}.tgz"
 
       - name: Publish to npm (OIDC trusted publishing)
         env:
           VERSION_NUM: ${{ needs.preflight.outputs.package_version }}
         run: |
           set -euo pipefail
-          PACKAGE_FILE="$(realpath "$(find release-assets -maxdepth 1 -name '*.tgz' -type f -print -quit)")"
           PUBLISH_TAG="latest"
           if [[ "${VERSION_NUM}" == *-* ]]; then
             PUBLISH_TAG="next"
           fi
-          if npm view "@gitcode-cli/cli@${VERSION_NUM}" version >/dev/null 2>&1; then
-            mkdir existing-npm
-            npm pack "@gitcode-cli/cli@${VERSION_NUM}" --pack-destination existing-npm >/dev/null
-            EXISTING_FILE="$(find existing-npm -maxdepth 1 -name '*.tgz' -type f -print -quit)"
-            test -n "${EXISTING_FILE}"
-            test "$(sha256sum "${PACKAGE_FILE}" | cut -d' ' -f1)" = "$(sha256sum "${EXISTING_FILE}" | cut -d' ' -f1)" || {
-              echo "::error::existing npm package content differs from the verified release asset"
-              exit 1
-            }
-            TAG_VERSION="$(npm view "@gitcode-cli/cli" "dist-tags.${PUBLISH_TAG}")"
+          coordinate_tarball() {
+            case "$1" in
+              "@gitcode-cli/cli") printf 'gitcode-cli-cli-%s.tgz' "${VERSION_NUM}" ;;
+              "@atomgit-cli/cli") printf 'atomgit-cli-cli-%s.tgz' "${VERSION_NUM}" ;;
+              "atomgit-cli") printf 'atomgit-cli-%s.tgz' "${VERSION_NUM}" ;;
+              *) return 1 ;;
+            esac
+          }
+          for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
+            PACKAGE_FILE="release-assets/$(coordinate_tarball "${COORDINATE}")"
+            test -f "${PACKAGE_FILE}"
+            if npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1; then
+              mkdir existing-npm
+              npm pack "${COORDINATE}@${VERSION_NUM}" --pack-destination existing-npm >/dev/null
+              EXISTING_FILE="$(find existing-npm -maxdepth 1 -name '*.tgz' -type f -print -quit)"
+              test -n "${EXISTING_FILE}"
+              test "$(sha256sum "${PACKAGE_FILE}" | cut -d' ' -f1)" = "$(sha256sum "${EXISTING_FILE}" | cut -d' ' -f1)" || {
+                echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
+                exit 1
+              }
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              test "${TAG_VERSION}" = "${VERSION_NUM}" || {
+                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} points to ${TAG_VERSION}, expected ${VERSION_NUM}"
+                exit 1
+              }
+              echo "npm ${COORDINATE}@${VERSION_NUM} already published with identical content; skipping"
+              rm -rf existing-npm
+              continue
+            fi
+            # OIDC: npm CLI auto-detects the id-token: write permission and the
+            # trusted publisher configured on npmjs.com, exchanging a short-lived
+            # token. No NPM_TOKEN secret is used; provenance is auto-generated.
+            npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"
+          done
+          # Long-term parallel distribution invariant (docs/PACKAGING.md): a
+          # completed release must leave all three coordinates on the same
+          # dist-tag version. Bounded retries absorb registry propagation
+          # delay; a mismatch after the retries blocks the release.
+          for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
+            for ATTEMPT in 1 2 3; do
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              if [[ "${TAG_VERSION}" = "${VERSION_NUM}" ]]; then
+                break
+              fi
+              if [[ "${ATTEMPT}" -lt 3 ]]; then
+                sleep 10
+              fi
+            done
             test "${TAG_VERSION}" = "${VERSION_NUM}" || {
-              echo "::error::npm dist-tag ${PUBLISH_TAG} points to ${TAG_VERSION}, expected ${VERSION_NUM}"
+              echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; all three coordinates must publish ${VERSION_NUM}"
               exit 1
             }
-            echo "npm @gitcode-cli/cli@${VERSION_NUM} already published with identical content; skipping"
-            exit 0
-          fi
-          # OIDC: npm CLI auto-detects the id-token: write permission and the
-          # trusted publisher configured on npmjs.com, exchanging a short-lived
-          # token. No NPM_TOKEN secret is used; provenance is auto-generated.
-          npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"
+          done
 
   npm-recovery:
     name: npm recovery
@@ -563,14 +597,10 @@ jobs:
           test -f "${MANIFEST}"
           TAG_SHA_EXPECTED="$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.tagCommit)' "${MANIFEST}")"
           TAG_TREE_EXPECTED="$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.tagTree)' "${MANIFEST}")"
-          PACKAGE_SHA_EXPECTED="$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.sha256)' "${MANIFEST}")"
-          PACKAGE_NAME="$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.package)' "${MANIFEST}")"
           test "$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.version)' "${MANIFEST}")" = "${VERSION_NUM}"
           test "$(node -e 'const m=require("./"+process.argv[1]); process.stdout.write(m.tag)' "${MANIFEST}")" = "${VERSION_INPUT}"
           [[ "${TAG_SHA_EXPECTED}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${TAG_TREE_EXPECTED}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${PACKAGE_SHA_EXPECTED}" =~ ^[0-9a-f]{64}$ ]]
-          test "${PACKAGE_NAME}" = "gitcode-cli-cli-${VERSION_NUM}.tgz"
           git fetch --force --tags origin
           TAG_SHA="$(git rev-parse "${VERSION_INPUT}^{commit}")"
           test "${TAG_SHA}" = "${TAG_SHA_EXPECTED}"
@@ -582,41 +612,75 @@ jobs:
           test "$(gh release view "${VERSION_INPUT}" --json isDraft --jq .isDraft)" = "false"
           mkdir release-assets
           CHECKSUM_NAME="gc_${VERSION_NUM}_checksums.txt"
+          # Manifest v2 carries a packages map (one entry per npm coordinate,
+          # see docs/PACKAGING.md); v1 manifests carry a single @gitcode-cli/cli
+          # package plus sha256 and stay recoverable unchanged.
+          node - "${MANIFEST}" <<'NODE' > "${RUNNER_TEMP}/recovery-packages.tsv"
+          const m = require("./" + process.argv[2]);
+          const allowed = new Set(["@gitcode-cli/cli", "@atomgit-cli/cli", "atomgit-cli"]);
+          const rows = [];
+          if (m.packages && typeof m.packages === "object") {
+            for (const [coordinate, entry] of Object.entries(m.packages)) {
+              if (!allowed.has(coordinate)) throw new Error(`unsupported recovery coordinate: ${coordinate}`);
+              if (!/^[0-9a-f]{64}$/.test(entry.sha256 || "")) throw new Error(`invalid sha256 for ${coordinate}`);
+              if (!/^[A-Za-z0-9@._-]+\.tgz$/.test(entry.file || "")) throw new Error(`invalid tarball name for ${coordinate}`);
+              rows.push([coordinate, entry.file, entry.sha256].join("\t"));
+            }
+            if (rows.length === 0) throw new Error("recovery manifest lists no packages");
+          } else {
+            if (m.package !== `gitcode-cli-cli-${m.version}.tgz`) {
+              throw new Error("legacy manifest must reference the @gitcode-cli/cli tarball");
+            }
+            if (!/^[0-9a-f]{64}$/.test(m.sha256 || "")) throw new Error("invalid legacy sha256");
+            rows.push(["@gitcode-cli/cli", m.package, m.sha256].join("\t"));
+          }
+          process.stdout.write(rows.join("\n") + "\n");
+          NODE
           gh release download "${VERSION_INPUT}" \
-            --pattern "${PACKAGE_NAME}" \
+            --pattern "*.tgz" \
             --pattern "${CHECKSUM_NAME}" \
             --dir release-assets
-          test -f "release-assets/${PACKAGE_NAME}"
           test -f "release-assets/${CHECKSUM_NAME}"
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 2
-          test "$(grep -Fc "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")" -eq 1
-          CHECKSUM_LINE="$(grep -F "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")"
-          (cd release-assets && printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -)
-          ACTUAL_PACKAGE_SHA="$(sha256sum "release-assets/${PACKAGE_NAME}" | cut -d' ' -f1)"
-          test "${ACTUAL_PACKAGE_SHA}" = "${PACKAGE_SHA_EXPECTED}"
-          test "${CHECKSUM_LINE%% *}" = "${PACKAGE_SHA_EXPECTED}"
-          PACKAGE_FILE="$(realpath "release-assets/${PACKAGE_NAME}")"
-          tar -xOf "${PACKAGE_FILE}" package/package.json > "${RUNNER_TEMP}/npm-recovery-package.json"
-          node - "${RUNNER_TEMP}/npm-recovery-package.json" "${VERSION_NUM}" <<'NODE'
+          # Every tarball downloaded from the Release must be consumed by
+          # exactly one manifest row; extras indicate a tampered or stale
+          # release asset set.
+          DOWNLOADED_TARBALLS="$(find release-assets -maxdepth 1 -name '*.tgz' -type f | wc -l)"
+          test "${DOWNLOADED_TARBALLS}" -eq "$(wc -l < "${RUNNER_TEMP}/recovery-packages.tsv")"
+          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
+            test -f "release-assets/${PACKAGE_NAME}"
+            test "$(grep -Fc "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")" -eq 1
+            CHECKSUM_LINE="$(grep -F "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")"
+            (cd release-assets && printf '%s\n' "${CHECKSUM_LINE}" | sha256sum -c -)
+            ACTUAL_PACKAGE_SHA="$(sha256sum "release-assets/${PACKAGE_NAME}" | cut -d' ' -f1)"
+            test "${ACTUAL_PACKAGE_SHA}" = "${PACKAGE_SHA_EXPECTED}"
+            test "${CHECKSUM_LINE%% *}" = "${PACKAGE_SHA_EXPECTED}"
+            PACKAGE_FILE="$(realpath "release-assets/${PACKAGE_NAME}")"
+            tar -xOf "${PACKAGE_FILE}" package/package.json > "${RUNNER_TEMP}/npm-recovery-package.json"
+            node - "${RUNNER_TEMP}/npm-recovery-package.json" "${VERSION_NUM}" "${COORDINATE}" <<'NODE'
           const pkg = require(process.argv[2]);
-          const version = process.argv[3];
-          if (pkg.name !== "@gitcode-cli/cli" || pkg.version !== version ||
-              pkg.repository?.url !== "https://github.com/gitcode-cli/cli.git" ||
+          const [version, coordinate] = process.argv.slice(3);
+          const repositories = [
+            "https://github.com/gitcode-cli/cli.git",
+            "https://github.com/atomgit-cli/cli.git",
+          ];
+          if (pkg.name !== coordinate || pkg.version !== version ||
+              !repositories.includes(pkg.repository?.url) ||
               pkg.repository?.directory !== "npm") {
             throw new Error("release tarball package metadata does not match the reviewed recovery manifest");
           }
           NODE
-          tar -xOf "${PACKAGE_FILE}" package/bin/platforms/gc-linux-amd64 > "${RUNNER_TEMP}/gc-linux-amd64"
-          chmod 0755 "${RUNNER_TEMP}/gc-linux-amd64"
-          BINARY_INFO="$("${RUNNER_TEMP}/gc-linux-amd64" version --json)"
-          node - "${BINARY_INFO}" "${VERSION_NUM}" "${TAG_SHA}" <<'NODE'
+            tar -xOf "${PACKAGE_FILE}" package/bin/platforms/gc-linux-amd64 > "${RUNNER_TEMP}/gc-linux-amd64"
+            chmod 0755 "${RUNNER_TEMP}/gc-linux-amd64"
+            BINARY_INFO="$("${RUNNER_TEMP}/gc-linux-amd64" version --json)"
+            node - "${BINARY_INFO}" "${VERSION_NUM}" "${TAG_SHA}" <<'NODE'
           const info = JSON.parse(process.argv[2]);
           if (info.version !== process.argv[3] || info.commit !== process.argv[4]) {
             throw new Error("embedded Linux binary version or commit does not match the reviewed tag");
           }
           NODE
+          done 3< "${RUNNER_TEMP}/recovery-packages.tsv"
           echo "VERSION_NUM=${VERSION_NUM}" >> "$GITHUB_ENV"
-          echo "PACKAGE_FILE=${PACKAGE_FILE}" >> "$GITHUB_ENV"
+          echo "RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv" >> "$GITHUB_ENV"
 
       - name: Recover npm publication (OIDC trusted publishing)
         run: |
@@ -625,9 +689,10 @@ jobs:
           if [[ "${VERSION_NUM}" == *-* ]]; then
             PUBLISH_TAG="next"
           fi
-          CURRENT_TAG_VERSION="$(npm view "@gitcode-cli/cli" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
-          if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
-            node - "${VERSION_NUM}" "${CURRENT_TAG_VERSION}" <<'NODE'
+          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
+            CURRENT_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
+            if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
+              node - "${VERSION_NUM}" "${CURRENT_TAG_VERSION}" <<'NODE'
           function parse(value) {
             const match = value.match(/^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$/);
             if (!match) throw new Error(`unsupported release version: ${value}`);
@@ -645,19 +710,32 @@ jobs:
             throw new Error(`refusing to move npm dist-tag backwards from ${process.argv[3]} to ${process.argv[2]}`);
           }
           NODE
+            fi
+            PACKAGE_FILE="$(realpath "release-assets/${PACKAGE_NAME}")"
+            if npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1; then
+              mkdir existing-npm
+              npm pack "${COORDINATE}@${VERSION_NUM}" --pack-destination existing-npm >/dev/null
+              EXISTING_FILE="$(find existing-npm -maxdepth 1 -name '*.tgz' -type f -print -quit)"
+              test -n "${EXISTING_FILE}"
+              test "$(sha256sum "${PACKAGE_FILE}" | cut -d' ' -f1)" = "$(sha256sum "${EXISTING_FILE}" | cut -d' ' -f1)" || {
+                echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
+                exit 1
+              }
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              test "${TAG_VERSION}" = "${VERSION_NUM}"
+              echo "npm ${COORDINATE}@${VERSION_NUM} already published with identical content; skipping"
+              rm -rf existing-npm
+              continue
+            fi
+            npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"
+          done 3< "${RECOVERY_PACKAGES}"
+          # A full three-coordinate manifest must leave all coordinates aligned.
+          if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]; then
+            while IFS=$'\t' read -r COORDINATE _ _ <&3; do
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              test "${TAG_VERSION}" = "${VERSION_NUM}" || {
+                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; expected ${VERSION_NUM}"
+                exit 1
+              }
+            done 3< "${RECOVERY_PACKAGES}"
           fi
-          if npm view "@gitcode-cli/cli@${VERSION_NUM}" version >/dev/null 2>&1; then
-            mkdir existing-npm
-            npm pack "@gitcode-cli/cli@${VERSION_NUM}" --pack-destination existing-npm >/dev/null
-            EXISTING_FILE="$(find existing-npm -maxdepth 1 -name '*.tgz' -type f -print -quit)"
-            test -n "${EXISTING_FILE}"
-            test "$(sha256sum "${PACKAGE_FILE}" | cut -d' ' -f1)" = "$(sha256sum "${EXISTING_FILE}" | cut -d' ' -f1)" || {
-              echo "::error::existing npm package content differs from the verified release asset"
-              exit 1
-            }
-            TAG_VERSION="$(npm view "@gitcode-cli/cli" "dist-tags.${PUBLISH_TAG}")"
-            test "${TAG_VERSION}" = "${VERSION_NUM}"
-            echo "npm @gitcode-cli/cli@${VERSION_NUM} already published with identical content; skipping"
-            exit 0
-          fi
-          npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"
