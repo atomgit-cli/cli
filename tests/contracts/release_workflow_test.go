@@ -90,6 +90,7 @@ func TestReleaseWorkflowRecoversAllNPMCoordinates(t *testing.T) {
 		`DOWNLOADED_TARBALLS`,
 		// TSV-driven loops must not let npm commands swallow the manifest stdin.
 		`done 3< "${RECOVERY_PACKAGES}"`,
+		`done 3< "${RUNNER_TEMP}/recovery-packages.tsv"`,
 		// A full three-coordinate manifest must end with all dist-tags aligned.
 		`if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]`,
 		`expected ${VERSION_NUM}`,

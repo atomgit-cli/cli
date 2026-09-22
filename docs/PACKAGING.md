@@ -323,7 +323,7 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
 
 发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`，三坐标逐一绑定 Trusted Publisher）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。
 
-npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256，可只列待恢复子集）见 [release-process.md](../spec/delivery/release-process.md)。
+npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256，须列全量三坐标，已发布坐标幂等跳过）见 [release-process.md](../spec/delivery/release-process.md)。
 
 ### 发布命令参考
 
