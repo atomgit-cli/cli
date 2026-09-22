@@ -1355,6 +1355,60 @@ gc discussions comments replies 42 <comment-id> --org my-org
 
 说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--page`/`--per-page`；`--json`。
 
+### discussions comments create - 创建组织讨论评论
+
+调用 `POST /api/v5/orgs/{org}/discuss/{number}/comment`。
+
+```bash
+# 创建评论
+gc discussions comments create 42 --org my-org --body "评论内容"
+
+# 从文件读取正文
+gc discussions comments create 42 --org my-org --body-file comment.md
+
+# 从 stdin 读取正文
+echo "评论内容" | gc discussions comments create 42 --org my-org --body-file -
+
+# 输出 JSON
+gc discussions comments create 42 --org my-org --body "评论内容" --json
+```
+
+说明：`--org`（必填）；位置参数为讨论编号；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions comments edit - 编辑组织讨论评论
+
+调用 `PUT /api/v5/orgs/{org}/discuss/{number}/comment/{id}`。
+
+```bash
+# 编辑评论
+gc discussions comments edit 42 <comment-id> --org my-org --body "新内容"
+
+# 从文件读取正文
+gc discussions comments edit 42 <comment-id> --org my-org --body-file comment.md
+
+# 输出 JSON
+gc discussions comments edit 42 <comment-id> --org my-org --body "新内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出更新结果。
+
+### discussions comments reply - 回复组织讨论评论
+
+调用 `POST /api/v5/orgs/{org}/discuss/{number}/comment/{comment_id}/reply`。
+
+```bash
+# 回复评论
+gc discussions comments reply 42 <comment-id> --org my-org --body "回复内容"
+
+# 从文件读取正文
+gc discussions comments reply 42 <comment-id> --org my-org --body-file reply.md
+
+# 输出 JSON
+gc discussions comments reply 42 <comment-id> --org my-org --body "回复内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建的回复。
+
 ### discussions project comments list - 列出仓库讨论评论
 
 仓库讨论评论，调用 `GET /api/v5/repos/{owner}/{repo}/discuss/{number}/comment`。
