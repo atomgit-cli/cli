@@ -614,3 +614,214 @@ func TestHasAssigneeChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestEditRunSetsPRMergers(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	var requests []string
+	var mergerBody string
+	ioStreams, _, out, _ := iostreams.Test()
+	opts := &EditOptions{
+		IO: ioStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests = append(requests, req.Method+" "+req.URL.Path)
+
+				var body string
+				switch req.Method {
+				case http.MethodPut:
+					if req.URL.Path == "/api/v5/repos/owner/repo/pulls/123/mergers" {
+						bodyBytes, err := io.ReadAll(req.Body)
+						if err != nil {
+							t.Fatalf("read PUT body: %v", err)
+						}
+						mergerBody = string(bodyBytes)
+						body = `[{"id":1,"login":"user1","name":"User One","object_id":"o1"}]`
+					} else {
+						t.Fatalf("unexpected PUT path: %s", req.URL.Path)
+					}
+				case http.MethodGet:
+					body = `{"number":123,"title":"pr title","html_url":"https://gitcode.com/owner/repo/pulls/123"}`
+				default:
+					t.Fatalf("unexpected request method: %s", req.Method)
+				}
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     http.StatusText(http.StatusOK),
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			})}, nil
+		},
+		Repository: "owner/repo",
+		Number:     123,
+		Mergers:    []string{"user1"},
+		MergersSet: true,
+	}
+
+	if err := editRun(opts); err != nil {
+		t.Fatalf("editRun() error = %v", err)
+	}
+
+	wantRequests := []string{
+		"PUT /api/v5/repos/owner/repo/pulls/123/mergers",
+		"GET /api/v5/repos/owner/repo/pulls/123",
+	}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests = %q, want %q", requests, wantRequests)
+	}
+	if !strings.Contains(mergerBody, `"mergers":"user1"`) {
+		t.Fatalf("mergers body = %q, want mergers field", mergerBody)
+	}
+	if !strings.Contains(out.String(), "mergers: user1") {
+		t.Fatalf("output = %q, want mergers line in output", out.String())
+	}
+}
+
+func TestEditRunSetsPRMergersJSON(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	var requests []string
+	ioStreams, _, out, _ := iostreams.Test()
+	opts := &EditOptions{
+		IO: ioStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests = append(requests, req.Method+" "+req.URL.Path)
+
+				var body string
+				switch req.Method {
+				case http.MethodPut:
+					if req.URL.Path == "/api/v5/repos/owner/repo/pulls/123/mergers" {
+						body = `[{"id":1,"login":"user1","name":"User One","object_id":"o1"}]`
+					} else {
+						t.Fatalf("unexpected PUT path: %s", req.URL.Path)
+					}
+				case http.MethodGet:
+					body = `{"number":123,"title":"pr title","html_url":"https://gitcode.com/owner/repo/pulls/123"}`
+				default:
+					t.Fatalf("unexpected request method: %s", req.Method)
+				}
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     http.StatusText(http.StatusOK),
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			})}, nil
+		},
+		Repository: "owner/repo",
+		Number:     123,
+		Mergers:    []string{"user1"},
+		MergersSet: true,
+		JSON:       true,
+	}
+
+	if err := editRun(opts); err != nil {
+		t.Fatalf("editRun() error = %v", err)
+	}
+
+	wantRequests := []string{
+		"PUT /api/v5/repos/owner/repo/pulls/123/mergers",
+		"GET /api/v5/repos/owner/repo/pulls/123",
+	}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests = %q, want %q", requests, wantRequests)
+	}
+
+	var result struct {
+		PullRequest struct {
+			Number int    `json:"number"`
+			Title  string `json:"title"`
+		} `json:"pull_request"`
+		Mergers []struct {
+			Login string `json:"login"`
+		} `json:"mergers"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v; output=%q", err, out.String())
+	}
+	if result.PullRequest.Number != 123 || result.PullRequest.Title != "pr title" {
+		t.Fatalf("incomplete pull_request in JSON output: %#v", result.PullRequest)
+	}
+	if len(result.Mergers) != 1 || result.Mergers[0].Login != "user1" {
+		t.Fatalf("mergers = %#v, want one merger with login user1", result.Mergers)
+	}
+}
+
+func TestEditRunClearsPRMergers(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	var mergerBody string
+	ioStreams, _, out, _ := iostreams.Test()
+	opts := &EditOptions{
+		IO: ioStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				var body string
+				switch req.Method {
+				case http.MethodPut:
+					if req.URL.Path == "/api/v5/repos/owner/repo/pulls/123/mergers" {
+						bodyBytes, err := io.ReadAll(req.Body)
+						if err != nil {
+							t.Fatalf("read PUT body: %v", err)
+						}
+						mergerBody = string(bodyBytes)
+						body = `[]`
+					} else {
+						t.Fatalf("unexpected PUT path: %s", req.URL.Path)
+					}
+				case http.MethodGet:
+					body = `{"number":123,"title":"pr title","html_url":"https://gitcode.com/owner/repo/pulls/123"}`
+				default:
+					t.Fatalf("unexpected request method: %s", req.Method)
+				}
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     http.StatusText(http.StatusOK),
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			})}, nil
+		},
+		Repository: "owner/repo",
+		Number:     123,
+		Mergers:    []string{},
+		MergersSet: true,
+	}
+
+	if err := editRun(opts); err != nil {
+		t.Fatalf("editRun() error = %v", err)
+	}
+
+	if !strings.Contains(mergerBody, `"mergers":""`) {
+		t.Fatalf("mergers body = %q, want empty mergers field to clear the set", mergerBody)
+	}
+	if !strings.Contains(out.String(), "Updated PR #123") {
+		t.Fatalf("output = %q, want success line in output", out.String())
+	}
+}
+
+func TestNewCmdEditMergersFlag(t *testing.T) {
+	f := cmdutil.TestFactory()
+	var gotMergers []string
+	var gotSet bool
+	cmd := NewCmdEdit(f, func(opts *EditOptions) error {
+		gotMergers = opts.Mergers
+		gotSet = opts.MergersSet
+		return nil
+	})
+	cmd.SetArgs([]string{"123", "-R", "owner/repo", "--mergers", "user1,user2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(gotMergers) != 2 || gotMergers[0] != "user1" || gotMergers[1] != "user2" {
+		t.Fatalf("Mergers = %v, want [user1 user2]", gotMergers)
+	}
+	if !gotSet {
+		t.Fatalf("MergersSet = false, want true")
+	}
+}
