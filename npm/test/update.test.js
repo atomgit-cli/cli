@@ -149,6 +149,7 @@ test("latest-version checks query the installed coordinate on the official regis
   assert.ok(argv.includes("dist-tags.latest"), `dist-tags.latest expected: ${JSON.stringify(argv)}`);
   assert.ok(argv.includes("--json"));
   assert.ok(argv.includes("--registry=https://registry.npmjs.org"));
+  assert.strictEqual(checkLatest({ npm: stub }), "1.2.3");
 });
 
 test("global updater falls back when the recorded npm runtime is stale", () => {

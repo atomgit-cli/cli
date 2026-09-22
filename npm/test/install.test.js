@@ -291,6 +291,23 @@ test("install commit removes transaction-scoped backups", () => {
   assert.strictEqual(fs.existsSync(record.backup), false);
 });
 
+test("replacePath applies the helper transform at the wiring level", () => {
+  // Guards the P0 wiring itself: without the transform option, the copied
+  // helper keeps require("../package.json") and cannot load from a bin dir.
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-wiring-"));
+  const copied = path.join(root, "gitcode-update-helper.js");
+  const record = replacePath(
+    path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"),
+    copied,
+    "helper-wiring",
+    { transform: helperPackageNameTransform(require("../package.json").name) }
+  );
+  commitTransaction([record]);
+  const helper = require(copied);
+  assert.ok(helper.withNpmIsolation(["exec", "--", "gitcode", "install"], "u.npmrc", "g.npmrc")
+    .includes("--registry=https://registry.npmjs.org"));
+});
+
 function createFileSymlinkOrSkip(t, target, link) {
   try {
     fs.symlinkSync(target, link, "file");
