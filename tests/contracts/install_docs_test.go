@@ -8,13 +8,30 @@ import (
 	"testing"
 )
 
-const npmSecurityFlags = "--yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org"
+// Canonical npm bootstrap commands per distribution coordinate. The bare
+// atomgit-cli coordinate is the recommended one; the scoped @gitcode-cli/cli
+// coordinate stays valid in parallel. Scoped names additionally pin the
+// scope registry; bare names only pin the global registry.
+const npmSecurityFlagsScoped = "--yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org"
 const shortNPMBootstrap = "npx -y @gitcode-cli/cli@latest install"
-const canonicalNPMBootstrap = "npx " + npmSecurityFlags + " @gitcode-cli/cli@latest install"
+const canonicalNPMBootstrap = "npx " + npmSecurityFlagsScoped + " @gitcode-cli/cli@latest install"
 const canonicalNPMGlobal = "npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest"
 
-var npxInstallPattern = regexp.MustCompile(`npx[^` + "`\"\r\n" + `]*@gitcode-cli/cli[^` + "`\"\r\n" + `]*install`)
-var npmGlobalPattern = regexp.MustCompile(`npm install -g[^` + "`\"\r\n" + `]*@gitcode-cli/cli[^` + "`\"\r\n" + `]*`)
+const npmSecurityFlagsBare = "--yes --ignore-scripts --registry=https://registry.npmjs.org"
+const shortBareBootstrap = "npx -y atomgit-cli@latest install"
+const canonicalBareBootstrap = "npx " + npmSecurityFlagsBare + " atomgit-cli@latest install"
+const canonicalBareGlobal = "npm install -g --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest"
+
+// Equivalent short forms listed when a document recommends one coordinate
+// and mentions the others as alternatives.
+var equivalentShortBootstraps = []string{
+	"npx -y @atomgit-cli/cli@latest install",
+	"npx -y @gitcode-cli/cli@latest install",
+	"npx -y atomgit-cli@latest install",
+}
+
+var npxInstallPattern = regexp.MustCompile(`npx[^` + "`\"\r\n" + `]*(?:@gitcode-cli/cli|atomgit-cli)[^` + "`\"\r\n" + `]*install`)
+var npmGlobalPattern = regexp.MustCompile(`npm install -g[^` + "`\"\r\n" + `]*(?:@gitcode-cli/cli|atomgit-cli)[^` + "`\"\r\n" + `]*`)
 
 func TestInstallDocsUseCanonicalNPMBootstrap(t *testing.T) {
 	version := strings.TrimSpace(readRepositoryFile(t, "VERSION"))
@@ -29,10 +46,8 @@ func TestInstallDocsUseCanonicalNPMBootstrap(t *testing.T) {
 	}
 	for _, relativePath := range userPaths {
 		content := readRepositoryFile(t, relativePath)
-		shortIndex := strings.Index(content, shortNPMBootstrap)
-		hardenedIndex := strings.Index(content, canonicalNPMBootstrap)
-		if shortIndex < 0 || hardenedIndex < 0 || shortIndex > hardenedIndex {
-			t.Errorf("%s must show the short npm bootstrap before the hardened form", relativePath)
+		if !showsShortBeforeHardenedBootstrap(content) {
+			t.Errorf("%s must show the short npm bootstrap before the hardened form of one coordinate", relativePath)
 		}
 		assertNPMInstallLinesAreCanonical(t, relativePath, content, true)
 	}
@@ -43,6 +58,20 @@ func TestInstallDocsUseCanonicalNPMBootstrap(t *testing.T) {
 	}
 	assertNPMInstallLinesAreCanonical(t, securityPath, content, false)
 	assertNPMInstallLinesAreCanonical(t, filepath.Join("npm", "bin", "gc.js"), readRepositoryFile(t, filepath.Join("npm", "bin", "gc.js")), false)
+}
+
+// showsShortBeforeHardenedBootstrap reports whether the content shows the
+// short bootstrap before the hardened form for at least one coordinate.
+func showsShortBeforeHardenedBootstrap(content string) bool {
+	scopedShort, scopedHardened := strings.Index(content, shortNPMBootstrap), strings.Index(content, canonicalNPMBootstrap)
+	if scopedShort >= 0 && scopedHardened >= 0 && scopedShort <= scopedHardened {
+		return true
+	}
+	bareShort, bareHardened := strings.Index(content, shortBareBootstrap), strings.Index(content, canonicalBareBootstrap)
+	if bareShort >= 0 && bareHardened >= 0 && bareShort <= bareHardened {
+		return true
+	}
+	return false
 }
 
 func TestREADMEPrioritizesBootstrapAndExplainsLocalInstall(t *testing.T) {
@@ -61,7 +90,7 @@ func TestCurrentReleaseNotesProvideShortAndHardenedBootstrap(t *testing.T) {
 	version := strings.TrimSpace(readRepositoryFile(t, "VERSION"))
 	releasePath := filepath.Join("docs", "releases", "v"+version+".md")
 	content := readRepositoryFile(t, releasePath)
-	pinned := "npx " + npmSecurityFlags + " @gitcode-cli/cli@" + version + " install"
+	pinned := "npx " + npmSecurityFlagsScoped + " @gitcode-cli/cli@" + version + " install"
 	shortIndex := strings.Index(content, shortNPMBootstrap)
 	hardenedIndex := strings.Index(content, canonicalNPMBootstrap)
 	if shortIndex < 0 || hardenedIndex < 0 || shortIndex > hardenedIndex {
@@ -81,18 +110,25 @@ func TestCurrentReleaseNotesProvideShortAndHardenedBootstrap(t *testing.T) {
 func assertNPMInstallLinesAreCanonical(t *testing.T, path, content string, allowShort bool) {
 	t.Helper()
 	version := strings.TrimSpace(readRepositoryFile(t, "VERSION"))
-	pinned := "npx " + npmSecurityFlags + " @gitcode-cli/cli@" + version + " install"
+	pinnedScoped := "npx " + npmSecurityFlagsScoped + " @gitcode-cli/cli@" + version + " install"
+	pinnedBare := "npx " + npmSecurityFlagsBare + " atomgit-cli@" + version + " install"
 	for _, command := range npxInstallPattern.FindAllString(content, -1) {
-		if command == canonicalNPMBootstrap || command == pinned || strings.HasPrefix(command, canonicalNPMBootstrap+" --target-dir ") {
+		if command == canonicalNPMBootstrap || command == pinnedScoped || strings.HasPrefix(command, canonicalNPMBootstrap+" --target-dir ") {
 			continue
 		}
-		if allowShort && command == shortNPMBootstrap {
+		if command == canonicalBareBootstrap || command == pinnedBare || strings.HasPrefix(command, canonicalBareBootstrap+" --target-dir ") {
+			continue
+		}
+		if allowShort && (command == shortNPMBootstrap || command == shortBareBootstrap) {
+			continue
+		}
+		if allowShort && containsString(equivalentShortBootstraps, command) {
 			continue
 		}
 		t.Errorf("%s contains non-canonical npx install command %q", path, command)
 	}
 	for _, command := range npmGlobalPattern.FindAllString(content, -1) {
-		if command == canonicalNPMGlobal {
+		if command == canonicalNPMGlobal || command == canonicalBareGlobal {
 			continue
 		}
 		t.Errorf("%s contains non-canonical global npm install command %q", path, command)
