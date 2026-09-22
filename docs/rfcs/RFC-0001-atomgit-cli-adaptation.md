@@ -52,17 +52,19 @@ ATOMGIT_CLI_COMMAND_NAME
 - 存量用户零感知：检测到 `~/.config/gc/` 即沿用，auth/config 全部有效
 - 同时存在两个目录时优先 `ac`（用户显式创建 `~/.config/ac/` 视为主动迁移信号）
 
-### 4. npm 双包并行
+### 4. npm 三坐标并行（长期承诺）
 
-| | `@atomgit-cli/cli`（新） | `@gitcode-cli/cli`（旧） |
-|---|---|---|
-| bin 入口 | `ac` / `atomgit` / `gc` / `gitcode`（超集） | `gc` / `gitcode`（不变） |
-| 版本号 | 与旧包同步 | 照常演进 |
-| 内容 | 同一组 goreleaser 二进制 | 同上 |
+| | `atomgit-cli`（裸名，**推荐**） | `@atomgit-cli/cli`（新 scoped） | `@gitcode-cli/cli`（旧 scoped） |
+|---|---|---|---|
+| bin 入口 | `gc` / `gitcode`（实施 PR-2 前与旧包一致，其后含 `ac` / `atomgit` 超集） | 同左 | `gc` / `gitcode`（不变） |
+| 版本号 | 三坐标同版本号同步演进 | 同左 | 照常演进 |
+| 内容 | 同一组 goreleaser 二进制 | 同上 | 同上 |
 
-- release 流水线**一次构建**，组装两个 npm tarball（差异仅 package.json name/bin/描述），双双纳入统一 checksum，双双发布（对齐既有"npm tarball 必须由 release artifacts job 组装"的规范）
+- **长期并行承诺，不设弃用时间表**（决策 5 为长期承诺，非过渡措施）：每次正式发布必须以同一版本号发布全部三坐标（内容一致），发布流水线校验三坐标版本一致后方可判定发布成功；无任何坐标的 deprecation 计划
+- npm 裸名 `gitcode-cli` 被第三方占用（2026-05 起，非本项目），不可达且已在 README 标注勿装——"四坐标"目标实际为三坐标
+- release 流水线**一次构建**，按坐标模板化 package.json 组装三个 npm tarball（差异仅 name/bin/描述），全部纳入统一 checksum，全部发布（对齐既有"npm tarball 必须由 release artifacts job 组装"的规范；流水线须含坐标 allowlist 校验，防模板化笔误）
 - 捆绑二进制文件名保持 `gc-linux-*` 等不变（避免 goreleaser 归档、checksum、platform.js 映射全链变动）；npm wrapper 按被调用的 bin 名设置 `ATOMGIT_CLI_COMMAND_NAME` 传递自名
-- update checker / PATH 诊断按各自包名与入口适配
+- update checker / PATH 诊断按各自包名与入口适配（PR !564 已落地动态坐标）
 
 ### 5. 打包渠道同步适配（每渠道同时提供新旧名）
 
@@ -112,7 +114,7 @@ ATOMGIT_CLI_COMMAND_NAME
 ## 未决问题（Unresolved Questions）
 
 - 是否提供显式迁移命令（`ac config migrate`：`~/.config/gc` → `~/.config/ac`）
-- `GC_*` 旧环境变量的弃用时间表（建议：至少到 v1 前不设限，届时另行决策）
+- `GC_*` 旧环境变量的弃用时间表（建议：至少到 v1 前不设限，届时另行决策；**npm 三坐标不在此列——长期并行是承诺，不是待决事项**）
 - Homebrew 双 tap 的最终形态（单 formula 双名 vs 双 tap 并行）
 - 平台域名未来若切换，需另起 RFC 处理 host、web URL 与配置迁移
 
