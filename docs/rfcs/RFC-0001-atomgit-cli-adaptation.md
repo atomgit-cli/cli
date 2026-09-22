@@ -79,7 +79,7 @@ ATOMGIT_CLI_COMMAND_NAME
 - 仓内引用更新（实施 PR-5 范围）：`.gitmodules`、CI workflows、scripts、docs、AGENTS/CLAUDE 中的 `gitcode.com/gitcode-cli/*` 路径改为 `atomgit-cli/*`；Go module path 除外（见下）
 - **Go module path 保持 `gitcode.com/gitcode-cli/cli` 不变**：CLI 应用不是可导入库，module path 仅是标识符；改写 500+ 文件 import 是纯噪声高风险动作。旧路径重定向失效（如旧 org 路径被重新注册）不影响本地构建
 - 风险与对策：旧路径重定向的持久性不可控——文档与脚本一律改用新路径，不依赖重定向；本地/CI remote 同步更新
-- GitHub 镜像 org（github.com/gitcode-cli）与 homebrew tap 是否改名另行决策（涉及 release 下载 URL 链，属实施 PR-6 范围）
+- GitHub 镜像 org 已同步改名（2026-09-21，`github.com/gitcode-cli` → `github.com/atomgit-cli`，homebrew-tap 随迁；镜像同步链路经 rename 后 push 验证仍工作）。剩余工作：仓内 23 处 `github.com/gitcode-cli` 引用（release 下载 URL、homebrew formula、workflows、scripts）更新，属实施 PR-5/6 范围；GitHub 旧路径自动重定向在旧 org 名被重新注册后失效，不作为长期依赖
 
 ### 7. 品牌文案
 
@@ -125,6 +125,6 @@ ATOMGIT_CLI_COMMAND_NAME
 | 3 | 打包渠道 | goreleaser、nfpm、scoop、homebrew、Makefile、completions | 1 |
 | 4 | Python wheel | PyPI `atomgit-cli`、entry points、wrapper 适配 | 1 |
 | 5 | 文档与规范 | README、COMMANDS、AUTH、PACKAGING、spec、AGENTS/CLAUDE、Docker 文档 | 1–4 |
-| 6 | release 工程 | release workflow 双包发布、统一 checksum、GitHub 镜像与 tap 归属决策、CI workflow + spec/delivery 更新 | 2–4 |
+| 6 | release 工程 | release workflow 双包发布、统一 checksum、GitHub 镜像与 tap 引用更新、CI workflow + spec/delivery 更新 | 2–4 |
 
 回归：`./scripts/regression-core.sh` + 全渠道冒烟（双 npm 包安装、deb/rpm、brew、scoop、wheel、双命令名补全加载）。
