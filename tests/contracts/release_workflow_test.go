@@ -30,7 +30,6 @@ func TestReleaseWorkflowOrdersTagBeforeGoReleaser(t *testing.T) {
 func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 	workflow := readReleaseWorkflow(t)
 	for _, required := range []string{
-		`PACKAGE_FILE="$(realpath "$(find release-assets`,
 		`if: ${{ !inputs.npm_recovery }}`,
 		`if: ${{ inputs.npm_recovery }}`,
 		`test "$(tr -d '\r\n' < VERSION)" = "${VERSION_NUM}"`,
@@ -47,9 +46,53 @@ func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 		`package/bin/platforms/gc-linux-amd64`,
 		`refusing to move npm dist-tag backwards`,
 		`npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"`,
+		`recovery-packages.tsv`,
+		`RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing npm recovery protection %q", required)
+		}
+	}
+}
+
+func TestReleaseWorkflowPublishesAllNPMCoordinates(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		`test "$(find . -maxdepth 1 -name '*.tgz' -type f | wc -l)" -eq 3`,
+		`test -f "gitcode-cli-cli-${VERSION_NUM}.tgz"`,
+		`test -f "atomgit-cli-cli-${VERSION_NUM}.tgz"`,
+		`test -f "atomgit-cli-${VERSION_NUM}.tgz"`,
+		`coordinate_tarball()`,
+		`for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do`,
+		`all three coordinates must publish ${VERSION_NUM}`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing multi-coordinate npm publishing guard %q", required)
+		}
+	}
+	// The per-coordinate publish loop must exist in both the regular npm job
+	// (idempotent skip + publish) and the recovery job.
+	if got := strings.Count(workflow, `npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1`); got != 2 {
+		t.Fatalf("per-coordinate idempotency check appears %d times, want 2 (npm job + recovery)", got)
+	}
+}
+
+func TestPrepareNPMPackageScriptPublishesAllCoordinates(t *testing.T) {
+	path := filepath.Join("..", "..", "scripts", "prepare-npm-package.sh")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`readonly NPM_COORDINATES=("@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli")`,
+		`refusing npm coordinate outside the reviewed allowlist`,
+		`npm test`,
+		`npm pack --pack-destination "${OUTPUT_DIR}"`,
+		`pkg.name = name`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("prepare-npm-package.sh missing multi-coordinate guard %q", required)
 		}
 	}
 }
@@ -259,7 +302,7 @@ func TestReleaseWorkflowKeepsPrereleasesOffNpmLatest(t *testing.T) {
 			t.Errorf("release workflow missing npm prerelease tag guard %q", required)
 		}
 	}
-	assertOrdered(t, workflow, `PUBLISH_TAG="latest"`, `npm view "@gitcode-cli/cli@${VERSION_NUM}" version`)
+	assertOrdered(t, workflow, `PUBLISH_TAG="latest"`, `npm view "${COORDINATE}@${VERSION_NUM}" version`)
 }
 
 func TestPackageScriptPinsNfpm(t *testing.T) {

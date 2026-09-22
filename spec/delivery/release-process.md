@@ -80,10 +80,10 @@ vMAJOR.MINOR.PATCH-PRERELEASE
   - tap 仓 `gitcode-cli/homebrew-tap` 存在且默认分支为 `main`
   - tap 仓已配置 write deploy key（公钥）
   - 主仓 secret `HOMEBREW_TAP_DEPLOY_KEY` 已配置（对应私钥）
-- npm 链路就绪（首次发布前一次性配置）：
-  - npm 组织 `gitcode-cli` 已创建，发布者为成员
-  - 在 npmjs.com 的 `@gitcode-cli/cli` 包设置中配置 **Trusted Publisher**（GitHub Actions）：org `gitcode-cli`、repo `cli`、workflow filename `release.yml`、allowed `npm publish`。npm CLI ≥ 11.5.1 + Node ≥ 22.14 自动经 OIDC 发布，**无需 NPM_TOKEN**；Classic token 已于 2025-11 移除，granular token 无法创建 org 下首个新包，故采用 OIDC（npm 官方推荐）
-  - `npm/package.json` 的 `repository.url` 必须为 `https://github.com/gitcode-cli/cli.git`（OIDC 校验 repository.url 与 GitHub 仓一致）
+- npm 链路就绪（首次发布前一次性配置，**三坐标逐一配置**）：
+  - npm 组织 `gitcode-cli` 与 `atomgit-cli` 已创建，发布者为成员；裸名 `atomgit-cli` 与 `@atomgit-cli/cli` 的 Trusted Publisher 同样绑定
+  - 在 npmjs.com 为 `@gitcode-cli/cli`、`@atomgit-cli/cli`、`atomgit-cli` 三个包分别配置 **Trusted Publisher**（GitHub Actions）：org `atomgit-cli`、repo `cli`、workflow filename `release.yml`、allowed `npm publish`。npm CLI ≥ 11.5.1 + Node ≥ 22.14 自动经 OIDC 发布，**无需 NPM_TOKEN**；Classic token 已于 2025-11 移除，granular token 无法创建 org 下首个新包，故采用 OIDC（npm 官方推荐）
+  - `npm/package.json` 的 `repository.url` 必须为 `https://github.com/atomgit-cli/cli.git`（OIDC 校验 repository.url 与 GitHub 仓一致；旧 `gitcode-cli` 路径仅重定向兼容）
 
 ## 6. 标准发布流程
 
@@ -95,7 +95,7 @@ vMAJOR.MINOR.PATCH-PRERELEASE
 4. 运行 `scripts/sync-package-version.sh X.Y.Z` 同步根 `VERSION` 与所有 package metadata，并同步文档版本号
 5. 使用标准脚本在本地验证发布产物
 6. 将发布准备 PR 合入 GitCode 与 GitHub 的 `main`，确认 tree hash 一致
-7. 触发 GitHub release workflow，创建 tag、GitHub Release、正式产物并发布 PyPI，推送 Homebrew formula 到 `gitcode-cli/homebrew-tap`（brew job），并发布 npm 包 `@gitcode-cli/cli`（npm job，内置多平台二进制 + Node wrapper + `install` 子命令）
+7. 触发 GitHub release workflow，创建 tag、GitHub Release、正式产物并发布 PyPI，推送 Homebrew formula 到 homebrew tap（brew job），并以三坐标并行发布 npm 包 `@gitcode-cli/cli`、`@atomgit-cli/cli`、`atomgit-cli`（npm job，内置多平台二进制 + Node wrapper + `install` 子命令；发布后校验三坐标 dist-tag 版本一致）
 8. 通过 SSH 将同一 tag 推送到 GitCode，并把同一批正式产物上传到 GitCode Release
 9. 对两个平台、PyPI、Homebrew 与 npm 安装入口执行发布后验证
 
@@ -149,9 +149,9 @@ workflow 必须先在只读权限下校验 `docs/releases/vX.Y.Z.md`、执行 Go
 
 `brew` job 在 publish 后推送 Homebrew formula 到 tap 仓，是发布完整性的组成部分：失败即整个 release workflow 失败，阻断 §6.6 GitCode 同步，需人工修复（deploy key / secret / tap 仓）后重跑 workflow（publish 幂等跳过，brew 重新推送），或手动补推 formula 与 GitCode 同步。它使用 deploy key 而非 GITHUB_TOKEN，只读权限即可。
 
-`artifacts` job 从同一批 GoReleaser 标准产物提取 5 个平台二进制（linux/darwin × amd64/arm64 + windows amd64），调用 `scripts/prepare-npm-package.sh` 组装 npm tarball、运行 wrapper 单测，并把 `.tgz` 纳入统一 Release SHA-256 清单。禁止 `npm` job 独立重编译。
+`artifacts` job 从同一批 GoReleaser 标准产物提取 5 个平台二进制（linux/darwin × amd64/arm64 + windows amd64），调用 `scripts/prepare-npm-package.sh` 按**三坐标**（`@gitcode-cli/cli` / `@atomgit-cli/cli` / `atomgit-cli`，坐标 allowlist 硬校验）各组装一个 npm tarball——每个坐标副本以自身包名运行 wrapper 单测（动态坐标代码路径按坐标实测）——并把全部 `.tgz` 纳入统一 Release SHA-256 清单。禁止 `npm` job 独立重编译。
 
-`npm` job 只下载并校验 `release-assets`，再用 **OIDC Trusted Publishing** 执行 `npm publish <verified.tgz> --access public`（`permissions: id-token: write`，无 `NPM_TOKEN`，自动 provenance）。目标版本已存在时，必须 `npm pack` 下载 registry tarball 并与 Release tarball 比较 SHA-256；只有完全一致才可跳过，差异必须阻断发布。
+`npm` job 只下载并校验 `release-assets`（三坐标 tarball 齐全且入清单），再按坐标逐一以 **OIDC Trusted Publishing** 执行 `npm publish <verified.tgz> --access public`（`permissions: id-token: write`，无 `NPM_TOKEN`，自动 provenance）。任一坐标目标版本已存在时，必须 `npm pack` 下载 registry tarball 并与 Release tarball 比较 SHA-256；只有完全一致才可跳过，差异必须阻断发布。发布完成后必须校验三坐标同名 dist-tag 均指向目标版本（长期并行不变量，docs/PACKAGING.md）。
 
 稳定版本发布到 npm `latest` dist-tag；带 prerelease 后缀的版本必须显式使用 `next`，不得污染自动更新读取的 stable `latest`。
 
@@ -163,7 +163,7 @@ gh workflow run release.yml -R gitcode-cli/cli \
   -f npm_recovery=true
 ```
 
-恢复 job 必须要求 `main` 中存在经 PR 评审的 `docs/releases/vX.Y.Z.npm-recovery.json`，以精确 tag commit、tag tree 与 npm tarball SHA-256 把恢复目标绑定到受审事实。它还须验证当前根 `VERSION`、tag 内 `VERSION`、tag tree 存在于当前 `main` 历史（允许双镜像产生 tree 相同但 commit 不同的 merge）、GitHub Release 非草稿、Release tarball SHA-256、包内 name/version/repository，以及内置 Linux 二进制的 version/commit。它不得重建制品、移动 tag 或重发其他渠道；发布前必须拒绝对应 dist-tag 回退，目标 npm 版本已存在时仍须比较 registry tarball 与 Release tarball并校验 dist-tag。该恢复路径继续使用 `release.yml` 的 OIDC Trusted Publisher 身份，不使用长期 `NPM_TOKEN`。
+恢复 job 必须要求 `main` 中存在经 PR 评审的 `docs/releases/vX.Y.Z.npm-recovery.json`，以精确 tag commit、tag tree 与 npm tarball SHA-256 把恢复目标绑定到受审事实。清单 schema v2 携带 `packages` 映射（每坐标一项：`file` + `sha256`，坐标限三坐标 allowlist）；v1 单包清单（`package` + `sha256`，仅 `@gitcode-cli/cli`）继续可恢复。恢复 job 须验证当前根 `VERSION`、tag 内 `VERSION`、tag tree 存在于当前 `main` 历史（允许双镜像产生 tree 相同但 commit 不同的 merge）、GitHub Release 非草稿、每个 Release tarball 的 SHA-256 与清单校验行、包内 name（等于恢复坐标）/version/repository（新旧 repository.url 均接受，重定向等价），以及内置 Linux 二进制的 version/commit。它不得重建制品、移动 tag 或重发其他渠道；发布前必须拒绝对应坐标 dist-tag 回退，目标 npm 版本已存在时仍须比较 registry tarball 与 Release tarball 并校验 dist-tag；清单覆盖全部三坐标时，恢复后校验三坐标 dist-tag 一致。该恢复路径继续使用 `release.yml` 的 OIDC Trusted Publisher 身份，不使用长期 `NPM_TOKEN`。
 
 ### 6.6 同步 GitCode tag、Release 与正式制品
 
@@ -221,8 +221,8 @@ release notes 必须满足：
 - PyPI 返回目标版本，且 wheel 内置二进制的版本和 commit SHA 可追溯
 - Homebrew tap 仓 `gc.rb` 已更新到目标版本，`brew install gitcode-cli/homebrew-tap/gc` 可安装且 `gc version` 输出正确
 - Homebrew 的 `gc` 与 `gitcode` 两个入口均解析到同一版本
-- npm `@gitcode-cli/cli` 返回目标版本（`npm view @gitcode-cli/cli version`），registry tarball 与 Release `.tgz` SHA-256 一致
-- 固定 generic/scoped 官方 registry 且使用 `--ignore-scripts` 的 `npm install -g` 与 `npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install` 均提供 `gc` / `gitcode`，`version --json` 的版本与 commit SHA 正确，`doctor install --json` 识别对应 distribution；不得把只添加当前项目依赖的裸 `npm i @gitcode-cli/cli` 写成 CLI 安装入口
+- npm 三坐标均返回目标版本（`npm view @gitcode-cli/cli version`、`npm view @atomgit-cli/cli version`、`npm view atomgit-cli version`），各自 registry tarball 与 Release `.tgz` SHA-256 一致
+- 固定 generic/scoped 官方 registry 且使用 `--ignore-scripts` 的 `npm install -g`（三坐标至少抽验推荐坐标 `atomgit-cli` 与一个 scoped 坐标）与 `npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install` 均提供 `gc` / `gitcode`，`version --json` 的版本与 commit SHA 正确，`doctor install --json` 识别对应 distribution；不得把只添加当前项目依赖的裸 `npm i` 写成 CLI 安装入口
 - Windows、Linux、macOS 至少执行旧 npm 版本到目标版本的真实升级烟测；Windows 同时覆盖旧 pip launcher 位于 PATH 前方的诊断
 
 若发布包含 DEB / RPM / wheel，建议至少各抽样验证一种常用安装路径。

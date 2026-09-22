@@ -299,7 +299,7 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
     gitcode update --check --json
     gitcode config set update.mode off
 
-更新器只允许从官方 npm registry 操作**用户所安装坐标**（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json）。**三坐标为长期并行承诺，不设弃用时间表**：每次正式发布必须以同一版本号发布全部坐标（内容一致），发布流水线须校验三坐标版本一致后才能判定发布成功；多坐标发布的流水线模板化由 RFC-0001 实施计划 PR-2/PR-6 交付，交付前流水线仅发布 `@gitcode-cli/cli`。更新器以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。
+更新器只允许从官方 npm registry 操作**用户所安装坐标**（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json）。**三坐标为长期并行承诺，不设弃用时间表**：每次正式发布必须以同一版本号发布全部坐标（内容一致，由 `scripts/prepare-npm-package.sh` 按坐标 allowlist 组装三份 tarball，各坐标副本以自身包名跑 wrapper 单测），发布流水线校验三坐标 dist-tag 版本一致后才能判定发布成功。更新器以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`，三坐标逐一绑定 Trusted Publisher）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。npm 恢复清单 schema v2 见 [release-process.md](../spec/delivery/release-process.md)：`packages` 映射每坐标一项（file + sha256）。
 
 ## 验证安装
 
