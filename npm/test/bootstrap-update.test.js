@@ -43,7 +43,10 @@ test("bootstrap npm exec isolates config before the command separator", () => {
   assert.ok(args.slice(0, separator).includes("--userconfig=user.npmrc"));
   if (pkgName.startsWith("@")) {
     assert.ok(args.slice(0, separator).includes(`--${pkgName.split("/")[0]}:registry=https://registry.npmjs.org`));
+  } else {
+    assert.ok(!args.some((a) => a.includes(":registry=")), "unscoped package names must not carry a scope-registry flag");
   }
+  assert.ok(args.slice(0, separator).includes("--registry=https://registry.npmjs.org"));
   assert.deepStrictEqual(args.slice(separator + 1), ["gitcode", "install"]);
 });
 

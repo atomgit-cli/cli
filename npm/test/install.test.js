@@ -11,9 +11,35 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
+  helperPackageNameTransform, installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
   quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
 } = require("../lib/install");
+
+test("copied update helper gets the npm coordinate injected and loads standalone", () => {
+  const helperSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "utf8");
+  for (const name of ["atomgit-cli", "@atomgit-cli/cli", "@gitcode-cli/cli"]) {
+    const rendered = helperPackageNameTransform(name)(helperSrc);
+    assert.ok(!rendered.includes('require("../package.json")'), `${name}: relative require must be rewritten`);
+    assert.ok(rendered.includes(`const PACKAGE = ${JSON.stringify(name)};`), `${name}: literal coordinate expected`);
+    // The copy runs from the bin directory: loading it must not throw and
+    // must expose the injected coordinate through its behavior.
+    const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-copy-"));
+    const copy = path.join(dir, "gitcode-update-helper.js");
+    fs.writeFileSync(copy, rendered, { mode: 0o755 });
+    const helper = require(copy);
+    const args = helper.withNpmIsolation(["exec", "--yes", "--", "gitcode", "install"], "u.npmrc", "g.npmrc");
+    assert.ok(args.includes("--registry=https://registry.npmjs.org"), `${name}: official registry must be pinned`);
+    if (name.startsWith("@")) {
+      assert.ok(args.some((a) => a === `--${name.split("/")[0]}:registry=https://registry.npmjs.org`), `${name}: scope flag expected`);
+    } else {
+      assert.ok(!args.some((a) => a.includes(":registry=")), `${name}: no scope flag for unscoped names`);
+    }
+  }
+});
+
+test("helper transform fails loudly when the marker is missing", () => {
+  assert.throws(() => helperPackageNameTransform("atomgit-cli")("const PACKAGE = 'stale';"));
+});
 
 test("chooseGlobalBinDir returns a writable, existing dir on posix (regardless of /usr/local/bin)", () => {
   // Deterministic: on hosted runners /usr/local/bin may be writable, so we

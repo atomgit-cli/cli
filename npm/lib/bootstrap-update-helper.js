@@ -11,6 +11,9 @@ const { spawnSync } = require("child_process");
 
 // Derived from package.json so parallel npm coordinates (atomgit-cli,
 // @atomgit-cli/cli, @gitcode-cli/cli) each bootstrap-update themselves.
+// install.js rewrites this exact two-line marker to a literal
+// `const PACKAGE = "<name>";` when copying the helper into the bin dir,
+// because the copy runs outside the package tree (standalone, built-ins only).
 const pkg = require("../package.json");
 const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";

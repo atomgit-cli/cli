@@ -1,12 +1,12 @@
-# AtomGit CLI（原 GitCode CLI）
+# AtomGit CLI
 
-The open-source [AtomGit CLI](https://gitcode.com/atomgit-cli/cli) (formerly GitCode CLI) distributed via npm with **bundled multi-platform binaries** (Linux x64/ARM64, macOS x64/ARM64, Windows x64). No separate binary download is needed after the bootstrap or global installation.
+The open-source [AtomGit CLI](https://gitcode.com/atomgit-cli/cli) (formerly GitCode CLI) distributed via npm with **bundled multi-platform binaries** (Linux x64/ARM64, macOS x64/ARM64, Windows x64, OpenHarmony arm64). No separate binary download is needed after the bootstrap or global installation.
 
 AtomGit CLI (`gc` / `gitcode`) is the community-developed, MIT-licensed command line tool for GitCode / AtomGit — bringing repositories, issues, pull requests, releases and Actions back to the terminal for developers, scripts, and AI agents. It is an independent open-source project, not published by the platform team.
 
-## 分发坐标（Distribution coordinates）
+## Distribution coordinates
 
-以下坐标内容一致、版本号同步演进，命令入口保持 `gc` / `gitcode` 不变，各坐标自更新自身：
+All coordinates below ship identical content with synchronized versions. Command entries stay `gc` / `gitcode`, and each coordinate updates itself — never a sibling package:
 
 | Coordinate | Status |
 | --- | --- |
@@ -14,7 +14,7 @@ AtomGit CLI (`gc` / `gitcode`) is the community-developed, MIT-licensed command 
 | `@atomgit-cli/cli` | New scoped coordinate, equivalent |
 | `@gitcode-cli/cli` | Legacy coordinate, published in parallel — existing installs need no migration |
 
-> ⚠️ The bare npm name `gitcode-cli` is an **unrelated third-party package** (not this tool). Do not install it.
+> ⚠️ The bare npm name `gitcode-cli` is an **unrelated third-party package** (not this tool; it even ships its own `gc` bin that would shadow this one). Do not install it.
 
 ## Install
 
@@ -77,6 +77,9 @@ GC_NO_UPDATE_CHECK=1 gitcode version
 | Linux | x64, arm64 |
 | macOS | x64, arm64 |
 | Windows | x64 |
+| OpenHarmony | arm64 |
+
+OpenHarmony (arm64) reuses the bundled `gc-linux-arm64` binary: the OpenHarmony standard system runs the Linux kernel and gc ships fully static binaries, so no separate download is needed. Node.js reports `process.platform === "openharmony"` there; official upstream support is experimental, so use a Node.js build for OpenHarmony.
 
 Windows arm64 is not shipped by npm, wheel, or release archives yet; build from source with Go for that target. On other unsupported combinations, use only a channel that explicitly lists the OS/architecture: https://gitcode.com/atomgit-cli/cli/releases
 

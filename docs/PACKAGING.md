@@ -299,7 +299,7 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
     gitcode update --check --json
     gitcode config set update.mode off
 
-更新器只允许从官方 npm registry 操作 `@gitcode-cli/cli` 的精确 stable 版本，以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/gitcode-cli/cli.git`。
+更新器只允许从官方 npm registry 操作**用户所安装坐标**（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，由发布流水线按坐标模板化 package.json 并行发布）的精确 stable 版本，以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。
 
 ## 验证安装
 

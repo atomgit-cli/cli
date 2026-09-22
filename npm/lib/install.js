@@ -1,4 +1,4 @@
-// Bootstrap ("install" subcommand) for @gitcode-cli/cli.
+// Bootstrap ("install" subcommand) for the npm-distributed CLI wrapper.
 //
 // Copies the bundled platform binary to a global bin directory and, on
 // Linux/macOS, installs shell completions. The registry-isolated npx bootstrap works without a prior
@@ -124,6 +124,20 @@ function completionTarget(shell, home) {
   }
 }
 
+// Builds the content transform used when copying the bootstrap update helper
+// into the bin directory. The helper must stay standalone (Node built-ins
+// only): the dynamic `require("../package.json")` from the source tree is
+// rewritten to a literal so the copy resolves outside the package tree.
+function helperPackageNameTransform(name) {
+  const marker = 'const pkg = require("../package.json");\nconst PACKAGE = pkg.name;';
+  return (content) => {
+    if (!content.includes(marker)) {
+      throw new Error("bootstrap update helper package-name marker not found");
+    }
+    return content.replace(marker, `const PACKAGE = ${JSON.stringify(name)};`);
+  };
+}
+
 function ensureExec(file) {
   if (process.platform === "win32") return;
   try {
@@ -184,7 +198,11 @@ function replacePath(src, dst, transactionID, options = {}) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  fs.copyFileSync(src, temp, fs.constants.COPYFILE_EXCL);
+  if (options.transform) {
+    fs.writeFileSync(temp, options.transform(fs.readFileSync(src, "utf8")), { flag: "wx", mode: 0o755 });
+  } else {
+    fs.copyFileSync(src, temp, fs.constants.COPYFILE_EXCL);
+  }
   ensureExec(temp);
   let backupReady = false;
   try {
@@ -523,7 +541,7 @@ async function runInstall(args = []) {
       : "Use a release channel that explicitly lists this OS and architecture.";
     throw new Error(
       `no bundled binary for ${process.platform}/${process.arch}. ${guidance} ` +
-        `https://gitcode.com/gitcode-cli/cli/releases`
+        `https://gitcode.com/atomgit-cli/cli/releases`
     );
   }
 
@@ -531,7 +549,7 @@ async function runInstall(args = []) {
   if (!fs.existsSync(src)) {
     throw new Error(
       `bundled binary missing at ${src}. The npm package may be incomplete; ` +
-        `reinstall ${require("../package.json").name}.`
+        `reinstall ${pkg.name}.`
     );
   }
   ensureExec(src);
@@ -549,7 +567,12 @@ async function runInstall(args = []) {
   try {
     transaction.push(replacePath(src, dst, transactionID));
     transaction.push(replacePath(src, alias, transactionID, aliasOptions));
-    transaction.push(replacePath(BOOTSTRAP_HELPER, helper, transactionID));
+    // The bootstrap update helper runs from the bin directory, outside the
+    // package tree, so `require("../package.json")` cannot resolve there.
+    // Inject the npm coordinate as a literal while copying.
+    transaction.push(replacePath(BOOTSTRAP_HELPER, helper, transactionID, {
+      transform: helperPackageNameTransform(pkg.name),
+    }));
     if (sha256(src) !== sha256(dst) || sha256(src) !== sha256(alias)) {
       throw new Error("installed binary checksum verification failed");
     }
@@ -615,6 +638,6 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
+  helperPackageNameTransform, installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
   quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
 };
