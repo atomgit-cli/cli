@@ -88,7 +88,9 @@ dist/
 ├── gc_linux_arm64                  # Linux 二进制 arm64
 ├── gitcode_cli-0.13.0-py3-none-any.whl  # PyPI wheel
 ├── gitcode_cli-0.13.0.tar.gz        # PyPI sdist
-└── gitcode-cli-cli-0.13.0.tgz       # npm tarball（正式 release workflow）
+├── gitcode-cli-cli-0.13.0.tgz       # npm tarball @gitcode-cli/cli（正式 release workflow）
+├── atomgit-cli-cli-0.13.0.tgz       # npm tarball @atomgit-cli/cli
+└── atomgit-cli-0.13.0.tgz           # npm tarball atomgit-cli（推荐坐标）
 ```
 
 ---
@@ -273,19 +275,19 @@ shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser �
 
 ### npm (跨平台)
 
-首选 bootstrap 安装二进制；Linux/macOS 同时配置补全，Windows 跳过补全：
+首选 bootstrap 安装二进制（推荐坐标 `atomgit-cli`；`@gitcode-cli/cli` / `@atomgit-cli/cli` 为并行等价坐标）；Linux/macOS 同时配置补全，Windows 跳过补全：
 
-    npx -y @gitcode-cli/cli@latest install
+    npx -y atomgit-cli@latest install
 
 CI、审计、不可信项目目录或自定义 npm registry 环境使用完整加固命令：
 
-    npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install
+    npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest install
 
 备选方式由 npm global prefix 管理入口：
 
-    npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest
+    npm install -g --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest
 
-`npm i @gitcode-cli/cli` 与 `npm install @gitcode-cli/cli` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
+`npm i` / `npm install` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
 
 npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件，因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖。
 
@@ -298,8 +300,6 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
     gitcode doctor install --json
     gitcode update --check --json
     gitcode config set update.mode off
-
-更新器只允许从官方 npm registry 操作**用户所安装坐标**（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json）。**三坐标为长期并行承诺，不设弃用时间表**：每次正式发布必须以同一版本号发布全部坐标（内容一致，由 `scripts/prepare-npm-package.sh` 按坐标 allowlist 组装三份 tarball，各坐标副本以自身包名跑 wrapper 单测），发布流水线校验三坐标 dist-tag 版本一致后才能判定发布成功。更新器以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`，三坐标逐一绑定 Trusted Publisher）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。npm 恢复清单 schema v2 见 [release-process.md](../spec/delivery/release-process.md)：`packages` 映射每坐标一项（file + sha256）。
 
 ## 验证安装
 
@@ -314,6 +314,16 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
    - PR 引用使用 `PR XX` 格式，不使用 `#XX`
    - 代码块注释单独成行，避免行内注释
 3. **完整下载路径**：所有安装命令必须包含完整下载 URL
+
+### npm 三坐标并行发布与更新策略
+
+三坐标（`atomgit-cli` 推荐 / `@atomgit-cli/cli` / `@gitcode-cli/cli`）为**长期并行承诺，不设弃用时间表**：每次正式发布必须以同一版本号发布全部坐标（内容一致，由 `scripts/prepare-npm-package.sh` 按坐标 allowlist 组装三份 tarball，各坐标副本以自身包名跑 wrapper 单测），发布流水线校验三坐标 dist-tag 版本一致后才能判定发布成功。
+
+更新器只允许从官方 npm registry 操作**用户所安装坐标**（坐标取自 package.json，不跨坐标安装），以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。
+
+发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`，三坐标逐一绑定 Trusted Publisher）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。
+
+npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256，可只列待恢复子集）见 [release-process.md](../spec/delivery/release-process.md)。
 
 ### 发布命令参考
 

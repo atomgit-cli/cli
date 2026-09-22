@@ -62,7 +62,9 @@ func TestReleaseWorkflowPublishesAllNPMCoordinates(t *testing.T) {
 		`test -f "gitcode-cli-cli-${VERSION_NUM}.tgz"`,
 		`test -f "atomgit-cli-cli-${VERSION_NUM}.tgz"`,
 		`test -f "atomgit-cli-${VERSION_NUM}.tgz"`,
-		`coordinate_tarball()`,
+		`"@gitcode-cli/cli") printf 'gitcode-cli-cli-%s.tgz' "${VERSION_NUM}" ;;`,
+		`"@atomgit-cli/cli") printf 'atomgit-cli-cli-%s.tgz' "${VERSION_NUM}" ;;`,
+		`"atomgit-cli") printf 'atomgit-cli-%s.tgz' "${VERSION_NUM}" ;;`,
 		`for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do`,
 		`all three coordinates must publish ${VERSION_NUM}`,
 	} {
@@ -77,6 +79,30 @@ func TestReleaseWorkflowPublishesAllNPMCoordinates(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowRecoversAllNPMCoordinates(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		// v2 manifest schema handling with the coordinate allowlist.
+		`m.packages`,
+		`unsupported recovery coordinate`,
+		`legacy manifest must reference the @gitcode-cli/cli tarball`,
+		// Every downloaded tarball must be consumed by exactly one manifest row.
+		`DOWNLOADED_TARBALLS`,
+		// TSV-driven loops must not let npm commands swallow the manifest stdin.
+		`done 3< "${RECOVERY_PACKAGES}"`,
+		// A full three-coordinate manifest must end with all dist-tags aligned.
+		`if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]`,
+		`expected ${VERSION_NUM}`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing multi-coordinate npm recovery guard %q", required)
+		}
+	}
+	if got := strings.Count(workflow, `done 3< "${RECOVERY_PACKAGES}"`); got != 2 {
+		t.Fatalf("recovery loops on fd 3 = %d, want 2 (publish loop + consistency gate)", got)
+	}
+}
+
 func TestPrepareNPMPackageScriptPublishesAllCoordinates(t *testing.T) {
 	path := filepath.Join("..", "..", "scripts", "prepare-npm-package.sh")
 	data, err := os.ReadFile(path)
@@ -87,13 +113,21 @@ func TestPrepareNPMPackageScriptPublishesAllCoordinates(t *testing.T) {
 	for _, required := range []string{
 		`readonly NPM_COORDINATES=("@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli")`,
 		`refusing npm coordinate outside the reviewed allowlist`,
-		`npm test`,
-		`npm pack --pack-destination "${OUTPUT_DIR}"`,
 		`pkg.name = name`,
+		`npm pack --pack-destination "${OUTPUT_DIR}"`,
+		`trap cleanup_stage EXIT`,
+		`for coordinate in "${NPM_COORDINATES[@]}"; do`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("prepare-npm-package.sh missing multi-coordinate guard %q", required)
 		}
+	}
+	// The per-coordinate staging copies the tree, rewrites the coordinate
+	// name on the copy, then exercises and packs it under that name.
+	assertOrdered(t, script, `cp -a npm/. "${stage}/"`, `pkg.name = name`)
+	assertOrdered(t, script, `pkg.name = name`, `npm pack --pack-destination "${OUTPUT_DIR}"`)
+	if !strings.Contains(script, "\n        npm test\n") {
+		t.Error("prepare-npm-package.sh must run the npm test suite inside each staged coordinate copy")
 	}
 }
 

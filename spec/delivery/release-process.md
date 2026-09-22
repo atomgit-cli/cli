@@ -81,7 +81,7 @@ vMAJOR.MINOR.PATCH-PRERELEASE
   - tap 仓已配置 write deploy key（公钥）
   - 主仓 secret `HOMEBREW_TAP_DEPLOY_KEY` 已配置（对应私钥）
 - npm 链路就绪（首次发布前一次性配置，**三坐标逐一配置**）：
-  - npm 组织 `gitcode-cli` 与 `atomgit-cli` 已创建，发布者为成员；裸名 `atomgit-cli` 与 `@atomgit-cli/cli` 的 Trusted Publisher 同样绑定
+  - npm 组织 `gitcode-cli` 与 `atomgit-cli` 已创建，发布者为成员；scoped 坐标 `@gitcode-cli/cli` 与 `@atomgit-cli/cli` 归属各自 org；**裸名 `atomgit-cli` 目前由维护者个人账户持有**（0.13.0 桥接发布时创建），是否转移至 `atomgit-cli` org 登记为 issue #588 待决策项——转移前发布鉴权依赖该账户的 Trusted Publisher 绑定
   - 在 npmjs.com 为 `@gitcode-cli/cli`、`@atomgit-cli/cli`、`atomgit-cli` 三个包分别配置 **Trusted Publisher**（GitHub Actions）：org `atomgit-cli`、repo `cli`、workflow filename `release.yml`、allowed `npm publish`。npm CLI ≥ 11.5.1 + Node ≥ 22.14 自动经 OIDC 发布，**无需 NPM_TOKEN**；Classic token 已于 2025-11 移除，granular token 无法创建 org 下首个新包，故采用 OIDC（npm 官方推荐）
   - `npm/package.json` 的 `repository.url` 必须为 `https://github.com/atomgit-cli/cli.git`（OIDC 校验 repository.url 与 GitHub 仓一致；旧 `gitcode-cli` 路径仅重定向兼容）
 
@@ -95,7 +95,7 @@ vMAJOR.MINOR.PATCH-PRERELEASE
 4. 运行 `scripts/sync-package-version.sh X.Y.Z` 同步根 `VERSION` 与所有 package metadata，并同步文档版本号
 5. 使用标准脚本在本地验证发布产物
 6. 将发布准备 PR 合入 GitCode 与 GitHub 的 `main`，确认 tree hash 一致
-7. 触发 GitHub release workflow，创建 tag、GitHub Release、正式产物并发布 PyPI，推送 Homebrew formula 到 homebrew tap（brew job），并以三坐标并行发布 npm 包 `@gitcode-cli/cli`、`@atomgit-cli/cli`、`atomgit-cli`（npm job，内置多平台二进制 + Node wrapper + `install` 子命令；发布后校验三坐标 dist-tag 版本一致）
+7. 触发 GitHub release workflow，创建 tag、GitHub Release、正式产物并发布 PyPI，推送 Homebrew formula 到 homebrew tap（brew job），并在同一次运行中发布全部三坐标 npm 包 `@gitcode-cli/cli`、`@atomgit-cli/cli`、`atomgit-cli`（npm job，内置多平台二进制 + Node wrapper + `install` 子命令；发布后校验三坐标 dist-tag 版本一致）
 8. 通过 SSH 将同一 tag 推送到 GitCode，并把同一批正式产物上传到 GitCode Release
 9. 对两个平台、PyPI、Homebrew 与 npm 安装入口执行发布后验证
 
@@ -145,7 +145,7 @@ gh workflow run release.yml -R gitcode-cli/cli -f version=vX.Y.Z
 gh run watch <run-id> -R gitcode-cli/cli
 ```
 
-workflow 必须先在只读权限下校验 `docs/releases/vX.Y.Z.md`、执行 GoReleaser snapshot、nFPM、wheel/sdist 和入口冒烟；全部预检通过后，独立的最小写权限 job 才能创建指向当前 `main` 的 tag。正式制品从该 tag 在只读 job 中构建并生成覆盖全部资产的 SHA-256 清单，再由独立 job 发布 GitHub Release。PyPI job 只下载已验证制品并执行 Trusted Publishing，不参与构建，也不修改 Release。已有 tag 仅在其 commit 与当前 workflow HEAD 完全一致时允许复用。
+workflow 必须先在只读权限下校验 `docs/releases/vX.Y.Z.md`、执行 GoReleaser snapshot、nFPM、wheel/sdist、**三坐标 npm 包组装（`prepare-npm-package.sh`，各坐标副本以自身包名跑 wrapper 单测）**和入口冒烟；全部预检通过后，独立的最小写权限 job 才能创建指向当前 `main` 的 tag。正式制品从该 tag 在只读 job 中构建并生成覆盖全部资产的 SHA-256 清单，再由独立 job 发布 GitHub Release。PyPI job 只下载已验证制品并执行 Trusted Publishing，不参与构建，也不修改 Release。已有 tag 仅在其 commit 与当前 workflow HEAD 完全一致时允许复用。
 
 `brew` job 在 publish 后推送 Homebrew formula 到 tap 仓，是发布完整性的组成部分：失败即整个 release workflow 失败，阻断 §6.6 GitCode 同步，需人工修复（deploy key / secret / tap 仓）后重跑 workflow（publish 幂等跳过，brew 重新推送），或手动补推 formula 与 GitCode 同步。它使用 deploy key 而非 GITHUB_TOKEN，只读权限即可。
 
@@ -163,7 +163,7 @@ gh workflow run release.yml -R gitcode-cli/cli \
   -f npm_recovery=true
 ```
 
-恢复 job 必须要求 `main` 中存在经 PR 评审的 `docs/releases/vX.Y.Z.npm-recovery.json`，以精确 tag commit、tag tree 与 npm tarball SHA-256 把恢复目标绑定到受审事实。清单 schema v2 携带 `packages` 映射（每坐标一项：`file` + `sha256`，坐标限三坐标 allowlist）；v1 单包清单（`package` + `sha256`，仅 `@gitcode-cli/cli`）继续可恢复。恢复 job 须验证当前根 `VERSION`、tag 内 `VERSION`、tag tree 存在于当前 `main` 历史（允许双镜像产生 tree 相同但 commit 不同的 merge）、GitHub Release 非草稿、每个 Release tarball 的 SHA-256 与清单校验行、包内 name（等于恢复坐标）/version/repository（新旧 repository.url 均接受，重定向等价），以及内置 Linux 二进制的 version/commit。它不得重建制品、移动 tag 或重发其他渠道；发布前必须拒绝对应坐标 dist-tag 回退，目标 npm 版本已存在时仍须比较 registry tarball 与 Release tarball 并校验 dist-tag；清单覆盖全部三坐标时，恢复后校验三坐标 dist-tag 一致。该恢复路径继续使用 `release.yml` 的 OIDC Trusted Publisher 身份，不使用长期 `NPM_TOKEN`。
+恢复 job 必须要求 `main` 中存在经 PR 评审的 `docs/releases/vX.Y.Z.npm-recovery.json`，以精确 tag commit、tag tree 与 npm tarball SHA-256 把恢复目标绑定到受审事实。清单 schema v2 携带 `packages` 映射（每坐标一项：`file` + `sha256`，坐标限三坐标 allowlist，**可只列待恢复的坐标子集**）；v1 单包清单（`package` + `sha256`，仅 `@gitcode-cli/cli`）继续可恢复。注意：多坐标发布门禁（恰好三个 tarball）只对引入该门禁之后的 tag 生效；重跑更早的旧版本须走本恢复路径而非全量 workflow 重跑。恢复 job 须验证当前根 `VERSION`、tag 内 `VERSION`、tag tree 存在于当前 `main` 历史（允许双镜像产生 tree 相同但 commit 不同的 merge）、GitHub Release 非草稿、每个 Release tarball 的 SHA-256 与清单校验行、包内 name（等于恢复坐标）/version/repository（新旧 repository.url 均接受，重定向等价），以及内置 Linux 二进制的 version/commit。它不得重建制品、移动 tag 或重发其他渠道；发布前必须拒绝对应坐标 dist-tag 回退，目标 npm 版本已存在时仍须比较 registry tarball 与 Release tarball 并校验 dist-tag；清单覆盖全部三坐标时，恢复后校验三坐标 dist-tag 一致。该恢复路径继续使用 `release.yml` 的 OIDC Trusted Publisher 身份，不使用长期 `NPM_TOKEN`。
 
 ### 6.6 同步 GitCode tag、Release 与正式制品
 

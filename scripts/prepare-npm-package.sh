@@ -23,6 +23,16 @@ fi
 # a name outside this list can never be staged or packed.
 readonly NPM_COORDINATES=("@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli")
 
+# Staging copies carry the five platform binaries; clean them up on every
+# exit path, including set -e aborts inside npm test / npm pack.
+STAGE=""
+cleanup_stage() {
+    if [[ -n "${STAGE}" ]]; then
+        rm -rf "${STAGE}"
+    fi
+}
+trap cleanup_stage EXIT
+
 PLATFORMS_DIR="npm/bin/platforms"
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_DIR="$(cd "${OUTPUT_DIR}" && pwd)"
@@ -56,6 +66,7 @@ stage_coordinate() {
             ;;
     esac
     stage="$(mktemp -d)"
+    STAGE="${stage}"
     cp -a npm/. "${stage}/"
     node - "${stage}/package.json" "${coordinate}" <<'NODE'
 const fs = require("fs");
@@ -70,6 +81,7 @@ NODE
         npm pack --pack-destination "${OUTPUT_DIR}"
     )
     rm -rf "${stage}"
+    STAGE=""
     printf 'assembled npm package %s@%s\n' "${coordinate}" "${VERSION}"
 }
 

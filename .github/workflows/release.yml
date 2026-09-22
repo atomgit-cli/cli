@@ -546,9 +546,18 @@ jobs:
           done
           # Long-term parallel distribution invariant (docs/PACKAGING.md): a
           # completed release must leave all three coordinates on the same
-          # dist-tag version.
+          # dist-tag version. Bounded retries absorb registry propagation
+          # delay; a mismatch after the retries blocks the release.
           for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
-            TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+            for ATTEMPT in 1 2 3; do
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              if [[ "${TAG_VERSION}" = "${VERSION_NUM}" ]]; then
+                break
+              fi
+              if [[ "${ATTEMPT}" -lt 3 ]]; then
+                sleep 10
+              fi
+            done
             test "${TAG_VERSION}" = "${VERSION_NUM}" || {
               echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; all three coordinates must publish ${VERSION_NUM}"
               exit 1
@@ -614,7 +623,7 @@ jobs:
             for (const [coordinate, entry] of Object.entries(m.packages)) {
               if (!allowed.has(coordinate)) throw new Error(`unsupported recovery coordinate: ${coordinate}`);
               if (!/^[0-9a-f]{64}$/.test(entry.sha256 || "")) throw new Error(`invalid sha256 for ${coordinate}`);
-              if (!/^[A-Za-z0-9@/_-]+\.tgz$/.test(entry.file || "")) throw new Error(`invalid tarball name for ${coordinate}`);
+              if (!/^[A-Za-z0-9@._-]+\.tgz$/.test(entry.file || "")) throw new Error(`invalid tarball name for ${coordinate}`);
               rows.push([coordinate, entry.file, entry.sha256].join("\t"));
             }
             if (rows.length === 0) throw new Error("recovery manifest lists no packages");
@@ -632,7 +641,12 @@ jobs:
             --pattern "${CHECKSUM_NAME}" \
             --dir release-assets
           test -f "release-assets/${CHECKSUM_NAME}"
-          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED; do
+          # Every tarball downloaded from the Release must be consumed by
+          # exactly one manifest row; extras indicate a tampered or stale
+          # release asset set.
+          DOWNLOADED_TARBALLS="$(find release-assets -maxdepth 1 -name '*.tgz' -type f | wc -l)"
+          test "${DOWNLOADED_TARBALLS}" -eq "$(wc -l < "${RUNNER_TEMP}/recovery-packages.tsv")"
+          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
             test -f "release-assets/${PACKAGE_NAME}"
             test "$(grep -Fc "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")" -eq 1
             CHECKSUM_LINE="$(grep -F "  ${PACKAGE_NAME}" "release-assets/${CHECKSUM_NAME}")"
@@ -664,7 +678,7 @@ jobs:
             throw new Error("embedded Linux binary version or commit does not match the reviewed tag");
           }
           NODE
-          done < "${RUNNER_TEMP}/recovery-packages.tsv"
+          done 3< "${RUNNER_TEMP}/recovery-packages.tsv"
           echo "VERSION_NUM=${VERSION_NUM}" >> "$GITHUB_ENV"
           echo "RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv" >> "$GITHUB_ENV"
 
@@ -675,7 +689,7 @@ jobs:
           if [[ "${VERSION_NUM}" == *-* ]]; then
             PUBLISH_TAG="next"
           fi
-          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED; do
+          while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
             CURRENT_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
             if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
               node - "${VERSION_NUM}" "${CURRENT_TAG_VERSION}" <<'NODE'
@@ -714,14 +728,14 @@ jobs:
               continue
             fi
             npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"
-          done < "${RECOVERY_PACKAGES}"
+          done 3< "${RECOVERY_PACKAGES}"
           # A full three-coordinate manifest must leave all coordinates aligned.
           if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]; then
-            while IFS=$'\t' read -r COORDINATE _ _; do
+            while IFS=$'\t' read -r COORDINATE _ _ <&3; do
               TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
               test "${TAG_VERSION}" = "${VERSION_NUM}" || {
                 echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; expected ${VERSION_NUM}"
                 exit 1
               }
-            done < "${RECOVERY_PACKAGES}"
+            done 3< "${RECOVERY_PACKAGES}"
           fi
