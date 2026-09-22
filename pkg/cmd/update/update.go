@@ -28,7 +28,8 @@ func NewCmdUpdate(_ *cmdutil.Factory) *cobra.Command {
 		Short: "Check for or apply an installation-channel update",
 		Long: `Update GitCode CLI through the channel that owns the current installation.
 
-Global npm wrappers update @gitcode-cli/cli directly. npm-bootstrap installs
+Global npm wrappers update the installed npm coordinate (atomgit-cli,
+@atomgit-cli/cli, or @gitcode-cli/cli) directly. npm-bootstrap installs
 schedule an atomic replacement after the current process exits. Other package
 managers remain user-controlled and are never invoked or removed implicitly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

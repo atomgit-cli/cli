@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Wrapper entry for @gitcode-cli/cli.
+// Wrapper entry for the npm-distributed CLI package.
 //
 // - Default: resolve the bundled platform binary and exec it with the
 //   remaining args (so `gc version`, `gc issue list`, ... all work).
@@ -60,7 +60,7 @@ function runBinary(args) {
       process.stderr.write(
         `gc binary not found at ${p}. ` +
           `Run "npx --yes --ignore-scripts --registry=https://registry.npmjs.org ` +
-          `--@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install" first.\n`
+          `${pkg.name.startsWith("@") ? `--${pkg.name.split("/")[0]}:registry=https://registry.npmjs.org ` : ""}${pkg.name}@latest install" first.\n`
       );
       process.exit(127);
     }

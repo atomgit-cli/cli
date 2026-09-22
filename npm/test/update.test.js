@@ -5,9 +5,11 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const pkgName = require("../package.json").name;
 const { spawnSync } = require("child_process");
 const {
   acquireLock,
+  checkLatest,
   compareVersions,
   disabledForInvocation,
   exactInstallArgs,
@@ -49,6 +51,13 @@ test("exact updates and rollbacks stay inside the recorded npm prefix", () => {
     "--prefix", "/isolated/prefix",
   ]);
   assert.ok(args.includes("--ignore-scripts"));
+  assert.ok(args.includes(`${pkgName}@1.2.3`), `exact install must target the installed coordinate ${pkgName}`);
+});
+
+test("exact install arguments target the installed coordinate, not a sibling package", () => {
+  const args = exactInstallArgs({ prefix: "/isolated/prefix" }, "1.2.3");
+  assert.ok(args.includes(`${pkgName}@1.2.3`));
+  assert.ok(!args.some((a) => a !== `${pkgName}@1.2.3` && /@gitcode-cli\/cli@|@atomgit-cli\/cli@|^atomgit-cli@|^gitcode-cli@/.test(a)));
 });
 
 test("npm calls isolate config and override scoped registries before exec arguments", () => {
@@ -56,18 +65,22 @@ test("npm calls isolate config and override scoped registries before exec argume
   const separator = args.indexOf("--");
   assert.ok(args.slice(0, separator).includes("--userconfig=user.npmrc"));
   assert.ok(args.slice(0, separator).includes("--globalconfig=global.npmrc"));
-  assert.ok(args.slice(0, separator).includes("--@gitcode-cli:registry=https://registry.npmjs.org"));
+  if (pkgName.startsWith("@")) {
+    assert.ok(args.slice(0, separator).includes(`--${pkgName.split("/")[0]}:registry=https://registry.npmjs.org`));
+  } else {
+    assert.ok(!args.some((a) => a.includes(":registry=")), "unscoped package names must not carry a scope-registry flag");
+  }
   assert.ok(args.slice(0, separator).includes("--registry=https://registry.npmjs.org"));
   assert.deepStrictEqual(args.slice(separator + 1), ["gitcode", "install"]);
 });
 
-test("npm isolation overrides conflicting user and project scoped registries", () => {
+(pkgName.startsWith("@") ? test : test.skip)("npm isolation overrides conflicting user and project scoped registries", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-registry-isolation-"));
   const home = path.join(root, "home");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
   fs.mkdirSync(project);
-  const conflict = "@gitcode-cli:registry=https://untrusted.invalid\n";
+  const conflict = `${pkgName.split("/")[0]}:registry=https://untrusted.invalid\n`;
   fs.writeFileSync(path.join(home, ".npmrc"), conflict);
   fs.writeFileSync(path.join(project, ".npmrc"), conflict);
   const userConfig = path.join(root, "isolated-user.npmrc");
@@ -77,7 +90,7 @@ test("npm isolation overrides conflicting user and project scoped registries", (
   const invocation = npmCommand({ npm: process.env.npm_execpath || "" });
   const result = spawnSync(
     invocation.command,
-    [...invocation.prefix, ...withNpmIsolation(["config", "get", "@gitcode-cli:registry"], userConfig, globalConfig)],
+    [...invocation.prefix, ...withNpmIsolation(["config", "get", `${pkgName.split("/")[0]}:registry`], userConfig, globalConfig)],
     {
       cwd: project,
       encoding: "utf8",
@@ -89,6 +102,56 @@ test("npm isolation overrides conflicting user and project scoped registries", (
   assert.strictEqual(result.stdout.trim(), "https://registry.npmjs.org");
 });
 
+test("npm isolation overrides a conflicting default registry for every coordinate", () => {
+  // Unscoped names have no scope-registry key; the global --registry flag is
+  // their only defense against a hijacked user/project npmrc.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-registry-isolation-"));
+  const home = path.join(root, "home");
+  const project = path.join(root, "project");
+  fs.mkdirSync(home);
+  fs.mkdirSync(project);
+  const conflict = "registry=https://untrusted.invalid\n";
+  fs.writeFileSync(path.join(home, ".npmrc"), conflict);
+  fs.writeFileSync(path.join(project, ".npmrc"), conflict);
+  const userConfig = path.join(root, "isolated-user.npmrc");
+  const globalConfig = path.join(root, "isolated-global.npmrc");
+  fs.writeFileSync(userConfig, "");
+  fs.writeFileSync(globalConfig, "");
+  const invocation = npmCommand({ npm: process.env.npm_execpath || "" });
+  const result = spawnSync(
+    invocation.command,
+    [...invocation.prefix, ...withNpmIsolation(["config", "get", "registry"], userConfig, globalConfig)],
+    {
+      cwd: project,
+      encoding: "utf8",
+      windowsHide: true,
+      env: updaterEnvironment({ ...process.env, HOME: home, USERPROFILE: home }),
+    }
+  );
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.stdout.trim().replace(/\/$/, ""), "https://registry.npmjs.org");
+});
+
+test("latest-version checks query the installed coordinate on the official registry", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-view-"));
+  const argvFile = path.join(root, "argv.json");
+  const stub = path.join(root, "npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const fs = require('fs');",
+    `fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));`,
+    'process.stdout.write(\'"1.2.3"\\n\');',
+    "",
+  ].join("\n"));
+  checkLatest({ npm: stub });
+  const argv = JSON.parse(fs.readFileSync(argvFile, "utf8"));
+  assert.ok(argv.includes("view"), `view command expected: ${JSON.stringify(argv)}`);
+  assert.ok(argv.includes(pkgName), `registry query must target the installed coordinate ${pkgName}: ${JSON.stringify(argv)}`);
+  assert.ok(argv.includes("dist-tags.latest"), `dist-tags.latest expected: ${JSON.stringify(argv)}`);
+  assert.ok(argv.includes("--json"));
+  assert.ok(argv.includes("--registry=https://registry.npmjs.org"));
+  assert.strictEqual(checkLatest({ npm: stub }), "1.2.3");
+});
+
 test("global updater falls back when the recorded npm runtime is stale", () => {
   const command = npmCommand({ npm: path.join(os.tmpdir(), "missing-npm-cli.js") });
   assert.ok(command.command);
@@ -98,8 +161,8 @@ test("global updater falls back when the recorded npm runtime is stale", () => {
 test("global health checks execute the wrapper inside the recorded prefix", () => {
   const wrapper = globalWrapper({ prefix: "/isolated/prefix" });
   const expected = process.platform === "win32"
-    ? path.join("/isolated/prefix", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js")
-    : path.join("/isolated/prefix", "lib", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+    ? path.join("/isolated/prefix", "node_modules", pkgName, "bin", "gc.js")
+    : path.join("/isolated/prefix", "lib", "node_modules", pkgName, "bin", "gc.js");
   assert.strictEqual(wrapper, expected);
 });
 

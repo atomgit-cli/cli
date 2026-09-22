@@ -53,7 +53,8 @@ function npmEntrypoint() {
 
 function runEntrypoint(entrypoint, args, options = {}) {
   if (process.platform === "win32" && /\.cmd$/i.test(entrypoint)) {
-    const wrapper = path.join(prefix, "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+    const name = require("../npm/package.json").name;
+    const wrapper = path.join(prefix, "node_modules", ...name.split("/"), "bin", "gc.js");
     return run(process.execPath, [wrapper, ...args], options);
   }
   return run(entrypoint, args, options);

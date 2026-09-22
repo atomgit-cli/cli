@@ -1,19 +1,21 @@
 {
   "name": "@gitcode-cli/cli",
   "version": "0.13.0",
-  "description": "GitCode CLI — the open-source command line tool for GitCode, distributed via npm with bundled multi-platform binaries.",
+  "description": "AtomGit CLI (formerly GitCode CLI) — open-source command line tool with bundled multi-platform binaries. Recommended coordinate: atomgit-cli; @gitcode-cli/cli stays supported in parallel.",
   "license": "MIT",
-  "author": "GitCode CLI Contributors <support@gitcode.com>",
-  "homepage": "https://gitcode.com/gitcode-cli/cli",
+  "author": "AtomGit CLI Contributors <support@gitcode.com>",
+  "homepage": "https://gitcode.com/atomgit-cli/cli",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gitcode-cli/cli.git",
+    "url": "https://github.com/atomgit-cli/cli.git",
     "directory": "npm"
   },
   "bugs": {
-    "url": "https://gitcode.com/gitcode-cli/cli/issues"
+    "url": "https://gitcode.com/atomgit-cli/cli/issues"
   },
   "keywords": [
+    "atomgit",
+    "atomgit-cli",
     "gitcode",
     "gitcode-cli",
     "cli",

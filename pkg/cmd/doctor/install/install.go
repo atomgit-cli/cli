@@ -123,7 +123,9 @@ func detectDistribution(env map[string]string, binary string) string {
 	}
 	normalized := filepath.ToSlash(strings.ToLower(binary))
 	switch {
-	case strings.Contains(normalized, "/node_modules/@gitcode-cli/cli/"):
+	case strings.Contains(normalized, "/node_modules/@gitcode-cli/cli/"),
+		strings.Contains(normalized, "/node_modules/@atomgit-cli/cli/"),
+		strings.Contains(normalized, "/node_modules/atomgit-cli/"):
 		return "npm"
 	case strings.Contains(normalized, "/gc_cli/bin/"):
 		return "pypi"

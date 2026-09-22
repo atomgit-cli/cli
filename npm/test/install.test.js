@@ -11,9 +11,35 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
+  helperPackageNameTransform, installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
   quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
 } = require("../lib/install");
+
+test("copied update helper gets the npm coordinate injected and loads standalone", () => {
+  const helperSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "utf8");
+  for (const name of ["atomgit-cli", "@atomgit-cli/cli", "@gitcode-cli/cli"]) {
+    const rendered = helperPackageNameTransform(name)(helperSrc);
+    assert.ok(!rendered.includes('require("../package.json")'), `${name}: relative require must be rewritten`);
+    assert.ok(rendered.includes(`const PACKAGE = ${JSON.stringify(name)};`), `${name}: literal coordinate expected`);
+    // The copy runs from the bin directory: loading it must not throw and
+    // must expose the injected coordinate through its behavior.
+    const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-copy-"));
+    const copy = path.join(dir, "gitcode-update-helper.js");
+    fs.writeFileSync(copy, rendered, { mode: 0o755 });
+    const helper = require(copy);
+    const args = helper.withNpmIsolation(["exec", "--yes", "--", "gitcode", "install"], "u.npmrc", "g.npmrc");
+    assert.ok(args.includes("--registry=https://registry.npmjs.org"), `${name}: official registry must be pinned`);
+    if (name.startsWith("@")) {
+      assert.ok(args.some((a) => a === `--${name.split("/")[0]}:registry=https://registry.npmjs.org`), `${name}: scope flag expected`);
+    } else {
+      assert.ok(!args.some((a) => a.includes(":registry=")), `${name}: no scope flag for unscoped names`);
+    }
+  }
+});
+
+test("helper transform fails loudly when the marker is missing", () => {
+  assert.throws(() => helperPackageNameTransform("atomgit-cli")("const PACKAGE = 'stale';"));
+});
 
 test("chooseGlobalBinDir returns a writable, existing dir on posix (regardless of /usr/local/bin)", () => {
   // Deterministic: on hosted runners /usr/local/bin may be writable, so we
@@ -263,6 +289,23 @@ test("install commit removes transaction-scoped backups", () => {
   commitTransaction([record]);
   assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
   assert.strictEqual(fs.existsSync(record.backup), false);
+});
+
+test("replacePath applies the helper transform at the wiring level", () => {
+  // Guards the P0 wiring itself: without the transform option, the copied
+  // helper keeps require("../package.json") and cannot load from a bin dir.
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-wiring-"));
+  const copied = path.join(root, "gitcode-update-helper.js");
+  const record = replacePath(
+    path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"),
+    copied,
+    "helper-wiring",
+    { transform: helperPackageNameTransform(require("../package.json").name) }
+  );
+  commitTransaction([record]);
+  const helper = require(copied);
+  assert.ok(helper.withNpmIsolation(["exec", "--", "gitcode", "install"], "u.npmrc", "g.npmrc")
+    .includes("--registry=https://registry.npmjs.org"));
 });
 
 function createFileSymlinkOrSkip(t, target, link) {

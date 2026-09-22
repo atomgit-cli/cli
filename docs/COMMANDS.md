@@ -3202,7 +3202,7 @@ gc update
 gc update --json
 ```
 
-- npm global wrapper 只从官方 `https://registry.npmjs.org` 更新精确包 `@gitcode-cli/cli@<stable latest>`；不会更新其他全局 npm 包，并使用 `--ignore-scripts` 禁止更新包生命周期脚本。
+- npm global wrapper 只从官方 `https://registry.npmjs.org` 更新**所安装坐标**的精确包 `<所装坐标>@<stable latest>`（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json，不跨坐标安装）；不会更新其他全局 npm 包，并使用 `--ignore-scripts` 禁止更新包生命周期脚本。
 - npm bootstrap 使用安装 manifest 和独立 helper，在当前进程退出后原子替换 `gc` / `gitcode`，下一次启动生效。
 - stable 版本不会自动进入 prerelease，也不会降级。
 - 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码，摘要在下次启动写入 stderr 一次。

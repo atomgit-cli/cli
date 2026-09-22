@@ -10,7 +10,10 @@ const { spawnSync } = require("child_process");
 const pkg = require("../package.json");
 const { npmInvocation, readInstallMetadata, stateDir } = require("./install-metadata");
 
-const PACKAGE = "@gitcode-cli/cli";
+// The npm coordinate this copy runs under. Derived from package.json so the
+// same wrapper ships under parallel coordinates (atomgit-cli,
+// @atomgit-cli/cli, @gitcode-cli/cli) and each updates itself, not a sibling.
+const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 15 * 60 * 1000;
@@ -122,7 +125,7 @@ function withNpmIsolation(args, userConfig, globalConfig) {
   const isolation = [
     `--userconfig=${userConfig}`,
     `--globalconfig=${globalConfig}`,
-    `--@gitcode-cli:registry=${OFFICIAL_REGISTRY}`,
+    ...(PACKAGE.startsWith("@") ? [`--${PACKAGE.split("/")[0]}:registry=${OFFICIAL_REGISTRY}`] : []),
     `--registry=${OFFICIAL_REGISTRY}`,
   ];
   const separator = args.indexOf("--");
@@ -167,7 +170,7 @@ function globalWrapper(metadata) {
   const modules = process.platform === "win32"
     ? path.join(metadata.prefix, "node_modules")
     : path.join(metadata.prefix, "lib", "node_modules");
-  return path.join(modules, "@gitcode-cli", "cli", "bin", "gc.js");
+  return path.join(modules, ...PACKAGE.split("/"), "bin", "gc.js");
 }
 
 function healthCheck(metadata, expectedVersion) {

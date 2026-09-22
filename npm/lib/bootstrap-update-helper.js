@@ -9,7 +9,13 @@ const path = require("path");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
-const PACKAGE = "@gitcode-cli/cli";
+// Derived from package.json so parallel npm coordinates (atomgit-cli,
+// @atomgit-cli/cli, @gitcode-cli/cli) each bootstrap-update themselves.
+// install.js rewrites this exact two-line marker to a literal
+// `const PACKAGE = "<name>";` when copying the helper into the bin dir,
+// because the copy runs outside the package tree (standalone, built-ins only).
+const pkg = require("../package.json");
+const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 15 * 60 * 1000;
@@ -124,7 +130,7 @@ function withNpmIsolation(args, userConfig, globalConfig) {
   const isolation = [
     `--userconfig=${userConfig}`,
     `--globalconfig=${globalConfig}`,
-    `--@gitcode-cli:registry=${OFFICIAL_REGISTRY}`,
+    ...(PACKAGE.startsWith("@") ? [`--${PACKAGE.split("/")[0]}:registry=${OFFICIAL_REGISTRY}`] : []),
     `--registry=${OFFICIAL_REGISTRY}`,
   ];
   const separator = args.indexOf("--");
