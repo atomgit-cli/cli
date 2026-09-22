@@ -1,0 +1,20 @@
+{
+  "tag": "v0.14.0",
+  "tagCommit": "1495c6897ac03feb3d57fff62e9dbd37de81abc0",
+  "tagTree": "2bc658b65b152ec410850d5ae3f80f82911e76e5",
+  "version": "0.14.0",
+  "packages": {
+    "@gitcode-cli/cli": {
+      "file": "gitcode-cli-cli-0.14.0.tgz",
+      "sha256": "27727a9116ce7870910186509d1b17869ffc7e4b7fd8afe07f4d135f0643df71"
+    },
+    "@atomgit-cli/cli": {
+      "file": "atomgit-cli-cli-0.14.0.tgz",
+      "sha256": "eda661a47512c5612518b946d62f227ad351f6c920ee83532d76431cd4c6615a"
+    },
+    "atomgit-cli": {
+      "file": "atomgit-cli-0.14.0.tgz",
+      "sha256": "74d186fac7490389d6a46536a621d916becea280b4610790e78d8b5efc31904e"
+    }
+  }
+}

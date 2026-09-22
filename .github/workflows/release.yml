@@ -519,7 +519,9 @@ jobs:
             esac
           }
           for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
-            PACKAGE_FILE="release-assets/$(coordinate_tarball "${COORDINATE}")"
+            # Absolute path: a relative path with slashes makes npm treat the
+            # tarball argument as a git shorthand spec instead of a file.
+            PACKAGE_FILE="$(realpath "release-assets/$(coordinate_tarball "${COORDINATE}")")"
             test -f "${PACKAGE_FILE}"
             if npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1; then
               mkdir existing-npm
