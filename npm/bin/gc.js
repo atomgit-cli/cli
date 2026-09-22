@@ -60,7 +60,7 @@ function runBinary(args) {
       process.stderr.write(
         `gc binary not found at ${p}. ` +
           `Run "npx --yes --ignore-scripts --registry=https://registry.npmjs.org ` +
-          `--@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install" first.\n`
+          `${pkg.name.startsWith("@") ? `--${pkg.name.split("/")[0]}:registry=https://registry.npmjs.org ` : ""}${pkg.name}@latest install" first.\n`
       );
       process.exit(127);
     }

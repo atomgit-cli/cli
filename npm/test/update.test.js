@@ -5,6 +5,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const pkgName = require("../package.json").name;
 const { spawnSync } = require("child_process");
 const {
   acquireLock,
@@ -56,18 +57,20 @@ test("npm calls isolate config and override scoped registries before exec argume
   const separator = args.indexOf("--");
   assert.ok(args.slice(0, separator).includes("--userconfig=user.npmrc"));
   assert.ok(args.slice(0, separator).includes("--globalconfig=global.npmrc"));
-  assert.ok(args.slice(0, separator).includes("--@gitcode-cli:registry=https://registry.npmjs.org"));
+  if (pkgName.startsWith("@")) {
+    assert.ok(args.slice(0, separator).includes(`--${pkgName.split("/")[0]}:registry=https://registry.npmjs.org`));
+  }
   assert.ok(args.slice(0, separator).includes("--registry=https://registry.npmjs.org"));
   assert.deepStrictEqual(args.slice(separator + 1), ["gitcode", "install"]);
 });
 
-test("npm isolation overrides conflicting user and project scoped registries", () => {
+(pkgName.startsWith("@") ? test : test.skip)("npm isolation overrides conflicting user and project scoped registries", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-registry-isolation-"));
   const home = path.join(root, "home");
   const project = path.join(root, "project");
   fs.mkdirSync(home);
   fs.mkdirSync(project);
-  const conflict = "@gitcode-cli:registry=https://untrusted.invalid\n";
+  const conflict = `${pkgName.split("/")[0]}:registry=https://untrusted.invalid\n`;
   fs.writeFileSync(path.join(home, ".npmrc"), conflict);
   fs.writeFileSync(path.join(project, ".npmrc"), conflict);
   const userConfig = path.join(root, "isolated-user.npmrc");
@@ -77,7 +80,7 @@ test("npm isolation overrides conflicting user and project scoped registries", (
   const invocation = npmCommand({ npm: process.env.npm_execpath || "" });
   const result = spawnSync(
     invocation.command,
-    [...invocation.prefix, ...withNpmIsolation(["config", "get", "@gitcode-cli:registry"], userConfig, globalConfig)],
+    [...invocation.prefix, ...withNpmIsolation(["config", "get", `${pkgName.split("/")[0]}:registry`], userConfig, globalConfig)],
     {
       cwd: project,
       encoding: "utf8",
@@ -98,8 +101,8 @@ test("global updater falls back when the recorded npm runtime is stale", () => {
 test("global health checks execute the wrapper inside the recorded prefix", () => {
   const wrapper = globalWrapper({ prefix: "/isolated/prefix" });
   const expected = process.platform === "win32"
-    ? path.join("/isolated/prefix", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js")
-    : path.join("/isolated/prefix", "lib", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+    ? path.join("/isolated/prefix", "node_modules", ...pkgName.split("/"), "bin", "gc.js")
+    : path.join("/isolated/prefix", "lib", "node_modules", ...pkgName.split("/"), "bin", "gc.js");
   assert.strictEqual(wrapper, expected);
 });
 

@@ -531,7 +531,7 @@ async function runInstall(args = []) {
   if (!fs.existsSync(src)) {
     throw new Error(
       `bundled binary missing at ${src}. The npm package may be incomplete; ` +
-        `reinstall @gitcode-cli/cli.`
+        `reinstall ${require("../package.json").name}.`
     );
   }
   ensureExec(src);

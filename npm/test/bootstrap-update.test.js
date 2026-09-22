@@ -5,6 +5,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const pkgName = require("../package.json").name;
 const {
   compareVersions, npmCommand, parseArgs, stableVersion, updateMode, updaterEnvironment, withNpmIsolation,
 } = require("../lib/bootstrap-update-helper");
@@ -40,7 +41,9 @@ test("bootstrap npm exec isolates config before the command separator", () => {
   const args = withNpmIsolation(["exec", "--yes", "--", "gitcode", "install"], "user.npmrc", "global.npmrc");
   const separator = args.indexOf("--");
   assert.ok(args.slice(0, separator).includes("--userconfig=user.npmrc"));
-  assert.ok(args.slice(0, separator).includes("--@gitcode-cli:registry=https://registry.npmjs.org"));
+  if (pkgName.startsWith("@")) {
+    assert.ok(args.slice(0, separator).includes(`--${pkgName.split("/")[0]}:registry=https://registry.npmjs.org`));
+  }
   assert.deepStrictEqual(args.slice(separator + 1), ["gitcode", "install"]);
 });
 

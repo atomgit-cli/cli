@@ -8,6 +8,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const { execFileSync } = require("child_process");
+const pkg = require("../package.json");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -41,7 +42,8 @@ test("wrapper exits 127 with a clear message when the binary is missing (ENOENT)
   assert.ok(
     r.stderr.includes(
       "npx --yes --ignore-scripts --registry=https://registry.npmjs.org " +
-        "--@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install"
+        (pkg.name.startsWith("@") ? `--${pkg.name.split("/")[0]}:registry=https://registry.npmjs.org ` : "") +
+        `${pkg.name}@latest install`
     )
   );
 });
