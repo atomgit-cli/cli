@@ -207,10 +207,11 @@ func appendDiscussionCommentParams(endpoint string, opts *ListDiscussionComments
 // --- Write operations (POST / PATCH / DELETE) ---
 
 // CreateOrgDiscussionOptions specifies the parameters for creating an
-// organization discussion.
+// organization discussion. Per the official OpenAPI all fields are required.
 type CreateOrgDiscussionOptions struct {
-	Title     string `json:"title"`
-	MdContent string `json:"md_content,omitempty"`
+	Title        string `json:"title"`
+	MdContent    string `json:"md_content,omitempty"`
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 // CreateOrgDiscussion creates a new discussion in an organization.
@@ -225,18 +226,19 @@ func CreateOrgDiscussion(client *Client, org string, opts *CreateOrgDiscussionOp
 }
 
 // UpdateOrgDiscussionOptions specifies the parameters for updating an
-// organization discussion.
+// organization discussion. Per the official OpenAPI all fields are optional.
 type UpdateOrgDiscussionOptions struct {
-	Title     string `json:"title,omitempty"`
-	MdContent string `json:"md_content,omitempty"`
+	Title        string `json:"title,omitempty"`
+	MdContent    string `json:"md_content,omitempty"`
+	CategoryName string `json:"category_name,omitempty"`
 }
 
 // UpdateOrgDiscussion updates an existing organization discussion.
-// PATCH /api/v5/orgs/{org}/discuss/{number}
+// PUT /api/v5/orgs/{org}/discuss/{number}
 func UpdateOrgDiscussion(client *Client, org string, number int, opts *UpdateOrgDiscussionOptions) (*Discussion, error) {
 	endpoint := "/orgs/" + url.PathEscape(org) + "/discuss/" + strconv.Itoa(number)
 	var d Discussion
-	if err := client.Patch(endpoint, opts, &d); err != nil {
+	if err := client.Put(endpoint, opts, &d); err != nil {
 		return nil, fmt.Errorf("failed to update org discussion: %w", err)
 	}
 	return &d, nil

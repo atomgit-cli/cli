@@ -6,7 +6,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/comments"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/create"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/delete"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/edit"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/list"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/project"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/discussions/view"
@@ -22,8 +24,8 @@ func NewCmdDiscussions(f *cmdutil.Factory) *cobra.Command {
 			Work with GitCode organization discussions (discuss).
 
 			Discussions are organization-level conversation threads for ideas,
-			Q&A, and announcements. The CLI exposes list, view, and delete
-			operations via the GitCode v5 API.
+			Q&A, and announcements. The CLI exposes list, view, create, edit,
+			and delete operations via the GitCode v5 API.
 		`),
 		Example: heredoc.Doc(`
 			# List discussions in an organization
@@ -31,6 +33,12 @@ func NewCmdDiscussions(f *cmdutil.Factory) *cobra.Command {
 
 			# View a discussion
 			$ gc discussions view 42 --org my-org
+
+			# Create a discussion
+			$ gc discussions create --org my-org --title "New idea" --category "Ideas" --body "Description"
+
+			# Edit a discussion
+			$ gc discussions edit 42 --org my-org --title "New title"
 
 			# Delete a discussion
 			$ gc discussions delete 42 --org my-org
@@ -46,6 +54,8 @@ func NewCmdDiscussions(f *cmdutil.Factory) *cobra.Command {
 
 	cmd.AddCommand(list.NewCmdList(f, nil))
 	cmd.AddCommand(view.NewCmdView(f, nil))
+	cmd.AddCommand(create.NewCmdCreate(f, nil))
+	cmd.AddCommand(edit.NewCmdEdit(f, nil))
 	cmd.AddCommand(delete.NewCmdDelete(f, nil))
 	cmd.AddCommand(comments.NewCmdComments(f))
 	cmd.AddCommand(project.NewCmdProject(f))

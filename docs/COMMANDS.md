@@ -1220,7 +1220,7 @@ gc issue relations -R infra-test/gctest1 --state open --limit 50
 
 ## Discussions 命令 (discussions)
 
-只读访问 GitCode 组织级讨论（discuss）。当前覆盖组织讨论列表与详情，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss` 与 `/discuss/{number}`）。
+访问 GitCode 组织级讨论（discuss）：列表、详情、创建、编辑与删除，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss`、`POST /discuss`、`PUT /discuss/{number}` 等）。
 
 ### discussions list - 列出组织讨论
 
@@ -1263,6 +1263,46 @@ gc discussions view 42 --org my-org --json
 说明：
 - `--org`（必填）：组织 path。位置参数为讨论编号。
 - `--json`：原样输出讨论对象（含 `md_content` 正文）。
+
+### discussions create - 创建组织讨论
+
+调用 `POST /api/v5/orgs/{org}/discuss`。
+
+```bash
+# 创建讨论
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body "描述内容"
+
+# 从文件读取正文
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body-file idea.md
+
+# 从 stdin 读取正文
+cat idea.md | gc discussions create --org my-org --title "新想法" --category "Ideas" --body-file -
+
+# 输出 JSON
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body "描述" --json
+```
+
+说明：`--org`/`--title`/`--category`/`--body`（或 `--body-file`，支持 `-` 表示 stdin）均必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions edit - 编辑组织讨论
+
+调用 `PUT /api/v5/orgs/{org}/discuss/{number}`。仅更新显式传入的字段。
+
+```bash
+# 修改标题
+gc discussions edit 42 --org my-org --title "新标题"
+
+# 修改正文
+gc discussions edit 42 --org my-org --body-file idea.md
+
+# 修改分类
+gc discussions edit 42 --org my-org --category "Q&A"
+
+# 输出 JSON
+gc discussions edit 42 --org my-org --title "新标题" --json
+```
+
+说明：`--org`（必填）；位置参数为讨论编号；至少提供一个变更 flag（`--title`/`--body`/`--body-file`/`--category`），否则报参数错误；`--json` 原样输出更新结果。
 
 ### discussions project list - 列出仓库讨论
 
