@@ -12,7 +12,9 @@ All coordinates below ship identical content with synchronized versions. Command
 | --- | --- |
 | **`atomgit-cli`** | **Recommended** |
 | `@atomgit-cli/cli` | New scoped coordinate, equivalent |
-| `@gitcode-cli/cli` | Legacy coordinate, published in parallel — existing installs need no migration |
+| `@gitcode-cli/cli` | Legacy coordinate — **kept in parallel for the long term**, existing installs never need to migrate |
+
+Parallel publishing is a long-term commitment: every release ships to all three coordinates with identical content and synchronized versions, and no coordinate has a deprecation date.
 
 > ⚠️ The bare npm name `gitcode-cli` is an **unrelated third-party package** (not this tool; it even ships its own `gc` bin that would shadow this one). Do not install it.
 
