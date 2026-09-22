@@ -691,6 +691,23 @@ jobs:
           if [[ "${VERSION_NUM}" == *-* ]]; then
             PUBLISH_TAG="next"
           fi
+          # Bounded retries absorb registry dist-tag propagation delay, which
+          # already produced a false-negative recovery gate in v0.14.0.
+          dist_tag_with_retry() {
+            local coordinate="$1" attempt tag_version
+            for attempt in 1 2 3; do
+              tag_version="$(npm view "${coordinate}" "dist-tags.${PUBLISH_TAG}")"
+              if [[ "${tag_version}" = "${VERSION_NUM}" ]]; then
+                printf '%s' "${tag_version}"
+                return 0
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                sleep 10
+              fi
+            done
+            printf '%s' "${tag_version}"
+            return 1
+          }
           while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
             CURRENT_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
             if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
@@ -723,7 +740,7 @@ jobs:
                 echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
                 exit 1
               }
-              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              TAG_VERSION="$(dist_tag_with_retry "${COORDINATE}")"
               test "${TAG_VERSION}" = "${VERSION_NUM}"
               echo "npm ${COORDINATE}@${VERSION_NUM} already published with identical content; skipping"
               rm -rf existing-npm
@@ -734,10 +751,9 @@ jobs:
           # A full three-coordinate manifest must leave all coordinates aligned.
           if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]; then
             while IFS=$'\t' read -r COORDINATE _ _ <&3; do
-              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
-              test "${TAG_VERSION}" = "${VERSION_NUM}" || {
+              if ! TAG_VERSION="$(dist_tag_with_retry "${COORDINATE}")"; then
                 echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; expected ${VERSION_NUM}"
                 exit 1
-              }
+              fi
             done 3< "${RECOVERY_PACKAGES}"
           fi
