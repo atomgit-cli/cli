@@ -89,11 +89,12 @@ function bundledBinaryPath() {
  * per-user dir under the home directory. Pure (no FS side effects beyond the
  * write probe on the candidate dir).
  */
-function chooseGlobalBinDir(home, isWin) {
+function chooseGlobalBinDir(home, isWin, posixCandidates) {
   if (isWin) {
     return path.join(home, "AppData", "Local", "gitcode-cli", "bin");
   }
-  for (const dir of ["/usr/local/bin", path.join(home, ".local", "bin")]) {
+  const candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       const probe = path.join(dir, ".gc-write-probe");
@@ -227,7 +228,8 @@ function nonRegularTargetError(dst) {
     }
     let detail = `: ${dst} is a symlink -> ${raw}`;
     if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
-    const surface = `${raw}\n${resolved}`;
+    // Windows readlink/path results use backslashes; normalize for matching.
+    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
     const guidance = surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)
       ? `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
         `run "npm uninstall -g ${THIRD_PARTY_NPM_PACKAGE}" (check "npm prefix -g"), or remove the symlink`

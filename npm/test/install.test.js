@@ -49,12 +49,20 @@ test("chooseGlobalBinDir fallback explains the failure and the --target-dir esca
   }
   const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-home-notdir-"));
   fs.writeFileSync(path.join(home, ".local"), "regular file");
-  assert.throws(
-    () => chooseGlobalBinDir(home, false),
-    (error) => /cannot create install directory/.test(error.message) &&
-      /\.local/.test(error.message) &&
-      /--target-dir/.test(error.message)
-  );
+  // Inject candidates so the test does not depend on /usr/local/bin
+  // writability (CI runners can write it, which would bypass the fallback).
+  const unwritable = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-nowrite-"));
+  fs.chmodSync(unwritable, 0o555);
+  try {
+    assert.throws(
+      () => chooseGlobalBinDir(home, false, [unwritable, path.join(home, ".local", "bin")]),
+      (error) => /cannot create install directory/.test(error.message) &&
+        /\.local/.test(error.message) &&
+        /--target-dir/.test(error.message)
+    );
+  } finally {
+    fs.chmodSync(unwritable, 0o755);
+  }
 });
 
 test("ensureUsableInstallDir reports an unwritable target dir with guidance", (t) => {
@@ -526,7 +534,8 @@ test("install adopts a gitcode symlink left by a classic npm-global install and 
 
   rollbackTransaction([record]);
   assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
-  assert.strictEqual(fs.readlinkSync(alias), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
+  // Windows readlink returns backslash-separated targets; normalize both sides.
+  assert.strictEqual(fs.readlinkSync(alias).split(path.sep).join("/"), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
   assert.strictEqual(fs.readFileSync(alias, "utf8"), "old");
   assert.strictEqual(fs.existsSync(record.backup), false);
 });
