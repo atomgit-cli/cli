@@ -72,6 +72,15 @@ GC_NO_UPDATE_CHECK=1 gitcode version
 
 `CI=true` and `--no-interactive` disable background checks. The updater touches only the coordinate you installed (for example `atomgit-cli`); it never invokes pip, Homebrew, apt, dnf, or rpm, and it never rewrites PATH. If another `gitcode` is earlier on PATH, npm's non-failing install check and `doctor install` report the exact candidates and remediation choices.
 
+## Troubleshooting
+
+### `refusing non-regular install target`
+
+The bootstrap installer refuses to replace a symlink at the install target. Symlinks left by a classic global npm install of our own coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) are migrated automatically: rerun the install command. For any other symlink the error names the link target and the remediation:
+
+- A symlink into `node_modules/gitcode-cli/` belongs to the third-party npm package `gitcode-cli`, which is not AtomGit CLI: run `npm uninstall -g gitcode-cli` (check `npm prefix -g`), or remove the symlink.
+- Otherwise remove the stale symlink manually, or install to another directory with `--target-dir <dir>`.
+
 ## Supported platforms
 
 | OS | Arch |

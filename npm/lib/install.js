@@ -172,6 +172,53 @@ function isAllowedAliasSymlink(dst, allowedTarget) {
   }
 }
 
+// npm coordinates owned by this project. A bin symlink resolving into one of
+// these package trees is a leftover of a classic `npm install -g` channel and
+// is safe to migrate to the bootstrap layout.
+const OWN_NPM_PACKAGES = ["@atomgit-cli/cli", "@gitcode-cli/cli", "atomgit-cli"];
+const THIRD_PARTY_NPM_PACKAGE = "gitcode-cli";
+
+function resolvesIntoOwnNpmPackage(linkPath) {
+  let resolved;
+  try {
+    resolved = fs.realpathSync(linkPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    // A broken link still counts when its text points into one of our own
+    // package trees (leftover after the package was uninstalled).
+    try {
+      resolved = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
+    } catch {
+      return false;
+    }
+  }
+  const normalized = resolved.split(path.sep).join("/");
+  return OWN_NPM_PACKAGES.some((name) => normalized.includes(`/node_modules/${name}/`));
+}
+
+function nonRegularTargetError(dst) {
+  try {
+    const raw = fs.readlinkSync(dst);
+    let resolved = "";
+    try {
+      resolved = fs.realpathSync(dst);
+    } catch {
+      // Keep the raw link text only (broken link).
+    }
+    let detail = `: ${dst} is a symlink -> ${raw}`;
+    if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
+    const surface = `${raw}\n${resolved}`;
+    const guidance = surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)
+      ? `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
+        `run "npm uninstall -g ${THIRD_PARTY_NPM_PACKAGE}" (check "npm prefix -g"), or remove the symlink`
+      : "remove the symlink and run install again, or install to another directory with --target-dir";
+    return new Error(`refusing non-regular install target${detail}\n${guidance}`);
+  } catch {
+    // Non-symlink non-regular target (e.g. a directory): keep the plain form.
+    return new Error(`refusing non-regular install target: ${dst}`);
+  }
+}
+
 function replacePath(src, dst, transactionID, options = {}) {
   const temp = `${dst}.tmp-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   const backup = `${dst}.backup-${transactionID}`;
@@ -183,9 +230,12 @@ function replacePath(src, dst, transactionID, options = {}) {
   let moveOriginal = false;
   try {
     const stat = fs.lstatSync(dst);
-    if (stat.isSymbolicLink() && isAllowedAliasSymlink(dst, options.allowedSymlinkTarget)) {
+    if (stat.isSymbolicLink()) {
+      if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
+        throw nonRegularTargetError(dst);
+      }
       moveOriginal = true;
-    } else if (!stat.isFile() || stat.isSymbolicLink()) {
+    } else if (!stat.isFile()) {
       throw new Error(`refusing non-regular install target: ${dst}`);
     }
     hadOriginal = true;
@@ -210,7 +260,7 @@ function replacePath(src, dst, transactionID, options = {}) {
       if (moveOriginal) {
         fs.renameSync(dst, backup);
         backupReady = true;
-        if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget)) {
+        if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw new Error(`refusing non-regular install target: ${dst}`);
         }
       } else {
