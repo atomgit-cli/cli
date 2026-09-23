@@ -93,14 +93,14 @@ changelog:
 brews:
   - name: gc
     repository:
-      owner: gitcode-cli
+      owner: atomgit-cli
       name: homebrew-tap
       branch: main
     commit_author:
       name: github-actions[bot]
       email: 41898282+github-actions[bot]@users.noreply.github.com
     commit_msg_template: "chore: update gc formula for {{ .Tag }}"
-    homepage: https://gitcode.com/gitcode-cli/cli
+    homepage: https://gitcode.com/atomgit-cli/cli
     description: GitCode CLI - Command line tool for GitCode
     license: MIT
     install: |
@@ -118,7 +118,7 @@ release:
   prerelease: auto
   mode: replace
   footer: |
-    **Full Changelog**: https://gitcode.com/gitcode-cli/cli/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://gitcode.com/atomgit-cli/cli/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 announce:
   skip: false

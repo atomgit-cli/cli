@@ -456,7 +456,7 @@ jobs:
           printf '%s\n' "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzqKEHvnCg2BRkOjFMiQ24aN3n5j0JpnewHSk" > ~/.ssh/known_hosts
           eval "$(ssh-agent -s)"
           ssh-add - <<< "${HOMEBREW_TAP_DEPLOY_KEY}"
-          git clone git@github.com:gitcode-cli/homebrew-tap.git /tmp/tap
+          git clone git@github.com:atomgit-cli/homebrew-tap.git /tmp/tap
           cp formula/gc.rb /tmp/tap/gc.rb
           cd /tmp/tap
           git config user.name "github-actions[bot]"
