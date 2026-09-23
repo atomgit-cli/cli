@@ -831,13 +831,15 @@ test("sweepTransactionLeftovers removes stale regular leftovers only", (t) => {
 test("isTransactionLeftoverName matches only installer transaction artifacts", () => {
   for (const name of [
     "gc.backup-1-abc", "gc.tmp-1-abc",
+    "gc.exe.backup-1-abc", "gc.exe.tmp-1-abc",
     "gitcode.backup-1-abc", "gitcode.tmp-1-abc",
+    "gitcode.exe.backup-1-abc", "gitcode.exe.tmp-1-abc",
     "gitcode-update-helper.js.backup-1-abc", "gitcode-update-helper.js.tmp-1-abc",
-    ".gc-install-probe-123",
+    ".gc-install-probe-123", ".gc-write-probe",
   ]) {
     assert.strictEqual(isTransactionLeftoverName(name), true, name);
   }
-  for (const name of ["gc", "gitcode", "gitcode-update-helper.js", "gc.exe", "other.backup-x", "gcbackup-1"]) {
+  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", "other.backup-x", "gcbackup-1"]) {
     assert.strictEqual(isTransactionLeftoverName(name), false, name);
   }
 });

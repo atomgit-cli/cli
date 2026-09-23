@@ -622,11 +622,12 @@ function ensureUsableInstallDir(dir) {
 // the bin dir. Only regular files are swept, and only by mtime age: a symlink
 // backup keeps its original mtime through rename, so age is unreliable there
 // and active concurrent transactions must never be disturbed.
-const LEFTOVER_PREFIXES = ["gc", "gitcode", "gitcode-update-helper.js"];
+const LEFTOVER_PREFIXES = ["gc", "gc.exe", "gitcode", "gitcode.exe", "gitcode-update-helper.js"];
 const LEFTOVER_AGE_MS = 24 * 60 * 60 * 1000;
 
 function isTransactionLeftoverName(name) {
   if (name.startsWith(".gc-install-probe-")) return true;
+  if (name === ".gc-write-probe") return true;
   return LEFTOVER_PREFIXES.some((prefix) =>
     name.startsWith(`${prefix}.backup-`) || name.startsWith(`${prefix}.tmp-`));
 }

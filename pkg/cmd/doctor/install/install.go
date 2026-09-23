@@ -209,10 +209,10 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 // transactionLeftoverPrefixes matches the temp/backup file names an
 // interrupted bootstrap install can leave behind (see npm/lib/install.js).
 var transactionLeftoverPrefixes = []string{
-	"gc.backup-", "gc.tmp-",
-	"gitcode.backup-", "gitcode.tmp-",
+	"gc.backup-", "gc.tmp-", "gc.exe.backup-", "gc.exe.tmp-",
+	"gitcode.backup-", "gitcode.tmp-", "gitcode.exe.backup-", "gitcode.exe.tmp-",
 	"gitcode-update-helper.js.backup-", "gitcode-update-helper.js.tmp-",
-	".gc-install-probe-",
+	".gc-install-probe-", ".gc-write-probe",
 }
 
 // transactionLeftovers lists interrupted-install leftover files in dir.
@@ -247,11 +247,12 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 	for dir := range directories {
 		report.Leftovers = append(report.Leftovers, transactionLeftovers(dir)...)
 	}
+	sort.Strings(report.Leftovers)
 	if len(report.Leftovers) > 0 {
 		report.Conflicts = append(report.Conflicts,
 			fmt.Sprintf("interrupted-install leftovers detected (%d file(s))", len(report.Leftovers)))
 		report.Recommendations = append(report.Recommendations,
-			"rerun the npm bootstrap install to sweep stale leftovers, or delete the listed files manually")
+			"rerun the npm bootstrap install to sweep stale leftovers (regular files older than 24h), or delete the listed files manually")
 	}
 	if report.PowerShellGCAlias {
 		report.Conflicts = append(report.Conflicts, `Windows PowerShell may resolve "gc" as the Get-Content alias`)
