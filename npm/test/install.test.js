@@ -850,6 +850,12 @@ test("foreignChannelHint recognizes pip console scripts and ignores binaries", (
   const script = path.join(root, "gitcode");
   fs.writeFileSync(script, "#!/usr/bin/env python3\nimport gc_cli\n");
   assert.match(foreignChannelHint(script), /pip uninstall gitcode-cli/);
+  const versioned = path.join(root, "gitcode3");
+  fs.writeFileSync(versioned, "#!/usr/local/bin/python3.11\nimport gc_cli\n");
+  assert.match(foreignChannelHint(versioned), /pip uninstall gitcode-cli/);
+  const fakeComment = path.join(root, "fake");
+  fs.writeFileSync(fakeComment, "#!/bin/sh # python wrapper\nexec something\n");
+  assert.strictEqual(foreignChannelHint(fakeComment), "");
   const binary = path.join(root, "gc");
   fs.writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]));
   assert.strictEqual(foreignChannelHint(binary), "");
@@ -893,8 +899,34 @@ test("install gives pipx-specific guidance for a pipx-owned symlink", (t) => {
 
   assert.throws(
     () => replacePath(source, alias, "pipx-reject"),
-    (error) => /refusing non-regular install target/.test(error.message) &&
-      /pipx uninstall gitcode-cli/.test(error.message)
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pipx uninstall gitcode-cli/.test(message);
+    }
+  );
+});
+
+test("install keeps the generic guidance for a non-pipx directory named pipx", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pipx-lookalike-"));
+  const fakeBin = path.join(root, "pipx", "mytool", "bin", "gitcode");
+  fs.mkdirSync(path.dirname(fakeBin), { recursive: true });
+  fs.writeFileSync(fakeBin, "unrelated");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, fakeBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "pipx-lookalike-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /--target-dir/.test(message) &&
+        !/pipx uninstall/.test(message);
+    }
   );
 });
 

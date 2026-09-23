@@ -222,7 +222,7 @@ function resolvesIntoOwnNpmPackage(linkPath) {
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
   { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
-  { marker: "/pipx/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
+  { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
 ];
 
 function nonRegularTargetError(dst) {
@@ -632,7 +632,8 @@ function foreignChannelHint(file) {
   } catch {
     return "";
   }
-  if (/^#!.*\bpython/.test(content)) {
+  const firstLine = content.split("\n", 1)[0];
+  if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
     return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" instead to keep the pip channel';
   }
   return "";
