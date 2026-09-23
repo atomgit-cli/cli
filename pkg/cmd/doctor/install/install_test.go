@@ -98,3 +98,59 @@ func TestDoctorInstallJSON(t *testing.T) {
 		t.Fatalf("Version = %q, want 1.2.3", report.Version)
 	}
 }
+
+func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leftovers := []string{
+		"gc.backup-123-abc",
+		"gitcode.tmp-456-def",
+		"gitcode-update-helper.js.backup-123-abc",
+		".gc-install-probe-789",
+	}
+	for _, leftover := range leftovers {
+		if err := os.WriteFile(filepath.Join(dir, leftover), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "unrelated.backup-x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	if len(report.Leftovers) != len(leftovers) {
+		t.Fatalf("Leftovers = %#v, want %d entries", report.Leftovers, len(leftovers))
+	}
+	for _, leftover := range leftovers {
+		found := false
+		for _, entry := range report.Leftovers {
+			if strings.HasSuffix(entry, leftover) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected leftover %q in %#v", leftover, report.Leftovers)
+		}
+	}
+	conflict := false
+	recommendation := false
+	for _, line := range report.Conflicts {
+		if strings.Contains(line, "interrupted-install leftovers detected") {
+			conflict = true
+		}
+	}
+	for _, line := range report.Recommendations {
+		if strings.Contains(line, "rerun the npm bootstrap install") {
+			recommendation = true
+		}
+	}
+	if !conflict || !recommendation {
+		t.Fatalf("expected leftover conflict and recommendation, got conflicts=%#v recommendations=%#v",
+			report.Conflicts, report.Recommendations)
+	}
+}

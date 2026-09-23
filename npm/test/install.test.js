@@ -11,9 +11,9 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, parseInstallArgs,
-  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath, rollbackTransaction,
-  validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, isTransactionLeftoverName,
+  parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
+  rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
 } = require("../lib/install");
 
 test("copied update helper gets the npm coordinate injected and loads standalone", () => {
@@ -793,4 +793,51 @@ test("replacePath reports a backup that disappears before internal restore", () 
   }
   assert.strictEqual(fs.existsSync(target), false);
   assert.strictEqual(fs.existsSync(backup), false);
+});
+
+test("sweepTransactionLeftovers removes stale regular leftovers only", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-sweep-"));
+  const now = Date.now();
+  const stale = new Date(now - 25 * 60 * 60 * 1000);
+  const files = {
+    "gc.backup-old-txn": { content: "stale", mtime: stale, removed: true },
+    "gitcode.tmp-111-abc": { content: "stale", mtime: stale, removed: true },
+    "gitcode-update-helper.js.backup-old": { content: "stale", mtime: stale, removed: true },
+    ".gc-install-probe-999": { content: "stale", mtime: stale, removed: true },
+    "gc.tmp-222-fresh": { content: "fresh", mtime: new Date(now), removed: false },
+    "gc": { content: "binary", mtime: stale, removed: false },
+    "gitcode": { content: "binary", mtime: stale, removed: false },
+    "unrelated.backup-not-ours": { content: "x", mtime: stale, removed: false },
+  };
+  for (const [name, spec] of Object.entries(files)) {
+    fs.writeFileSync(path.join(root, name), spec.content);
+    fs.utimesSync(path.join(root, name), spec.mtime, spec.mtime);
+  }
+  if (!createFileSymlinkOrSkip(t, "gc", path.join(root, "gitcode.backup-migrated"))) return;
+  fs.utimesSync(path.join(root, "gitcode.backup-migrated"), stale, stale);
+
+  const removed = sweepTransactionLeftovers(root, now);
+  let expectedRemovals = 0;
+  for (const [name, spec] of Object.entries(files)) {
+    assert.strictEqual(fs.existsSync(path.join(root, name)), !spec.removed, name);
+    if (spec.removed) expectedRemovals += 1;
+  }
+  // A symlink backup keeps its original mtime through rename, so it is never
+  // swept by age (an active transaction could own it).
+  assert.strictEqual(fs.lstatSync(path.join(root, "gitcode.backup-migrated")).isSymbolicLink(), true);
+  assert.strictEqual(removed, expectedRemovals);
+});
+
+test("isTransactionLeftoverName matches only installer transaction artifacts", () => {
+  for (const name of [
+    "gc.backup-1-abc", "gc.tmp-1-abc",
+    "gitcode.backup-1-abc", "gitcode.tmp-1-abc",
+    "gitcode-update-helper.js.backup-1-abc", "gitcode-update-helper.js.tmp-1-abc",
+    ".gc-install-probe-123",
+  ]) {
+    assert.strictEqual(isTransactionLeftoverName(name), true, name);
+  }
+  for (const name of ["gc", "gitcode", "gitcode-update-helper.js", "gc.exe", "other.backup-x", "gcbackup-1"]) {
+    assert.strictEqual(isTransactionLeftoverName(name), false, name);
+  }
 });

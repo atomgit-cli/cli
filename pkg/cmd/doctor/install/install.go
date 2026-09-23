@@ -43,6 +43,7 @@ type Report struct {
 	PowerShellGCAlias bool                         `json:"powershell_gc_alias"`
 	Conflicts         []string                     `json:"conflicts"`
 	Recommendations   []string                     `json:"recommendations"`
+	Leftovers         []string                     `json:"leftovers,omitempty"`
 }
 
 // NewCmdInstall creates the doctor install command.
@@ -205,7 +206,53 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 	return candidates
 }
 
+// transactionLeftoverPrefixes matches the temp/backup file names an
+// interrupted bootstrap install can leave behind (see npm/lib/install.js).
+var transactionLeftoverPrefixes = []string{
+	"gc.backup-", "gc.tmp-",
+	"gitcode.backup-", "gitcode.tmp-",
+	"gitcode-update-helper.js.backup-", "gitcode-update-helper.js.tmp-",
+	".gc-install-probe-",
+}
+
+// transactionLeftovers lists interrupted-install leftover files in dir.
+func transactionLeftovers(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		for _, prefix := range transactionLeftoverPrefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				found = append(found, filepath.Join(dir, entry.Name()))
+				break
+			}
+		}
+	}
+	sort.Strings(found)
+	return found
+}
+
 func addDiagnostics(report *Report, env map[string]string, goos string) {
+	directories := map[string]struct{}{}
+	for _, command := range []string{"gitcode", "gc"} {
+		for _, candidate := range report.Commands[command].Candidates {
+			directories[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
+		}
+	}
+	for dir := range directories {
+		report.Leftovers = append(report.Leftovers, transactionLeftovers(dir)...)
+	}
+	if len(report.Leftovers) > 0 {
+		report.Conflicts = append(report.Conflicts,
+			fmt.Sprintf("interrupted-install leftovers detected (%d file(s))", len(report.Leftovers)))
+		report.Recommendations = append(report.Recommendations,
+			"rerun the npm bootstrap install to sweep stale leftovers, or delete the listed files manually")
+	}
 	if report.PowerShellGCAlias {
 		report.Conflicts = append(report.Conflicts, `Windows PowerShell may resolve "gc" as the Get-Content alias`)
 		report.Recommendations = append(report.Recommendations, `use "gitcode" in PowerShell; do not remove the built-in gc alias globally`)
@@ -281,6 +328,9 @@ func writeHuman(cmd *cobra.Command, report Report) {
 	}
 	for _, conflict := range report.Conflicts {
 		fmt.Fprintf(out, "Conflict: %s\n", conflict)
+	}
+	for _, leftover := range report.Leftovers {
+		fmt.Fprintf(out, "Leftover: %s\n", leftover)
 	}
 	for _, recommendation := range report.Recommendations {
 		fmt.Fprintf(out, "Recommendation: %s\n", recommendation)

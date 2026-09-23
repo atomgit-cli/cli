@@ -618,6 +618,42 @@ function ensureUsableInstallDir(dir) {
   }
 }
 
+// Files an interrupted (SIGKILL/Ctrl-C) bootstrap install can leave behind in
+// the bin dir. Only regular files are swept, and only by mtime age: a symlink
+// backup keeps its original mtime through rename, so age is unreliable there
+// and active concurrent transactions must never be disturbed.
+const LEFTOVER_PREFIXES = ["gc", "gitcode", "gitcode-update-helper.js"];
+const LEFTOVER_AGE_MS = 24 * 60 * 60 * 1000;
+
+function isTransactionLeftoverName(name) {
+  if (name.startsWith(".gc-install-probe-")) return true;
+  return LEFTOVER_PREFIXES.some((prefix) =>
+    name.startsWith(`${prefix}.backup-`) || name.startsWith(`${prefix}.tmp-`));
+}
+
+function sweepTransactionLeftovers(dir, now = Date.now()) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!isTransactionLeftoverName(entry)) continue;
+    const file = path.join(dir, entry);
+    try {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || now - stat.mtimeMs < LEFTOVER_AGE_MS) continue;
+      fs.unlinkSync(file);
+      removed += 1;
+    } catch {
+      // best-effort sweep; a failed unlink must not block installation
+    }
+  }
+  return removed;
+}
+
 // Render an error chain (AggregateError causes) so users see the underlying
 // errno and paths instead of only the aggregate message (issue #592).
 function formatErrorChain(error) {
@@ -663,6 +699,10 @@ async function runInstall(args = []) {
 
   const dir = options.targetDir || chooseGlobalBinDir(home, isWin);
   ensureUsableInstallDir(dir);
+  const swept = sweepTransactionLeftovers(dir);
+  if (swept > 0) {
+    process.stdout.write(`Swept ${swept} leftover file(s) from a previously interrupted install in ${dir}\n`);
+  }
 
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
@@ -745,7 +785,7 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, parseInstallArgs,
-  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath, rollbackTransaction,
-  validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, isTransactionLeftoverName,
+  parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
+  rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
 };
