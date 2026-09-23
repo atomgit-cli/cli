@@ -38,7 +38,7 @@ npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@lat
 (For scoped coordinates, additionally pin the scope registry, e.g. `--@atomgit-cli:registry=https://registry.npmjs.org`.)
 
 Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions.
-If an older installation left a same-directory `gitcode -> gc` alias, bootstrap migrates that verified alias transactionally; links to any other target are never overwritten.
+If an older installation left a same-directory `gitcode -> gc` alias, or bin symlinks from a classic global npm install of our own coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`), bootstrap migrates those verified links transactionally; links to any other target are never overwritten.
 On Windows it installs both `gc.exe` and `gitcode.exe`, then prepends the install directory to the persistent user PATH. Pass `--no-modify-path` to opt out. An npx child process cannot refresh the already-running PowerShell process, so the installer prints explicit Chinese instructions for refreshing `$env:Path` immediately or closing all PowerShell/Windows Terminal windows before reopening. It never changes the machine PATH or removes another package manager's entry. Use `gitcode` in PowerShell because `gc` is the built-in `Get-Content` alias.
 
 An explicit `--target-dir` replaces regular `gc`/`gitcode` files inside that directory. Do not point it at Python Scripts, an npm prefix, or another package manager-owned directory.
@@ -80,6 +80,8 @@ The bootstrap installer refuses to replace a symlink at the install target. Syml
 
 - A symlink into `node_modules/gitcode-cli/` belongs to the third-party npm package `gitcode-cli`, which is not AtomGit CLI: run `npm uninstall -g gitcode-cli` (check `npm prefix -g`), or remove the symlink.
 - Otherwise remove the stale symlink manually, or install to another directory with `--target-dir <dir>`.
+
+After a successful migration, the old classic global package tree stays behind and can be removed with `npm uninstall -g <coordinate>` (for example `npm uninstall -g @gitcode-cli/cli`).
 
 ## Supported platforms
 

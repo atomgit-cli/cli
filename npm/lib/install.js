@@ -183,9 +183,15 @@ function resolvesIntoOwnNpmPackage(linkPath) {
   try {
     resolved = fs.realpathSync(linkPath);
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if (error.code !== "ENOENT") {
+      // ELOOP/EACCES/ENOTDIR and friends: fall through to the refusal path,
+      // which renders an actionable message instead of a raw errno.
+      return false;
+    }
     // A broken link still counts when its text points into one of our own
-    // package trees (leftover after the package was uninstalled).
+    // package trees (leftover after the package was uninstalled). The text is
+    // resolved lexically here; a stale link has no live target to protect, so
+    // over-matching on crafted text is acceptable by design.
     try {
       resolved = path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath));
     } catch {
@@ -193,7 +199,14 @@ function resolvesIntoOwnNpmPackage(linkPath) {
     }
   }
   const normalized = resolved.split(path.sep).join("/");
-  return OWN_NPM_PACKAGES.some((name) => normalized.includes(`/node_modules/${name}/`));
+  return OWN_NPM_PACKAGES.some((name) => {
+    const marker = `/node_modules/${name}/`;
+    const index = normalized.indexOf(marker);
+    // Only a top-level global layout counts (`<prefix>/node_modules/<pkg>/`):
+    // the matched node_modules must be the outermost one, so links inside the
+    // nested dependency trees of other packages are never hijacked.
+    return index >= 0 && !normalized.slice(0, index).includes("/node_modules/");
+  });
 }
 
 function nonRegularTargetError(dst) {
@@ -261,7 +274,7 @@ function replacePath(src, dst, transactionID, options = {}) {
         fs.renameSync(dst, backup);
         backupReady = true;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
-          throw new Error(`refusing non-regular install target: ${dst}`);
+          throw nonRegularTargetError(backup);
         }
       } else {
         fs.copyFileSync(dst, backup, fs.constants.COPYFILE_EXCL);
