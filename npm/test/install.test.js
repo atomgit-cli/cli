@@ -608,9 +608,13 @@ test("install rejects a symlink into the third-party gitcode-cli package with un
 
   assert.throws(
     () => replacePath(source, alias, "third-party-reject"),
-    (error) => /refusing non-regular install target/.test(error.message) &&
-      /node_modules\/gitcode-cli/.test(error.message) &&
-      /npm uninstall -g gitcode-cli/.test(error.message)
+    (error) => {
+      // Windows renders the link target with backslashes; normalize before matching.
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /node_modules\/gitcode-cli/.test(message) &&
+        /npm uninstall -g gitcode-cli/.test(message);
+    }
   );
   assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
   assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "unrelated");
