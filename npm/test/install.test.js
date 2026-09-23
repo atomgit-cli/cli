@@ -425,6 +425,185 @@ test("install still rejects a symlink at the primary gc target", (t) => {
   assert.strictEqual(fs.readFileSync(other, "utf8"), "old");
 });
 
+test("install adopts a gitcode symlink left by a classic npm-global install and restores it on rollback", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-global-"));
+  const packageBin = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  const record = replacePath(source, alias, "npm-global-alias");
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "new");
+  assert.strictEqual(fs.lstatSync(record.backup).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(record.backup, "utf8"), "old");
+
+  rollbackTransaction([record]);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readlinkSync(alias), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "old");
+  assert.strictEqual(fs.existsSync(record.backup), false);
+});
+
+test("install adopts npm-global symlinks for every own npm coordinate", (t) => {
+  for (const coordinate of ["@atomgit-cli/cli", "@gitcode-cli/cli", "atomgit-cli"]) {
+    const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-coord-"));
+    const packageBin = path.join(root, "node_modules", ...coordinate.split("/"), "bin", "gc.js");
+    fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+    fs.writeFileSync(packageBin, "old");
+    const binDir = path.join(root, "bin");
+    fs.mkdirSync(binDir);
+    const source = path.join(root, "source");
+    const alias = path.join(binDir, "gitcode");
+    fs.writeFileSync(source, "new");
+    if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), alias)) return;
+
+    const record = replacePath(source, alias, `npm-coord-${coordinate.replace(/\//g, "-")}`);
+    assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false, coordinate);
+    assert.strictEqual(fs.readFileSync(alias, "utf8"), "new", coordinate);
+    commitTransaction([record]);
+    assert.strictEqual(fs.existsSync(record.backup), false, coordinate);
+  }
+});
+
+test("install adopts an npm-global symlink at the primary gc target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-primary-"));
+  const packageBin = path.join(root, "node_modules", "atomgit-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), target)) return;
+
+  const record = replacePath(source, target, "npm-global-primary");
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
+  commitTransaction([record]);
+});
+
+test("install adopts a broken npm-global symlink into our own package tree", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-broken-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  const record = replacePath(source, alias, "npm-global-broken");
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "new");
+  commitTransaction([record]);
+});
+
+test("install rejects a symlink into the third-party gitcode-cli package with uninstall guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-third-party-"));
+  const packageBin = path.join(root, "lib", "node_modules", "gitcode-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "unrelated");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/gitcode-cli/bin/gc.js", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "third-party-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /node_modules\/gitcode-cli/.test(error.message) &&
+      /npm uninstall -g gitcode-cli/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "unrelated");
+});
+
+test("install rejects a foreign symlink with the link target and --target-dir guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-foreign-"));
+  const source = path.join(root, "source");
+  const other = path.join(root, "other");
+  const alias = path.join(root, "gitcode");
+  fs.writeFileSync(source, "new");
+  fs.writeFileSync(other, "unrelated");
+  if (!createFileSymlinkOrSkip(t, "other", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "foreign-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /symlink -> other/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(other, "utf8"), "unrelated");
+});
+
+test("install reports an actionable refusal for a symlink loop at the primary target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-loop-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "gitcode", target)) return;
+  if (!createFileSymlinkOrSkip(t, "gc", path.join(binDir, "gitcode"))) return;
+
+  assert.throws(
+    () => replacePath(source, target, "loop-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      !/ELOOP/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install refuses symlinks inside the nested dependency tree of another package", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-nested-"));
+  const packageBin = path.join(root, "project", "node_modules", "pkg-a", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), alias)) return;
+
+  assert.throws(() => replacePath(source, alias, "nested-reject"), /refusing non-regular install target/);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "old");
+});
+
+test("install judges npm-global adoption by the resolved path, not the link text", (t) => {
+  if (process.platform === "win32") {
+    t.skip("directory symlinks require Windows Developer Mode or elevated privileges");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-authority-"));
+  const external = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-authority-external-"));
+  fs.mkdirSync(path.join(root, "lib"));
+  fs.mkdirSync(path.join(external, "libs", "@gitcode-cli", "cli", "bin"), { recursive: true });
+  const externalBin = path.join(external, "libs", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.writeFileSync(externalBin, "external");
+  fs.symlinkSync(path.join(external, "libs"), path.join(root, "lib", "node_modules"), "dir");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  assert.throws(() => replacePath(source, alias, "authority-reject"), /refusing non-regular install target/);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(externalBin, "utf8"), "external");
+});
+
 test("rollback continues restoring remaining paths after one restore fails", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-rollback-failure-"));
   const source = path.join(root, "source");
