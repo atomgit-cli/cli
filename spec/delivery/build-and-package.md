@@ -213,7 +213,7 @@ go build -o ./gc ./cmd/gc
 Homebrew formula (`gc.rb`) 是发布产物，不属于本地产物：
 
 - 由 GoReleaser 在 release workflow `artifacts` job 生成到 `dist/homebrew/gc.rb`（含 version/sha256/URL/install/test，来自 `.goreleaser.yaml` `brews:` 段）
-- 由 `brew` job 用 deploy key 推送到 tap 仓 `gitcode-cli/homebrew-tap`（见 [release-process.md](./release-process.md) §6.5）
+- 由 `brew` job 用 deploy key 推送到 tap 仓 `atomgit-cli/homebrew-tap`（见 [release-process.md](./release-process.md) §6.5）
 - 本地 `homebrew/gc.rb` 仅作参考副本，实际 formula 以 GoReleaser 生成结果为准（DSL 风格可能与本副本不同）
 
 > **技术债务（保留 brews 的决策依据）**：GoReleaser `brews:` 段自 v2.16 起标记废弃，但仍可生成 formula（`goreleaser release` 兼容，仅 `goreleaser check` 报错）。正式 release workflow 固定 GoReleaser v2.17.1。GoReleaser 推荐迁移到 `homebrew_casks`，但 cask 假定签名公证、依赖 macOS app bundle 特性、Linux 支持有限，**不适用于跨平台未签名 CLI**——gc 是 CLI 二进制，需 macOS + Linux 双平台 `brew install`，formula 是 Homebrew 对 CLI 工具的标准做法（如 gh/jq/ripgrep）。故保留 `brews` 生成 formula，跟踪 GoReleaser 后续是否提供 CLI 友好替代；若未来大版本移除 `brews`，再评估自定义 formula 生成（`after.hooks` + 脚本）。不阻塞当前发布。

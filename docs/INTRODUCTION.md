@@ -5,7 +5,7 @@
 GitCode CLI 把这些工作带回终端：仓库、Issue、Pull Request、Commit、标签、里程碑、Release 和 Actions 都可以通过统一命令完成。对开发者，它减少上下文切换；对团队，它让操作可以复用和审计；对 AI 代理，它提供结构化、可发现、带安全边界的 GitCode 执行入口。本文统一使用跨平台入口 `gitcode`；通过 npm、PyPI、Homebrew、DEB/RPM 或 wheel 安装时都会同时提供 `gitcode` 和 `gc` 两个入口。
 
 - 项目仓库：[gitcode-cli/cli](https://gitcode.com/gitcode-cli/cli)
-- 安装渠道：[npm](https://www.npmjs.com/package/@gitcode-cli/cli)｜[PyPI](https://pypi.org/project/gitcode-cli/)｜[GitCode Release](https://gitcode.com/gitcode-cli/cli/releases)｜[GitHub Release](https://github.com/gitcode-cli/cli/releases)
+- 安装渠道：[npm](https://www.npmjs.com/package/@gitcode-cli/cli)｜[PyPI](https://pypi.org/project/gitcode-cli/)｜[GitCode Release](https://gitcode.com/atomgit-cli/cli/releases)｜[GitHub Release](https://github.com/atomgit-cli/cli/releases)
 - 完整命令手册：[docs/COMMANDS.md](https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md)
 
 ## 五分钟开始使用
@@ -41,9 +41,9 @@ npm 安装默认使用 `notify` 模式：普通命令最多每 24 小时在后�
 |------|-------------|------|
 | npm bootstrap（Windows、Node/AI 环境首选） | `npx -y @gitcode-cli/cli@latest install` | https://www.npmjs.com/package/@gitcode-cli/cli |
 | PyPI（隔离安装） | `pipx install gitcode-cli` / `pipx upgrade gitcode-cli`（或仅在已激活 venv 中使用 pip） | https://pypi.org/project/gitcode-cli/ |
-| Homebrew (macOS/Linux) | `brew install gitcode-cli/homebrew-tap/gc` / `brew upgrade gc` | [homebrew-tap](https://github.com/gitcode-cli/homebrew-tap) |
-| GitCode Release | 从归档下载 wheel/DEB/RPM/二进制 | https://gitcode.com/gitcode-cli/cli/releases |
-| GitHub Release | 同上制品镜像 | https://github.com/gitcode-cli/cli/releases |
+| Homebrew (macOS/Linux) | `brew install atomgit-cli/homebrew-tap/gc` / `brew upgrade gc` | [homebrew-tap](https://github.com/atomgit-cli/homebrew-tap) |
+| GitCode Release | 从归档下载 wheel/DEB/RPM/二进制 | https://gitcode.com/atomgit-cli/cli/releases |
+| GitHub Release | 同上制品镜像 | https://github.com/atomgit-cli/cli/releases |
 
 > npm 全局安装备选：`npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest`
 

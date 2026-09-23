@@ -15,7 +15,7 @@ func extractQuotedNames(t *testing.T, content string, pattern *regexp.Regexp, so
 	t.Helper()
 	match := pattern.FindStringSubmatch(content)
 	if match == nil {
-		t.Fatalf("failed to locate %s in %s", source, content[:0])
+		t.Fatalf("failed to locate %s", source)
 	}
 	names := quotedNamePattern.FindAllString(match[1], -1)
 	if len(names) == 0 {
