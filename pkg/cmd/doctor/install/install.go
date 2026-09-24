@@ -17,10 +17,9 @@ import (
 )
 
 const (
-	distributionEnv = "GITCODE_CLI_DISTRIBUTION"
-	entrypointEnv   = "GITCODE_CLI_ENTRYPOINT"
-	binaryEnv       = "GITCODE_CLI_BINARY"
-	packageRootEnv  = "GITCODE_CLI_PACKAGE_ROOT"
+	entrypointEnv  = "GITCODE_CLI_ENTRYPOINT"
+	binaryEnv      = "GITCODE_CLI_BINARY"
+	packageRootEnv = "GITCODE_CLI_PACKAGE_ROOT"
 )
 
 // CommandResolution describes how a command name resolves through PATH.
