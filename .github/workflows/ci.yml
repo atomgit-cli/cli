@@ -86,6 +86,10 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Run npm wrapper and real-upgrade tests
+        # bash -e fails the step on the first failing command; the default
+        # pwsh on Windows only surfaces the last command's exit code, which
+        # masked npm test failures (run 35840605182).
+        shell: bash
         run: |
           npm test --prefix npm
           npm run test:upgrade --prefix npm

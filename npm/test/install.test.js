@@ -11,8 +11,9 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  helperPackageNameTransform, installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
-  quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, parseInstallArgs,
+  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath, rollbackTransaction,
+  validateWindowsPathDirectory, windowsPathGuidance,
 } = require("../lib/install");
 
 test("copied update helper gets the npm coordinate injected and loads standalone", () => {
@@ -39,6 +40,94 @@ test("copied update helper gets the npm coordinate injected and loads standalone
 
 test("helper transform fails loudly when the marker is missing", () => {
   assert.throws(() => helperPackageNameTransform("atomgit-cli")("const PACKAGE = 'stale';"));
+});
+
+test("chooseGlobalBinDir fallback explains the failure and the --target-dir escape hatch", (t) => {
+  if (process.platform === "win32") {
+    t.skip("posix fallback path only");
+    return;
+  }
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-home-notdir-"));
+  fs.writeFileSync(path.join(home, ".local"), "regular file");
+  // Inject candidates so the test does not depend on /usr/local/bin
+  // writability (CI runners can write it, which would bypass the fallback).
+  const unwritable = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-nowrite-"));
+  fs.chmodSync(unwritable, 0o555);
+  try {
+    assert.throws(
+      () => chooseGlobalBinDir(home, false, [unwritable, path.join(home, ".local", "bin")]),
+      (error) => /cannot create install directory/.test(error.message) &&
+        /\.local/.test(error.message) &&
+        /--target-dir/.test(error.message)
+    );
+  } finally {
+    fs.chmodSync(unwritable, 0o755);
+  }
+});
+
+test("ensureUsableInstallDir reports an unwritable target dir with guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-unusable-"));
+  if (process.platform === "win32") {
+    t.skip("chmod read-only bits are advisory on Windows");
+    return;
+  }
+  const dir = path.join(root, "bin");
+  fs.mkdirSync(dir);
+  fs.chmodSync(dir, 0o555);
+  try {
+    assert.throws(
+      () => ensureUsableInstallDir(dir),
+      (error) => /install directory is not usable/.test(error.message) &&
+        /--target-dir/.test(error.message)
+    );
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+});
+
+test("ensureUsableInstallDir rejects a path occupied by a regular file with guidance", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-notdir-"));
+  const target = path.join(root, "occupied");
+  fs.writeFileSync(target, "file");
+  assert.throws(
+    () => ensureUsableInstallDir(target),
+    (error) => /install directory is not usable/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+});
+
+test("ensureUsableInstallDir accepts and creates a writable target dir", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-ok-"));
+  const dir = path.join(root, "nested", "bin");
+  ensureUsableInstallDir(dir);
+  assert.strictEqual(fs.statSync(dir).isDirectory(), true);
+  assert.strictEqual(fs.existsSync(path.join(dir, `.gc-install-probe-${process.pid}`)), false);
+});
+
+test("formatErrorChain renders nested AggregateError causes with their errno", () => {
+  const leaf = new Error("EACCES: permission denied, rename 'gc.backup-t1' -> 'gc'");
+  const inner = new AggregateError([leaf, new Error("restore denied")], "path replacement failed and rollback was incomplete");
+  const outer = new AggregateError([inner], "installation failed and rollback was incomplete");
+  const rendered = formatErrorChain(outer);
+  assert.ok(rendered.includes("installation failed and rollback was incomplete"));
+  assert.ok(rendered.includes("EACCES: permission denied, rename 'gc.backup-t1' -> 'gc'"));
+  assert.ok(rendered.includes("restore denied"));
+  assert.ok(rendered.split("\n").length >= 4);
+});
+
+test("install explains that a directory occupies the target and points to --target-dir", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-dir-target-"));
+  const source = path.join(root, "source");
+  const target = path.join(root, "gc");
+  fs.writeFileSync(source, "new");
+  fs.mkdirSync(target);
+  assert.throws(
+    () => replacePath(source, target, "dir-target"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /is a directory/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  assert.strictEqual(fs.statSync(target).isDirectory(), true);
 });
 
 test("chooseGlobalBinDir returns a writable, existing dir on posix (regardless of /usr/local/bin)", () => {
@@ -445,7 +534,8 @@ test("install adopts a gitcode symlink left by a classic npm-global install and 
 
   rollbackTransaction([record]);
   assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
-  assert.strictEqual(fs.readlinkSync(alias), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
+  // Windows readlink returns backslash-separated targets; normalize both sides.
+  assert.strictEqual(fs.readlinkSync(alias).split(path.sep).join("/"), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
   assert.strictEqual(fs.readFileSync(alias, "utf8"), "old");
   assert.strictEqual(fs.existsSync(record.backup), false);
 });
@@ -518,9 +608,13 @@ test("install rejects a symlink into the third-party gitcode-cli package with un
 
   assert.throws(
     () => replacePath(source, alias, "third-party-reject"),
-    (error) => /refusing non-regular install target/.test(error.message) &&
-      /node_modules\/gitcode-cli/.test(error.message) &&
-      /npm uninstall -g gitcode-cli/.test(error.message)
+    (error) => {
+      // Windows renders the link target with backslashes; normalize before matching.
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /node_modules\/gitcode-cli/.test(message) &&
+        /npm uninstall -g gitcode-cli/.test(message);
+    }
   );
   assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
   assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "unrelated");

@@ -89,11 +89,12 @@ function bundledBinaryPath() {
  * per-user dir under the home directory. Pure (no FS side effects beyond the
  * write probe on the candidate dir).
  */
-function chooseGlobalBinDir(home, isWin) {
+function chooseGlobalBinDir(home, isWin, posixCandidates) {
   if (isWin) {
     return path.join(home, "AppData", "Local", "gitcode-cli", "bin");
   }
-  for (const dir of ["/usr/local/bin", path.join(home, ".local", "bin")]) {
+  const candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       const probe = path.join(dir, ".gc-write-probe");
@@ -105,7 +106,14 @@ function chooseGlobalBinDir(home, isWin) {
     }
   }
   const dir = path.join(home, ".local", "bin");
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    throw new Error(
+      `cannot create install directory ${dir}: ${error.message}\n` +
+        `choose another directory with --target-dir <dir>`
+    );
+  }
   return dir;
 }
 
@@ -220,7 +228,8 @@ function nonRegularTargetError(dst) {
     }
     let detail = `: ${dst} is a symlink -> ${raw}`;
     if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
-    const surface = `${raw}\n${resolved}`;
+    // Windows readlink/path results use backslashes; normalize for matching.
+    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
     const guidance = surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)
       ? `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
         `run "npm uninstall -g ${THIRD_PARTY_NPM_PACKAGE}" (check "npm prefix -g"), or remove the symlink`
@@ -249,7 +258,11 @@ function replacePath(src, dst, transactionID, options = {}) {
       }
       moveOriginal = true;
     } else if (!stat.isFile()) {
-      throw new Error(`refusing non-regular install target: ${dst}`);
+      const kind = stat.isDirectory() ? "a directory" : "not a regular file";
+      throw new Error(
+        `refusing non-regular install target: ${dst} is ${kind}; ` +
+          `remove it or choose another directory with --target-dir <dir>`
+      );
     }
     hadOriginal = true;
   } catch (error) {
@@ -589,6 +602,37 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
   return `${lines.join("\n")}\n`;
 }
 
+// Fail early with actionable guidance when the install dir cannot be created
+// or written (mkdir on an existing dir skips write checks, so probe too).
+function ensureUsableInstallDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.gc-install-probe-${process.pid}`);
+    fs.writeFileSync(probe, "");
+    fs.unlinkSync(probe);
+  } catch (error) {
+    throw new Error(
+      `install directory is not usable: ${dir} (${error.message})\n` +
+        `check the path and permissions, or choose another directory with --target-dir <dir>`
+    );
+  }
+}
+
+// Render an error chain (AggregateError causes) so users see the underlying
+// errno and paths instead of only the aggregate message (issue #592).
+function formatErrorChain(error) {
+  const lines = [];
+  const walk = (current, depth) => {
+    const prefix = depth === 0 ? "" : "  ".repeat(depth) + "- ";
+    lines.push(`${prefix}${current && current.message ? current.message : current}`);
+    if (current && Array.isArray(current.errors)) {
+      for (const inner of current.errors) walk(inner, depth + 1);
+    }
+  };
+  walk(error, 0);
+  return lines.join("\n");
+}
+
 async function runInstall(args = []) {
   if (args.length === 1 && ["-h", "--help"].includes(args[0])) {
     process.stdout.write(installHelp());
@@ -618,7 +662,7 @@ async function runInstall(args = []) {
   ensureExec(src);
 
   const dir = options.targetDir || chooseGlobalBinDir(home, isWin);
-  fs.mkdirSync(dir, { recursive: true });
+  ensureUsableInstallDir(dir);
 
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
@@ -701,6 +745,7 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  helperPackageNameTransform, installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
-  quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, parseInstallArgs,
+  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath, rollbackTransaction,
+  validateWindowsPathDirectory, windowsPathGuidance,
 };

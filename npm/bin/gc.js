@@ -111,9 +111,9 @@ function main() {
   // CLI grows a real "gc install" later, prefer forwarding "--help"/unknown
   // flags through and reserve only the bare "install" first token.
   if (args[0] === "install") {
-    const { runInstall } = require("../lib/install");
+    const { runInstall, formatErrorChain } = require("../lib/install");
     runInstall(args.slice(1)).catch((err) => {
-      process.stderr.write(`install failed: ${err && err.message ? err.message : err}\n`);
+      process.stderr.write(`install failed: ${formatErrorChain(err)}\n`);
       process.exit(1);
     });
     return;
