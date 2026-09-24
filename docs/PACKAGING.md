@@ -130,8 +130,8 @@ export GC_TOKEN="your_gitcode_token"
 ./scripts/package.sh v0.14.0 release
 
 # 2. 发布准备 PR 合入两个远端 main 后，触发正式 workflow
-gh workflow run release.yml -R gitcode-cli/cli -f version=v0.14.0
-gh run watch <run-id> -R gitcode-cli/cli
+gh workflow run release.yml -R atomgit-cli/cli -f version=v0.14.0
+gh run watch <run-id> -R atomgit-cli/cli
 
 # 3. workflow 全部成功后，同步同一 tag 到 GitCode（SSH）
 git fetch github tag v0.14.0
@@ -139,7 +139,7 @@ git push origin refs/tags/v0.14.0
 
 # 4. 下载 GitHub workflow 生成的正式制品
 mkdir -p dist/github-release
-gh release download v0.14.0 -R gitcode-cli/cli --dir dist/github-release
+gh release download v0.14.0 -R atomgit-cli/cli --dir dist/github-release
 
 # 5. 验证覆盖全部正式资产的 SHA-256 清单
 cd dist/github-release
@@ -147,14 +147,14 @@ sha256sum -c gc_0.14.0_checksums.txt
 cd ../..
 
 # 6. 使用受跟踪的同一份说明创建 GitCode Release
-gc release create v0.14.0 -R gitcode-cli/cli \
+gc release create v0.14.0 -R atomgit-cli/cli \
   --title "GitCode CLI v0.14.0" \
   --notes-file docs/releases/v0.14.0.md \
   --target main \
   --json
 
 # 7. 将同一批正式制品上传到 GitCode，不得重新构建
-gc release upload v0.14.0 dist/github-release/* -R gitcode-cli/cli --json
+gc release upload v0.14.0 dist/github-release/* -R atomgit-cli/cli --json
 ```
 
 > **注意**：将示例中的版本号 `0.14.0` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
@@ -164,7 +164,7 @@ gc release upload v0.14.0 dist/github-release/* -R gitcode-cli/cli --json
 **重要**：所有下载链接必须使用完整路径：
 
 ```
-https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/{FILENAME}
+https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/{FILENAME}
 ```
 
 **禁止**只写 `pip install xxx.whl` 不提供下载地址！
@@ -217,7 +217,7 @@ GitCode 会错误渲染代码块内的 `#` 开头行为标题！
 
     python3 -m venv .venv
     source .venv/bin/activate
-    pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
+    pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
 
 Windows 用户激活虚拟环境：
 
@@ -231,47 +231,47 @@ Windows PowerShell 用户建议运行：
 
 ### DEB (Debian/Ubuntu)
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
     sudo dpkg -i gc_0.14.0_amd64.deb
 
 ARM64 设备：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_0.14.0_arm64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_arm64.deb
     sudo dpkg -i gc_0.14.0_arm64.deb
 
 ### RPM (RHEL/CentOS/Fedora)
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
     sudo rpm -i gc-0.14.0-1.x86_64.rpm
 
 ARM64 设备：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.aarch64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.aarch64.rpm
     sudo rpm -i gc-0.14.0-1.aarch64.rpm
 
 ### Linux 二进制
 
 AMD64：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_linux_amd64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_amd64
     chmod +x gc_linux_amd64
     sudo mv gc_linux_amd64 /usr/local/bin/gc
 
 ARM64：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_linux_arm64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_arm64
     chmod +x gc_linux_arm64
     sudo mv gc_linux_arm64 /usr/local/bin/gc
 
 ### Homebrew (macOS/Linux)
 
-    brew install gitcode-cli/homebrew-tap/gc
+    brew install atomgit-cli/homebrew-tap/gc
 
 更新到最新版本：
 
     brew upgrade gc
 
-shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [gitcode-cli/homebrew-tap](https://github.com/gitcode-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。
+shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。
 
 ### npm (跨平台)
 
@@ -329,13 +329,13 @@ npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256�
 
 ```bash
 # 查看 Release
-gc release view v0.14.0 -R gitcode-cli/cli
+gc release view v0.14.0 -R atomgit-cli/cli
 
 # 列出所有 Releases
-gc release list -R gitcode-cli/cli
+gc release list -R atomgit-cli/cli
 
 # 下载资产
-gc release download v0.14.0 -R gitcode-cli/cli
+gc release download v0.14.0 -R atomgit-cli/cli
 ```
 
 ---
@@ -350,7 +350,7 @@ gc release download v0.14.0 -R gitcode-cli/cli
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
@@ -361,7 +361,7 @@ gitcode version
 ### DEB (Debian/Ubuntu)
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
 sudo dpkg -i gc_0.14.0_amd64.deb
 ```
 
@@ -370,7 +370,7 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 ### RPM (RHEL/CentOS/Fedora)
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
 sudo rpm -i gc-0.14.0-1.x86_64.rpm
 ```
 
@@ -390,7 +390,7 @@ gitcode doctor install --json
 ### Linux 二进制
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.14.0/gc_linux_amd64
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_amd64
 chmod +x gc_linux_amd64
 sudo mv gc_linux_amd64 /usr/local/bin/gc
 ```
@@ -412,7 +412,7 @@ gitcode doctor install
 确保包含 `--notes` 参数：
 
 ```bash
-gc release create vX.Y.Z -R gitcode-cli/cli --title "vX.Y.Z" --notes "Release notes"
+gc release create vX.Y.Z -R atomgit-cli/cli --title "vX.Y.Z" --notes "Release notes"
 ```
 
 ### Q: nfpm 找不到命令
@@ -497,9 +497,9 @@ name: "gc"
 arch: "amd64"
 platform: "linux"
 version: "0.14.0"
-maintainer: "gitcode-cli contributors"
+maintainer: "atomgit-cli contributors"
 description: "GitCode CLI - Command line tool for GitCode"
-homepage: "https://gitcode.com/gitcode-cli/cli"
+homepage: "https://gitcode.com/atomgit-cli/cli"
 license: "MIT"
 scripts:
   postinstall: ./build/scripts/postinstall.sh

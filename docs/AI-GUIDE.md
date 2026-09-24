@@ -35,7 +35,7 @@ npm 安装默认每天在命令结束后后台检查 stable 更新，发现新�
 **macOS (Homebrew):**
 
 ```bash
-brew install gitcode-cli/homebrew-tap/gc
+brew install atomgit-cli/homebrew-tap/gc
 brew upgrade gc
 gitcode doctor install --json
 ```
@@ -44,11 +44,11 @@ gitcode doctor install --json
 
 ```bash
 # DEB (Debian/Ubuntu)
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gc_0.13.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.13.0/gc_0.13.0_amd64.deb
 sudo dpkg -i gc_0.13.0_amd64.deb
 
 # RPM (RHEL/CentOS/Fedora)
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gc-0.13.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.13.0/gc-0.13.0-1.x86_64.rpm
 sudo rpm -i gc-0.13.0-1.x86_64.rpm
 ```
 
@@ -65,7 +65,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 安装（一行命令）
-pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.13.0/gitcode_cli-0.13.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.13.0/gitcode_cli-0.13.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode，避免 gc 被内置 Get-Content 别名覆盖
 gitcode version

@@ -77,7 +77,7 @@ vMAJOR.MINOR.PATCH-PRERELEASE
 - 文档已同步
 - 无未解决的 blocker 级问题
 - Homebrew 链路就绪（首次发布前一次性配置）：
-  - tap 仓 `gitcode-cli/homebrew-tap` 存在且默认分支为 `main`
+  - tap 仓 `atomgit-cli/homebrew-tap` 存在且默认分支为 `main`
   - tap 仓已配置 write deploy key（公钥）
   - 主仓 secret `HOMEBREW_TAP_DEPLOY_KEY` 已配置（对应私钥）
 - npm 链路就绪（首次发布前一次性配置，**三坐标逐一配置**）：
@@ -141,8 +141,8 @@ go build -o ./gc ./cmd/gc
 发布准备改动合入两个远端的 `main` 且 tree hash 一致后，触发标准 workflow：
 
 ```bash
-gh workflow run release.yml -R gitcode-cli/cli -f version=vX.Y.Z
-gh run watch <run-id> -R gitcode-cli/cli
+gh workflow run release.yml -R atomgit-cli/cli -f version=vX.Y.Z
+gh run watch <run-id> -R atomgit-cli/cli
 ```
 
 workflow 必须先在只读权限下校验 `docs/releases/vX.Y.Z.md`、执行 GoReleaser snapshot、nFPM、wheel/sdist、**三坐标 npm 包组装（`prepare-npm-package.sh`，各坐标副本以自身包名跑 wrapper 单测）**和入口冒烟；全部预检通过后，独立的最小写权限 job 才能创建指向当前 `main` 的 tag。正式制品从该 tag 在只读 job 中构建并生成覆盖全部资产的 SHA-256 清单，再由独立 job 发布 GitHub Release。PyPI job 只下载已验证制品并执行 Trusted Publishing，不参与构建，也不修改 Release。已有 tag 仅在其 commit 与当前 workflow HEAD 完全一致时允许复用。
@@ -158,7 +158,7 @@ workflow 必须先在只读权限下校验 `docs/releases/vX.Y.Z.md`、执行 Go
 若正式 workflow 已创建 GitHub Release、但 npm job 在 registry 写入前单独失败，可在修复并合入 `main` 后使用同一个受信任的 `release.yml` 执行仅 npm 恢复：
 
 ```bash
-gh workflow run release.yml -R gitcode-cli/cli \
+gh workflow run release.yml -R atomgit-cli/cli \
   -f version=vX.Y.Z \
   -f npm_recovery=true
 ```
@@ -172,7 +172,7 @@ GitHub workflow 全部成功后，通过 SSH 将同一 tag 推送到 GitCode，�
 ```bash
 git fetch github tag vX.Y.Z
 git push origin refs/tags/vX.Y.Z
-gh release download vX.Y.Z -R gitcode-cli/cli --dir dist/github-release
+gh release download vX.Y.Z -R atomgit-cli/cli --dir dist/github-release
 cd dist/github-release
 sha256sum -c gc_X.Y.Z_checksums.txt
 cd ../..
@@ -181,12 +181,12 @@ cd ../..
 使用受跟踪的同一份 release notes 创建 GitCode Release，再上传下载得到的同一批制品：
 
 ```bash
-gc release create vX.Y.Z -R gitcode-cli/cli \
+gc release create vX.Y.Z -R atomgit-cli/cli \
   --title "GitCode CLI vX.Y.Z" \
   --notes-file docs/releases/vX.Y.Z.md \
   --target main \
   --json
-gc release upload vX.Y.Z dist/github-release/* -R gitcode-cli/cli --json
+gc release upload vX.Y.Z dist/github-release/* -R atomgit-cli/cli --json
 ```
 
 上传 GitCode 前必须先通过完整校验和验证。禁止在 GitCode 侧重新构建另一套正式制品。不得提取 `gh` 或 `gc` 保存的 token 再交给脚本或 `curl`；认证必须由 CLI 自身封装。
@@ -219,7 +219,7 @@ release notes 必须满足：
 - GitCode 与 GitHub tag 指向同一 commit，两个 `main` 的 tree hash 一致
 - GitCode 与 GitHub Release 的同名资产校验和一致
 - PyPI 返回目标版本，且 wheel 内置二进制的版本和 commit SHA 可追溯
-- Homebrew tap 仓 `gc.rb` 已更新到目标版本，`brew install gitcode-cli/homebrew-tap/gc` 可安装且 `gc version` 输出正确
+- Homebrew tap 仓 `gc.rb` 已更新到目标版本，`brew install atomgit-cli/homebrew-tap/gc` 可安装且 `gc version` 输出正确
 - Homebrew 的 `gc` 与 `gitcode` 两个入口均解析到同一版本
 - npm 三坐标均返回目标版本（`npm view @gitcode-cli/cli version`、`npm view @atomgit-cli/cli version`、`npm view atomgit-cli version`），各自 registry tarball 与 Release `.tgz` SHA-256 一致
 - 固定 generic/scoped 官方 registry 且使用 `--ignore-scripts` 的 `npm install -g`（三坐标至少抽验推荐坐标 `atomgit-cli` 与一个 scoped 坐标）与 `npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install` 均提供 `gc` / `gitcode`，`version --json` 的版本与 commit SHA 正确，`doctor install --json` 识别对应 distribution；不得把只添加当前项目依赖的裸 `npm i` 写成 CLI 安装入口

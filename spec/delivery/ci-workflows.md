@@ -63,8 +63,8 @@ CI 不替代任何现有门禁层，只在 PR 提交时自动运行跨平台验�
 
 CI 同时运行在两个平台：
 
-- **GitCode Actions**：GitCode 主仓 `gitcode.com/gitcode-cli/cli` 的原生 Linux CI，是 GitCode PR 的首要自动化证据
-- **GitHub Actions**：GitHub 镜像仓 `github.com/gitcode-cli/cli` 的跨平台 CI，继续覆盖 Linux、macOS 和 Windows
+- **GitCode Actions**：GitCode 主仓 `gitcode.com/atomgit-cli/cli` 的原生 Linux CI，是 GitCode PR 的首要自动化证据
+- **GitHub Actions**：GitHub 镜像仓 `github.com/atomgit-cli/cli` 的跨平台 CI，继续覆盖 Linux、macOS 和 Windows
 
 GitCode 原生 CI 当前只覆盖 Linux；macOS 和 Windows 兼容性仍以 GitHub Actions 结果为准。
 
@@ -72,7 +72,7 @@ GitCode 原生 CI 当前只覆盖 Linux；macOS 和 Windows 兼容性仍以 GitH
 
 | 平台 | 自动触发 | 查看运行 | 查看 Job / 日志 |
 |------|---------|---------|-----------------|
-| GitCode Actions | GitCode PR 提交/更新到 `main` | `gc actions run list -R gitcode-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
+| GitCode Actions | GitCode PR 提交/更新到 `main` | `gc actions run list -R atomgit-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
 | GitHub Actions | GitHub PR 提交/更新到 `main` | `gh run list --workflow=ci.yml` | `gh run view --log` |
 
 GitCode 平台操作固定使用 `gc`，GitHub 镜像仓操作使用 `gh`。
@@ -164,9 +164,9 @@ GitCode 日常 CI 使用最小仓库只读权限 `permissions: repository: read`
 
 ```bash
 # GitCode：查看 PR 关联的运行、详情和 Jobs
-gc actions run list -R gitcode-cli/cli --pr <pr-number> --workflow "CI" --json
-gc actions run view <run-id> -R gitcode-cli/cli --json
-gc actions job list <run-id> -R gitcode-cli/cli --json
+gc actions run list -R atomgit-cli/cli --pr <pr-number> --workflow "CI" --json
+gc actions run view <run-id> -R atomgit-cli/cli --json
+gc actions job list <run-id> -R atomgit-cli/cli --json
 
 # GitHub：查看镜像 PR 分支的最新 CI 运行
 gh run list --workflow=ci.yml --branch <pr-branch> --limit 1
@@ -186,8 +186,8 @@ GitCode CLI 当前不提供 watch 子命令；需要等待时，按合理间隔�
 CI 失败时，AI 必须：
 
 1. 获取失败 Job 的详细日志：
-   - GitCode：先用 `gc actions job list <run-id> -R gitcode-cli/cli --json` 取 `<job-id>`，再执行
-     `gc actions job log <run-id> <job-id> -R gitcode-cli/cli --output job-log.zip`
+   - GitCode：先用 `gc actions job list <run-id> -R atomgit-cli/cli --json` 取 `<job-id>`，再执行
+     `gc actions job log <run-id> <job-id> -R atomgit-cli/cli --output job-log.zip`
    - GitHub：`gh run view <run-id> --log --job=<job-id>`
 2. 分析根因（代码问题 vs 环境问题 vs 偶发问题）
 3. 修复后重新推送并重新触发 CI
@@ -225,7 +225,7 @@ PR 作者自检中至少包含：
   - build: ✅
   - package: ✅
 - GitHub Actions:
-  - Run URL: https://github.com/gitcode-cli/cli/actions/runs/<run-id>
+  - Run URL: https://github.com/atomgit-cli/cli/actions/runs/<run-id>
   - 结论: success
   - test/build (ubuntu, macOS, Windows): ✅
   - lint/secret-scan/docker (ubuntu): ✅
