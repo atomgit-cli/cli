@@ -38,19 +38,19 @@
 
 ```bash
 # 发布前全量打包验证（构建 DEB + RPM + PyPI，推荐）
-./scripts/package.sh v0.14.0 release
+./scripts/package.sh v0.14.1 release
 
 # 构建所有包（DEB + RPM + PyPI）
-./scripts/package.sh v0.14.0
+./scripts/package.sh v0.14.1
 
 # 仅构建 Linux 包（DEB + RPM）
-./scripts/package.sh v0.14.0 linux
+./scripts/package.sh v0.14.1 linux
 
 # 仅构建 DEB 包
-./scripts/package.sh v0.14.0 deb
+./scripts/package.sh v0.14.1 deb
 
 # 仅构建 PyPI 包
-./scripts/package.sh v0.14.0 pypi
+./scripts/package.sh v0.14.1 pypi
 ```
 
 ### 构建目标
@@ -80,17 +80,17 @@
 
 ```bash
 dist/
-├── gc_0.14.0_amd64.deb              # DEB amd64
-├── gc_0.14.0_arm64.deb              # DEB arm64
-├── gc-0.14.0-1.x86_64.rpm           # RPM x86_64
-├── gc-0.14.0-1.aarch64.rpm          # RPM aarch64
+├── gc_0.14.1_amd64.deb              # DEB amd64
+├── gc_0.14.1_arm64.deb              # DEB arm64
+├── gc-0.14.1-1.x86_64.rpm           # RPM x86_64
+├── gc-0.14.1-1.aarch64.rpm          # RPM aarch64
 ├── gc_linux_amd64                  # Linux 二进制 amd64
 ├── gc_linux_arm64                  # Linux 二进制 arm64
-├── gitcode_cli-0.14.0-py3-none-any.whl  # PyPI wheel
-├── gitcode_cli-0.14.0.tar.gz        # PyPI sdist
-├── gitcode-cli-cli-0.14.0.tgz       # npm tarball @gitcode-cli/cli（正式 release workflow）
-├── atomgit-cli-cli-0.14.0.tgz       # npm tarball @atomgit-cli/cli
-└── atomgit-cli-0.14.0.tgz           # npm tarball atomgit-cli（推荐坐标）
+├── gitcode_cli-0.14.1-py3-none-any.whl  # PyPI wheel
+├── gitcode_cli-0.14.1.tar.gz        # PyPI sdist
+├── gitcode-cli-cli-0.14.1.tgz       # npm tarball @gitcode-cli/cli（正式 release workflow）
+├── atomgit-cli-cli-0.14.1.tgz       # npm tarball @atomgit-cli/cli
+└── atomgit-cli-0.14.1.tgz           # npm tarball atomgit-cli（推荐坐标）
 ```
 
 ---
@@ -127,37 +127,37 @@ export GC_TOKEN="your_gitcode_token"
 
 ```bash
 # 1. 本地验证所有包；这些制品不得用于正式发布
-./scripts/package.sh v0.14.0 release
+./scripts/package.sh v0.14.1 release
 
 # 2. 发布准备 PR 合入两个远端 main 后，触发正式 workflow
-gh workflow run release.yml -R atomgit-cli/cli -f version=v0.14.0
+gh workflow run release.yml -R atomgit-cli/cli -f version=v0.14.1
 gh run watch <run-id> -R atomgit-cli/cli
 
 # 3. workflow 全部成功后，同步同一 tag 到 GitCode（SSH）
-git fetch github tag v0.14.0
-git push origin refs/tags/v0.14.0
+git fetch github tag v0.14.1
+git push origin refs/tags/v0.14.1
 
 # 4. 下载 GitHub workflow 生成的正式制品
 mkdir -p dist/github-release
-gh release download v0.14.0 -R atomgit-cli/cli --dir dist/github-release
+gh release download v0.14.1 -R atomgit-cli/cli --dir dist/github-release
 
 # 5. 验证覆盖全部正式资产的 SHA-256 清单
 cd dist/github-release
-sha256sum -c gc_0.14.0_checksums.txt
+sha256sum -c gc_0.14.1_checksums.txt
 cd ../..
 
 # 6. 使用受跟踪的同一份说明创建 GitCode Release
-gc release create v0.14.0 -R atomgit-cli/cli \
-  --title "GitCode CLI v0.14.0" \
-  --notes-file docs/releases/v0.14.0.md \
+gc release create v0.14.1 -R atomgit-cli/cli \
+  --title "GitCode CLI v0.14.1" \
+  --notes-file docs/releases/v0.14.1.md \
   --target main \
   --json
 
 # 7. 将同一批正式制品上传到 GitCode，不得重新构建
-gc release upload v0.14.0 dist/github-release/* -R atomgit-cli/cli --json
+gc release upload v0.14.1 dist/github-release/* -R atomgit-cli/cli --json
 ```
 
-> **注意**：将示例中的版本号 `0.14.0` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
+> **注意**：将示例中的版本号 `0.14.1` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
 
 ### Release Notes 要求
 
@@ -217,7 +217,7 @@ GitCode 会错误渲染代码块内的 `#` 开头行为标题！
 
     python3 -m venv .venv
     source .venv/bin/activate
-    pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
+    pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gitcode_cli-0.14.1-py3-none-any.whl
 
 Windows 用户激活虚拟环境：
 
@@ -231,35 +231,35 @@ Windows PowerShell 用户建议运行：
 
 ### DEB (Debian/Ubuntu)
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
-    sudo dpkg -i gc_0.14.0_amd64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_0.14.1_amd64.deb
+    sudo dpkg -i gc_0.14.1_amd64.deb
 
 ARM64 设备：
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_arm64.deb
-    sudo dpkg -i gc_0.14.0_arm64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_0.14.1_arm64.deb
+    sudo dpkg -i gc_0.14.1_arm64.deb
 
 ### RPM (RHEL/CentOS/Fedora)
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
-    sudo rpm -i gc-0.14.0-1.x86_64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc-0.14.1-1.x86_64.rpm
+    sudo rpm -i gc-0.14.1-1.x86_64.rpm
 
 ARM64 设备：
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.aarch64.rpm
-    sudo rpm -i gc-0.14.0-1.aarch64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc-0.14.1-1.aarch64.rpm
+    sudo rpm -i gc-0.14.1-1.aarch64.rpm
 
 ### Linux 二进制
 
 AMD64：
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_amd64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_linux_amd64
     chmod +x gc_linux_amd64
     sudo mv gc_linux_amd64 /usr/local/bin/gc
 
 ARM64：
 
-    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_arm64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_linux_arm64
     chmod +x gc_linux_arm64
     sudo mv gc_linux_arm64 /usr/local/bin/gc
 
@@ -308,7 +308,7 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
 
 #### 注意事项
 
-1. **版本号替换**：将模板中的 `0.14.0` 替换为实际版本号
+1. **版本号替换**：将模板中的 `0.14.1` 替换为实际版本号
 2. **避免 `#` 字符问题**：GitCode 会错误渲染代码块内的 `#`
    - Issue 引用使用 `Issue XX` 格式，不使用 `#XX`
    - PR 引用使用 `PR XX` 格式，不使用 `#XX`
@@ -329,13 +329,13 @@ npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256�
 
 ```bash
 # 查看 Release
-gc release view v0.14.0 -R atomgit-cli/cli
+gc release view v0.14.1 -R atomgit-cli/cli
 
 # 列出所有 Releases
 gc release list -R atomgit-cli/cli
 
 # 下载资产
-gc release download v0.14.0 -R atomgit-cli/cli
+gc release download v0.14.1 -R atomgit-cli/cli
 ```
 
 ---
@@ -350,7 +350,7 @@ gc release download v0.14.0 -R atomgit-cli/cli
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gitcode_cli-0.14.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gitcode_cli-0.14.1-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
@@ -361,8 +361,8 @@ gitcode version
 ### DEB (Debian/Ubuntu)
 
 ```bash
-wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_0.14.0_amd64.deb
-sudo dpkg -i gc_0.14.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_0.14.1_amd64.deb
+sudo dpkg -i gc_0.14.1_amd64.deb
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -370,8 +370,8 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 ### RPM (RHEL/CentOS/Fedora)
 
 ```bash
-wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc-0.14.0-1.x86_64.rpm
-sudo rpm -i gc-0.14.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc-0.14.1-1.x86_64.rpm
+sudo rpm -i gc-0.14.1-1.x86_64.rpm
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -390,7 +390,7 @@ gitcode doctor install --json
 ### Linux 二进制
 
 ```bash
-wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.0/gc_linux_amd64
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.14.1/gc_linux_amd64
 chmod +x gc_linux_amd64
 sudo mv gc_linux_amd64 /usr/local/bin/gc
 ```
@@ -452,7 +452,7 @@ GOOS=linux GOARCH=amd64 go build -o dist/gc_linux_amd64 ./cmd/gc
 GOOS=linux GOARCH=arm64 go build -o dist/gc_linux_arm64 ./cmd/gc
 
 # 2. 更新版本号
-VERSION="0.14.0"
+VERSION="0.14.1"
 bash scripts/sync-package-version.sh "$VERSION"
 
 # 3. 构建 DEB
@@ -476,7 +476,7 @@ GOOS=darwin GOARCH=arm64 go build -o gc_cli/bin/gc-darwin-arm64 ./cmd/gc
 GOOS=windows GOARCH=amd64 go build -o gc_cli/bin/gc-windows-amd64.exe ./cmd/gc
 
 # 2. 更新版本号
-VERSION="0.14.0"
+VERSION="0.14.1"
 bash scripts/sync-package-version.sh "$VERSION"
 
 # 3. 构建 wheel
@@ -496,7 +496,7 @@ python3 -m build --wheel --sdist --outdir dist/
 name: "gc"
 arch: "amd64"
 platform: "linux"
-version: "0.14.0"
+version: "0.14.1"
 maintainer: "atomgit-cli contributors"
 description: "GitCode CLI - Command line tool for GitCode"
 homepage: "https://gitcode.com/atomgit-cli/cli"
