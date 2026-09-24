@@ -36,3 +36,40 @@ func TestManagerMessagesNeverClaimToUninstallOtherChannels(t *testing.T) {
 		}
 	}
 }
+
+func TestManagerMessageCoversDetectedChannels(t *testing.T) {
+	cases := map[string]string{
+		"homebrew":          "brew upgrade gc",
+		"deb":               "package manager",
+		"rpm":               "package manager",
+		"pypi":              "pipx or pip",
+		"npm":               "npm",
+		"archive-or-source": "release archive",
+	}
+	for distribution, want := range cases {
+		message := managerMessage(distribution)
+		if !strings.Contains(message, want) {
+			t.Fatalf("managerMessage(%q) = %q, want it to mention %q", distribution, message, want)
+		}
+	}
+}
+
+func TestUpdateUsesPathDetectionWhenEnvUnset(t *testing.T) {
+	t.Setenv("GITCODE_CLI_DISTRIBUTION", "")
+	binary := t.TempDir() + "/Cellar/gc/0.14.0/bin/gc"
+	t.Setenv("GITCODE_CLI_BINARY", binary)
+	cmd := NewCmdUpdate(cmdutil.TestFactory())
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "manual" || got.Distribution != "homebrew" || !strings.Contains(got.Message, "brew upgrade gc") {
+		t.Fatalf("expected homebrew guidance via path detection, got %#v", got)
+	}
+}

@@ -24,7 +24,7 @@ func TestInspectUsesWrapperMetadataAndFindsCandidates(t *testing.T) {
 	}
 	environ := []string{
 		"PATH=" + dir,
-		distributionEnv + "=pypi",
+		"GITCODE_CLI_DISTRIBUTION=pypi",
 		entrypointEnv + "=" + commandPath,
 		binaryEnv + "=" + filepath.Join(dir, "gc-binary"),
 	}
