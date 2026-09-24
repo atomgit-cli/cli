@@ -207,6 +207,7 @@ test("update helper parser accepts check/json/background only", () => {
     background: false,
     checkOnly: true,
     json: true,
+    help: false,
   });
   assert.throws(() => parseArgs(["--channel", "next"]), /unknown update argument/);
 });

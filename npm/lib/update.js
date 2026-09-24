@@ -249,6 +249,15 @@ function performUpdate(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, "..");
   const metadata = options.metadata || readInstallMetadata(packageRoot);
   if (!metadata || !metadata.global || metadata.distribution !== "npm" || !metadata.prefix) {
+    if (metadata && metadata.distribution === "pnpm") {
+      throw new Error(`this installation is managed by pnpm; update it with "pnpm add -g ${pkg.name}@latest"`);
+    }
+    if (metadata && metadata.distribution === "npm-local") {
+      throw new Error(
+        `automatic update requires a global npm install; run "npm install -g ${pkg.name}" to switch, ` +
+          "or update through the channel that owns this installation"
+      );
+    }
     throw new Error("automatic update is available only for a global npm installation");
   }
   const latest = checkLatest(metadata);

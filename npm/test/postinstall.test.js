@@ -48,6 +48,7 @@ test("runtime discovery distinguishes global and project-local npm packages", ()
     runner,
     platform: "linux",
     version: "1.2.3",
+    env: {},
   });
   assert.strictEqual(global.global, true);
   assert.strictEqual(global.distribution, "npm");
@@ -58,7 +59,32 @@ test("runtime discovery distinguishes global and project-local npm packages", ()
     npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
     runner,
     platform: "linux",
+    env: {},
   });
   assert.strictEqual(local.global, false);
   assert.strictEqual(local.distribution, "npm-local");
+});
+
+test("runtime discovery recognizes pnpm installs without invoking npm", () => {
+  const runner = () => {
+    throw new Error("npm must not be invoked for a pnpm install");
+  };
+  const metadata = discoverGlobalInstall("/home/u/.local/share/pnpm/global/5/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    version: "1.2.3",
+    env: { npm_config_user_agent: "pnpm/9.12.0 npm/? node/v20.0.0 linux x64" },
+  });
+  assert.strictEqual(metadata.distribution, "pnpm");
+  assert.strictEqual(metadata.global, true);
+  assert.strictEqual(metadata.version, "1.2.3");
+
+  const byLayout = discoverGlobalInstall("/home/u/.local/share/pnpm/global/5/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    env: {},
+  });
+  assert.strictEqual(byLayout.distribution, "pnpm");
 });
