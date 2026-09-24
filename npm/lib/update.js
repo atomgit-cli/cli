@@ -250,7 +250,12 @@ function performUpdate(options = {}) {
   const metadata = options.metadata || readInstallMetadata(packageRoot);
   if (!metadata || !metadata.global || metadata.distribution !== "npm" || !metadata.prefix) {
     if (metadata && metadata.distribution === "pnpm") {
-      throw new Error(`this installation is managed by pnpm; update it with "pnpm add -g ${pkg.name}@latest"`);
+      if (metadata.global) {
+        throw new Error(`this installation is managed by pnpm; update it with "pnpm add -g ${pkg.name}@latest"`);
+      }
+      throw new Error(
+        'this pnpm-managed dependency is not a global install; update it with "pnpm update" in the owning project'
+      );
     }
     if (metadata && metadata.distribution === "npm-local") {
       throw new Error(

@@ -4,7 +4,7 @@
 
 const path = require("path");
 const pkg = require("../package.json");
-const { pathConflict, writeInstallMetadata } = require("./install-metadata");
+const { isPnpmEnvironment, pathConflict, writeInstallMetadata } = require("./install-metadata");
 
 function isGlobalInstall(env = process.env) {
   return env.npm_config_global === "true" || env.npm_config_global === true;
@@ -16,19 +16,30 @@ function globalInstallReport(env = process.env, isWin = process.platform === "wi
   return { prefix, ...pathConflict(prefix, env, isWin) };
 }
 
-function runPostinstall(env = process.env, stderr = process.stderr) {
+function runPostinstall(env = process.env, stderr = process.stderr, packageRoot = path.resolve(__dirname, "..")) {
   if (!isGlobalInstall(env)) return;
+  // pnpm global installs must never be recorded as npm installs: the npm
+  // updater would then run through pnpm with npm-only flags and fail.
+  if (isPnpmEnvironment(env, packageRoot, process.platform === "win32")) {
+    writeInstallMetadata(packageRoot, {
+      schema: 1,
+      distribution: "pnpm",
+      global: true,
+      version: pkg.version,
+      prefix: "",
+      npm: "",
+    });
+  } else {
+    writeInstallMetadata(packageRoot, {
+      distribution: "npm",
+      global: true,
+      version: pkg.version,
+      prefix: env.npm_config_prefix || "",
+      npm: env.npm_execpath || "",
+    });
+  }
 
-  const packageRoot = path.resolve(__dirname, "..");
   const report = globalInstallReport(env);
-  writeInstallMetadata(packageRoot, {
-    distribution: "npm",
-    global: true,
-    version: pkg.version,
-    prefix: report ? report.prefix : env.npm_config_prefix || "",
-    npm: env.npm_execpath || "",
-  });
-
   if (!report) return;
   if (report.shadowed) {
     stderr.write(

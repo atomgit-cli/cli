@@ -81,3 +81,10 @@ test("performUpdate keeps the generic refusal when no metadata exists", () => {
     /automatic update is available only for a global npm installation/
   );
 });
+
+test("performUpdate distinguishes project-level pnpm dependencies from global installs", () => {
+  assert.throws(
+    () => performUpdate({ metadata: { distribution: "pnpm", global: false } }),
+    (error) => /pnpm-managed dependency/.test(error.message) && /pnpm update/.test(error.message)
+  );
+});

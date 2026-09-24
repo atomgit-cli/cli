@@ -112,7 +112,9 @@ function npmInvocation(execPath = process.execPath, env = process.env, platform 
 function isPnpmEnvironment(env, packageRoot, isWin) {
   if (/^pnpm\//.test(String((env || {}).npm_config_user_agent || ""))) return true;
   // Fallback for direct invocation outside a pnpm shim: pnpm's global layout.
-  return /\/pnpm\/global\//.test(normalizePath(packageRoot, isWin));
+  // Windows paths keep backslashes through normalizePath, so unify them.
+  const normalized = normalizePath(packageRoot, isWin).replace(/\\/g, "/");
+  return /\/pnpm\/global\//.test(normalized);
 }
 
 function discoverGlobalInstall(packageRoot, options = {}) {
@@ -122,10 +124,11 @@ function discoverGlobalInstall(packageRoot, options = {}) {
     // pnpm manages its own global layout; the npm-based discovery below
     // (root -g comparison) would misclassify it, and an npm-channel update
     // would install a parallel npm copy.
+    const layoutGlobal = /\/pnpm\/global\//.test(normalizePath(packageRoot, isWin).replace(/\\/g, "/"));
     return {
       schema: 1,
       distribution: "pnpm",
-      global: true,
+      global: layoutGlobal || String(env.npm_config_global) === "true",
       version: options.version || "",
       prefix: "",
       npm: "",
@@ -183,6 +186,7 @@ module.exports = {
   discoverGlobalInstall,
   ensureInstallMetadata,
   expectedGlobalBin,
+  isPnpmEnvironment,
   normalizePath,
   npmInvocation,
   pathConflict,

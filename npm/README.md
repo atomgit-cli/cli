@@ -70,7 +70,7 @@ gitcode config set update.mode off
 GC_NO_UPDATE_CHECK=1 gitcode version
 ```
 
-`CI=true` and `--no-interactive` disable background checks. The updater touches only the coordinate you installed (for example `atomgit-cli`); it never invokes pip, Homebrew, apt, dnf, or rpm, and it never rewrites PATH. If another `gitcode` is earlier on PATH, npm's non-failing install check and `doctor install` report the exact candidates and remediation choices.
+`CI=true` and `--no-interactive` disable background checks. The updater touches only the coordinate you installed (for example `atomgit-cli`); it never invokes pip, Homebrew, apt, dnf, or rpm, and it never rewrites PATH. If another `gitcode` is earlier on PATH, npm's non-failing install check and `doctor install` report the exact candidates and remediation choices. Installs managed by pnpm are detected as such and get pnpm's own upgrade command (`pnpm add -g <coordinate>@latest`); the updater never installs a parallel npm copy for a pnpm-managed install.
 
 ## Troubleshooting
 
