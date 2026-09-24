@@ -11,8 +11,9 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, isTransactionLeftoverName,
-  parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
+  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, formatErrorChain,
+  helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
+  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
   rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
 } = require("../lib/install");
 
@@ -841,5 +842,113 @@ test("isTransactionLeftoverName matches only installer transaction artifacts", (
   }
   for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", "other.backup-x", "gcbackup-1"]) {
     assert.strictEqual(isTransactionLeftoverName(name), false, name);
+  }
+});
+
+test("foreignChannelHint recognizes pip console scripts and ignores binaries", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-channel-hint-"));
+  const script = path.join(root, "gitcode");
+  fs.writeFileSync(script, "#!/usr/bin/env python3\nimport gc_cli\n");
+  assert.match(foreignChannelHint(script), /pip uninstall gitcode-cli/);
+  const versioned = path.join(root, "gitcode3");
+  fs.writeFileSync(versioned, "#!/usr/local/bin/python3.11\nimport gc_cli\n");
+  assert.match(foreignChannelHint(versioned), /pip uninstall gitcode-cli/);
+  const fakeComment = path.join(root, "fake");
+  fs.writeFileSync(fakeComment, "#!/bin/sh # python wrapper\nexec something\n");
+  assert.strictEqual(foreignChannelHint(fakeComment), "");
+  const binary = path.join(root, "gc");
+  fs.writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]));
+  assert.strictEqual(foreignChannelHint(binary), "");
+  const missing = path.join(root, "absent");
+  assert.strictEqual(foreignChannelHint(missing), "");
+});
+
+test("install gives Homebrew-specific guidance for a brew-owned symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-link-"));
+  const brewBin = path.join(root, "opt", "homebrew", "Cellar", "gc", "0.14.0", "bin", "gc");
+  fs.mkdirSync(path.dirname(brewBin), { recursive: true });
+  fs.writeFileSync(brewBin, "brew-binary");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, brewBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "brew-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /Homebrew/.test(error.message) &&
+      /brew uninstall gc/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(brewBin, "utf8"), "brew-binary");
+});
+
+test("install gives pipx-specific guidance for a pipx-owned symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pipx-link-"));
+  const pipxBin = path.join(root, ".local", "pipx", "venvs", "gitcode-cli", "bin", "gitcode");
+  fs.mkdirSync(path.dirname(pipxBin), { recursive: true });
+  fs.writeFileSync(pipxBin, "pipx-shim");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, pipxBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "pipx-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pipx uninstall gitcode-cli/.test(message);
+    }
+  );
+});
+
+test("install keeps the generic guidance for a non-pipx directory named pipx", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pipx-lookalike-"));
+  const fakeBin = path.join(root, "pipx", "mytool", "bin", "gitcode");
+  fs.mkdirSync(path.dirname(fakeBin), { recursive: true });
+  fs.writeFileSync(fakeBin, "unrelated");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, fakeBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "pipx-lookalike-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /--target-dir/.test(message) &&
+        !/pipx uninstall/.test(message);
+    }
+  );
+});
+
+test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-provider-path-"));
+  const early = path.join(root, "early");
+  const late = path.join(root, "late");
+  fs.mkdirSync(early);
+  fs.mkdirSync(late);
+  fs.writeFileSync(path.join(early, "gc"), "binary");
+  fs.writeFileSync(path.join(late, "gc"), "binary");
+  fs.writeFileSync(path.join(late, "gitcode"), "binary");
+  const env = { PATH: [early, late].join(path.delimiter) };
+  assert.strictEqual(firstProviderOnPath("gc", env), path.join(early, "gc"));
+  assert.strictEqual(firstProviderOnPath("gitcode", env), path.join(late, "gitcode"));
+  assert.strictEqual(firstProviderOnPath("missing", env), "");
+  if (process.platform !== "win32") {
+    const broken = path.join(root, "broken");
+    fs.mkdirSync(broken);
+    fs.symlinkSync("nowhere", path.join(broken, "gitcode"), "file");
+    const envBroken = { PATH: [broken, late].join(path.delimiter) };
+    // The broken link is skipped; the real file in the later dir wins.
+    assert.strictEqual(firstProviderOnPath("gitcode", envBroken), path.join(late, "gitcode"));
   }
 });

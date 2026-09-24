@@ -217,6 +217,14 @@ function resolvesIntoOwnNpmPackage(linkPath) {
   });
 }
 
+// Channel-specific guidance for foreign symlinks, matched against both the
+// raw link text and the resolved path.
+const FOREIGN_SYMLINK_CHANNEL_HINTS = [
+  { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
+  { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
+  { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
+];
+
 function nonRegularTargetError(dst) {
   try {
     const raw = fs.readlinkSync(dst);
@@ -230,10 +238,16 @@ function nonRegularTargetError(dst) {
     if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
     // Windows readlink/path results use backslashes; normalize for matching.
     const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
-    const guidance = surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)
-      ? `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
-        `run "npm uninstall -g ${THIRD_PARTY_NPM_PACKAGE}" (check "npm prefix -g"), or remove the symlink`
-      : "remove the symlink and run install again, or install to another directory with --target-dir";
+    let guidance;
+    if (surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)) {
+      guidance = `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
+        `run "npm uninstall -g ${THIRD_PARTY_NPM_PACKAGE}" (check "npm prefix -g"), or remove the symlink`;
+    } else {
+      const channelHint = FOREIGN_SYMLINK_CHANNEL_HINTS.find((hint) => surface.includes(hint.marker));
+      guidance = channelHint
+        ? channelHint.guidance
+        : "remove the symlink and run install again, or install to another directory with --target-dir";
+    }
     return new Error(`refusing non-regular install target${detail}\n${guidance}`);
   } catch {
     // Non-symlink non-regular target (e.g. a directory): keep the plain form.
@@ -602,6 +616,44 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
   return `${lines.join("\n")}\n`;
 }
 
+// Detect a foreign-channel regular file occupying an install target (e.g. a
+// pip console script). Returns "" when nothing recognizable is found.
+function foreignChannelHint(file) {
+  let content = "";
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(256);
+      const bytes = fs.readSync(fd, buf, 0, buf.length, 0);
+      content = buf.toString("utf8", 0, bytes);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return "";
+  }
+  const firstLine = content.split("\n", 1)[0];
+  if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
+    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" instead to keep the pip channel';
+  }
+  return "";
+}
+
+// First directory on PATH providing the given command name (resolved through
+// symlinks; broken links are skipped).
+function firstProviderOnPath(name, env = process.env) {
+  const dirs = (env.PATH || "").split(path.delimiter).map((d) => d.trim()).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // keep scanning
+    }
+  }
+  return "";
+}
+
 // Fail early with actionable guidance when the install dir cannot be created
 // or written (mkdir on an existing dir skips write checks, so probe too).
 function ensureUsableInstallDir(dir) {
@@ -708,6 +760,20 @@ async function runInstall(args = []) {
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
   const helper = path.join(dir, "gitcode-update-helper.js");
+  // Warn before replacing foreign-channel regular files (e.g. pip console
+  // scripts in the same bin dir): the replacement is transactional, but the
+  // backup is removed on commit and the other channel loses its entry.
+  for (const target of [dst, alias, helper]) {
+    let hint = "";
+    try {
+      if (fs.lstatSync(target).isFile()) hint = foreignChannelHint(target);
+    } catch {
+      // target does not exist yet
+    }
+    if (hint) {
+      process.stdout.write(`Warning: replacing ${target}, which appears to be a ${hint}\n`);
+    }
+  }
   const aliasOptions = isWin ? {} : { allowedSymlinkTarget: dst };
   const transactionID = `${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   const transaction = [];
@@ -773,12 +839,25 @@ async function runInstall(args = []) {
   // PATH registration and guidance.
   if (isWin) {
     process.stdout.write(windowsPathGuidance(dir, options, windowsPathResult));
-  } else if (dir === path.join(home, ".local", "bin")) {
-    if (!dirOnPath(dir)) {
-      process.stdout.write(
-        `\nAdd ${dir} to your PATH:\n` +
-          `  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc  # or ~/.zshrc\n`
-      );
+  } else {
+    // Shadowing check: another provider earlier on PATH would win over the
+    // fresh install (mirrors the npm-channel postinstall warning).
+    for (const name of ["gc", "gitcode"]) {
+      const provider = firstProviderOnPath(name);
+      if (provider && path.resolve(path.dirname(provider)) !== path.resolve(dir)) {
+        process.stdout.write(
+          `Warning: PATH resolves "${name}" to ${provider}; the new installation is at ${dir}.\n` +
+            `  Move ${dir} earlier on PATH, or remove the other provider (run "gc doctor install" for details).\n`
+        );
+      }
+    }
+    if (dir === path.join(home, ".local", "bin")) {
+      if (!dirOnPath(dir)) {
+        process.stdout.write(
+          `\nAdd ${dir} to your PATH:\n` +
+            `  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc  # or ~/.zshrc\n`
+        );
+      }
     }
   }
   process.stdout.write(`\nRun "${isWin ? "gitcode" : "gc"} --help" to get started.\n`);
@@ -786,7 +865,8 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, formatErrorChain, helperPackageNameTransform, installHelp, isTransactionLeftoverName,
-  parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
-  rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, formatErrorChain, helperPackageNameTransform,
+  installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
+  quotePowerShell, replacePath, rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory,
+  windowsPathGuidance,
 };
