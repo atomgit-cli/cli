@@ -109,8 +109,32 @@ function npmInvocation(execPath = process.execPath, env = process.env, platform 
   return { command, prefix: [], metadataPath: command, shell: platform === "win32" };
 }
 
+function isPnpmEnvironment(env, packageRoot, isWin) {
+  if (/^pnpm\//.test(String((env || {}).npm_config_user_agent || ""))) return true;
+  // Fallback for direct invocation outside a pnpm shim: pnpm's global layout.
+  // Windows paths keep backslashes through normalizePath, so unify them.
+  const normalized = normalizePath(packageRoot, isWin).replace(/\\/g, "/");
+  return /\/pnpm\/global\//.test(normalized);
+}
+
 function discoverGlobalInstall(packageRoot, options = {}) {
-  const invoke = options.npm || npmInvocation(options.execPath, options.env, options.platform);
+  const env = options.env || process.env;
+  const isWin = (options.platform || process.platform) === "win32";
+  if (isPnpmEnvironment(env, packageRoot, isWin)) {
+    // pnpm manages its own global layout; the npm-based discovery below
+    // (root -g comparison) would misclassify it, and an npm-channel update
+    // would install a parallel npm copy.
+    const layoutGlobal = /\/pnpm\/global\//.test(normalizePath(packageRoot, isWin).replace(/\\/g, "/"));
+    return {
+      schema: 1,
+      distribution: "pnpm",
+      global: layoutGlobal || String(env.npm_config_global) === "true",
+      version: options.version || "",
+      prefix: "",
+      npm: "",
+    };
+  }
+  const invoke = options.npm || npmInvocation(options.execPath, env, options.platform);
   const runner = options.runner || spawnSync;
   const run = (args) =>
     runner(invoke.command, [...invoke.prefix, ...args], {
@@ -122,7 +146,6 @@ function discoverGlobalInstall(packageRoot, options = {}) {
   const root = run(["root", "-g"]);
   const prefix = run(["prefix", "-g"]);
   if (root.status !== 0 || prefix.status !== 0) return null;
-  const isWin = options.platform === "win32";
   const pathAPI = isWin ? path.win32 : path.posix;
   const expectedRoot = normalizePath(root.stdout.trim(), isWin);
   const actualRoot = normalizePath(pathAPI.resolve(packageRoot, "..", ".."), isWin);
@@ -163,6 +186,7 @@ module.exports = {
   discoverGlobalInstall,
   ensureInstallMetadata,
   expectedGlobalBin,
+  isPnpmEnvironment,
   normalizePath,
   npmInvocation,
   pathConflict,

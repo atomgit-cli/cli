@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict } = require("../lib/install-metadata");
-const { isGlobalInstall } = require("../lib/postinstall");
+const { isGlobalInstall, runPostinstall } = require("../lib/postinstall");
 
 test("normalizes Windows paths case-insensitively and trims separators", () => {
   assert.strictEqual(normalizePath("C:\\Users\\WPF\\npm\\", true), normalizePath("c:\\users\\wpf\\npm", true));
@@ -48,6 +48,7 @@ test("runtime discovery distinguishes global and project-local npm packages", ()
     runner,
     platform: "linux",
     version: "1.2.3",
+    env: {},
   });
   assert.strictEqual(global.global, true);
   assert.strictEqual(global.distribution, "npm");
@@ -58,7 +59,89 @@ test("runtime discovery distinguishes global and project-local npm packages", ()
     npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
     runner,
     platform: "linux",
+    env: {},
   });
   assert.strictEqual(local.global, false);
   assert.strictEqual(local.distribution, "npm-local");
+});
+
+test("runtime discovery recognizes pnpm installs without invoking npm", () => {
+  const runner = () => {
+    throw new Error("npm must not be invoked for a pnpm install");
+  };
+  const metadata = discoverGlobalInstall("/home/u/.local/share/pnpm/global/5/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    version: "1.2.3",
+    env: { npm_config_user_agent: "pnpm/9.12.0 npm/? node/v20.0.0 linux x64" },
+  });
+  assert.strictEqual(metadata.distribution, "pnpm");
+  assert.strictEqual(metadata.global, true);
+  assert.strictEqual(metadata.version, "1.2.3");
+
+  const byLayout = discoverGlobalInstall("/home/u/.local/share/pnpm/global/5/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    env: {},
+  });
+  assert.strictEqual(byLayout.distribution, "pnpm");
+});
+
+test("postinstall records pnpm global installs as pnpm, never as npm", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-postinstall-pnpm-"));
+  const packageRoot = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  runPostinstall(
+    { npm_config_global: "true", npm_config_user_agent: "pnpm/9.15.9 npm/? node/v20", npm_config_prefix: "/prefix" },
+    { write: () => {} },
+    packageRoot
+  );
+  const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, ".gitcode-install.json"), "utf8"));
+  assert.strictEqual(metadata.distribution, "pnpm");
+  assert.strictEqual(metadata.global, true);
+  assert.strictEqual(metadata.prefix, "");
+});
+
+test("postinstall keeps recording npm global installs as npm", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-postinstall-npm-"));
+  const packageRoot = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  runPostinstall(
+    { npm_config_global: "true", npm_config_user_agent: "npm/10.0.0 node/v20", npm_config_prefix: "/prefix", npm_execpath: "/usr/bin/npm" },
+    { write: () => {} },
+    packageRoot
+  );
+  const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, ".gitcode-install.json"), "utf8"));
+  assert.strictEqual(metadata.distribution, "npm");
+  assert.strictEqual(metadata.prefix, "/prefix");
+});
+
+test("pnpm layout detection also matches Windows global paths", () => {
+  const runner = () => {
+    throw new Error("npm must not be invoked for a pnpm install");
+  };
+  const metadata = discoverGlobalInstall("C:\\Users\\u\\AppData\\Local\\pnpm\\global\\5\\node_modules\\@gitcode-cli\\cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "win32",
+    env: {},
+  });
+  assert.strictEqual(metadata.distribution, "pnpm");
+  assert.strictEqual(metadata.global, true);
+});
+
+test("a project-level pnpm dependency is pnpm but not global", () => {
+  const runner = () => {
+    throw new Error("npm must not be invoked for a pnpm install");
+  };
+  const metadata = discoverGlobalInstall("/workspace/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    env: { npm_config_user_agent: "pnpm/9.15.9 npm/? node/v20" },
+  });
+  assert.strictEqual(metadata.distribution, "pnpm");
+  assert.strictEqual(metadata.global, false);
 });
