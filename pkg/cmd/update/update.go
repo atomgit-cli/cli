@@ -4,6 +4,7 @@ package update
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -49,10 +50,7 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 				})
 			}
 
-			distribution := os.Getenv("GITCODE_CLI_DISTRIBUTION")
-			if distribution == "" {
-				distribution = "archive-or-source"
-			}
+			distribution := detectDistribution()
 			message := managerMessage(distribution)
 			return writeResult(cmd, jsonOutput, result{Status: "manual", Distribution: distribution, Message: message})
 		},
@@ -60,6 +58,27 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "Check for an update without installing it")
 	cmdutil.AddJSONFlag(cmd, &jsonOutput)
 	return cmd
+}
+
+// detectDistribution resolves the installation channel from the process
+// environment and the running binary's location so channel-specific upgrade
+// guidance (Homebrew, deb/rpm, npm) reaches users who do not run through an
+// npm wrapper.
+func detectDistribution() string {
+	binary := os.Getenv("GITCODE_CLI_BINARY")
+	if binary == "" {
+		if resolved, err := os.Executable(); err == nil {
+			binary = resolved
+		}
+	}
+	env := make(map[string]string)
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[strings.ToUpper(key)] = value
+		}
+	}
+	return installupdate.DetectDistribution(env, binary)
 }
 
 func managerMessage(distribution string) string {
