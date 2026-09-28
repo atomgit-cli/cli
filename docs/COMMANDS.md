@@ -3357,7 +3357,7 @@ gc doctor install --json
 - 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。
 - `--json` 只向 stdout 写一个稳定 JSON 对象，适合安装器、CI 与 AI 代理消费。
 
-npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。
+npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`（POSIX 上等价入口为 `gc install`；`--target-dir` 亦接受 `--target-dir=<directory>` 等号形式，`-` 开头的目录名可用 `./-name` 或 `--target-dir=-name` 表达）；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。默认目录选择会避开 Homebrew 域（检测到 `/usr/local/Cellar` 布局时跳过 `/usr/local/bin` 候选）。
 
 - Windows 在用户显式执行 `install` 后，默认将安装目录置于持久 User PATH 前面并删除同目录重复项；只修改当前用户，不修改 Machine PATH、不提权、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。
 - 显式 `--target-dir` 会替换该目录内已有的同名常规文件；识别为外来渠道入口的目标（如带 python shebang 的 pip console script）会被拒绝替换并给出对应包管理器的卸载指引；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。

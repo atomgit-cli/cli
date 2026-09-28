@@ -209,6 +209,9 @@ test("parseInstallArgs supports target directory and Windows PATH opt-out", () =
 test("install help documents target directory and Windows PATH opt-out", () => {
   assert.match(installHelp(), /--target-dir <directory>/);
   assert.match(installHelp(), /--no-modify-path/);
+  assert.match(installHelp(), /--target-dir=<directory>/);
+  // The usage line shows the name the platform's users actually type.
+  assert.match(installHelp(), new RegExp(`${process.platform === "win32" ? "gitcode" : "gc"} install \\[`));
 });
 
 test("PowerShell guidance escapes single quotes in target directories", () => {
@@ -1196,6 +1199,24 @@ test("install refuses to replace a pip console script instead of warn-and-destro
   const record = replacePath(source, plain, "pip-plain");
   assert.strictEqual(fs.readFileSync(plain, "utf8"), "new");
   fs.unlinkSync(record.backup);
+});
+
+test("chooseGlobalBinDir avoids the Homebrew domain when the layout is present", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-skip-"));
+  const fakeCellar = path.join(root, "Cellar");
+  fs.mkdirSync(fakeCellar);
+  const fallback = path.join(root, "local-bin");
+  // With the Homebrew layout present, /usr/local/bin is skipped even when
+  // it heads the candidate list.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, ["/usr/local/bin", fallback], fakeCellar),
+    fallback
+  );
+  // Injected candidates without /usr/local/bin are unaffected by the check.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, [fallback], path.join(root, "absent")),
+    fallback
+  );
 });
 
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {

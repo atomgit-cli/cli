@@ -3,11 +3,6 @@
 
 set -e
 
-# Update shell completions if available
-if command -v update-shell-completions &> /dev/null; then
-    update-shell-completions
-fi
-
 # Inform user about setup
 echo "GitCode CLI (gc/gitcode) has been installed successfully!"
 echo "Run 'gitcode doctor install' to inspect PATH conflicts with pip, npm, Homebrew, or archive installs."

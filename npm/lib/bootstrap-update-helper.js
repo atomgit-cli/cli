@@ -164,6 +164,16 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+// Mirrors lib/install.js and lib/update.js.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
+}
+
 function stableVersion(value) {
   const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   return match ? match.slice(1).map(Number) : null;
@@ -269,7 +279,7 @@ function healthCheck(manifest, expected) {
     env: updaterEnvironment(),
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "bootstrap health check failed").trim());
+  if (result.status !== 0) throw new Error(commandFailureDetail(result, "bootstrap health check failed"));
   const actual = JSON.parse(result.stdout).version;
   if (compareVersions(actual, expected) !== 0) throw new Error(`updated CLI reported ${actual}, expected ${expected}`);
 }

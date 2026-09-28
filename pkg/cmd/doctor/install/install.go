@@ -154,7 +154,27 @@ var transactionLeftoverPrefixes = []string{
 	"gitcode.backup-", "gitcode.tmp-", "gitcode.exe.backup-", "gitcode.exe.tmp-",
 	"gitcode-update-helper.js.backup-", "gitcode-update-helper.js.tmp-",
 	".gitcode-install.json.backup-", ".gitcode-install.json.tmp-",
-	".gc-install-probe-", ".gc-write-probe",
+	".gc-install-probe-",
+}
+
+// transactionLeftoverNames are matched by full name, mirroring the JS
+// isTransactionLeftoverName equality check: ".gc-write-probe" with a suffix
+// is not an installer artifact, and a prefix match would report files the
+// npm sweep never cleans.
+var transactionLeftoverNames = []string{".gc-write-probe"}
+
+func isTransactionLeftoverName(name string) bool {
+	for _, prefix := range transactionLeftoverPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	for _, exact := range transactionLeftoverNames {
+		if name == exact {
+			return true
+		}
+	}
+	return false
 }
 
 // transactionLeftovers lists interrupted-install leftovers in dir, split
@@ -170,16 +190,14 @@ func transactionLeftovers(dir string) (files, symlinks []string) {
 		if entry.IsDir() {
 			continue
 		}
-		for _, prefix := range transactionLeftoverPrefixes {
-			if strings.HasPrefix(entry.Name(), prefix) {
-				target := filepath.Join(dir, entry.Name())
-				if entry.Type()&os.ModeSymlink != 0 {
-					symlinks = append(symlinks, target)
-				} else {
-					files = append(files, target)
-				}
-				break
-			}
+		if !isTransactionLeftoverName(entry.Name()) {
+			continue
+		}
+		target := filepath.Join(dir, entry.Name())
+		if entry.Type()&os.ModeSymlink != 0 {
+			symlinks = append(symlinks, target)
+		} else {
+			files = append(files, target)
 		}
 	}
 	sort.Strings(files)
@@ -192,6 +210,14 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 	for _, command := range []string{"gitcode", "gc"} {
 		for _, candidate := range report.Commands[command].Candidates {
 			directories[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
+		}
+	}
+	// The install directory is not necessarily on PATH, so leftovers there
+	// are invisible to the candidate scan; include the binary and entrypoint
+	// directories as well.
+	for _, target := range []string{report.Binary, report.Entrypoint} {
+		if target != "" && filepath.IsAbs(target) {
+			directories[normalizedPath(filepath.Dir(target), goos)] = struct{}{}
 		}
 	}
 	var leftoverFiles, leftoverSymlinks []string

@@ -89,11 +89,21 @@ function bundledBinaryPath() {
  * per-user dir under the home directory. Pure (no FS side effects beyond the
  * write probe on the candidate dir).
  */
-function chooseGlobalBinDir(home, isWin, posixCandidates) {
+function chooseGlobalBinDir(home, isWin, posixCandidates, brewCellarPath = "/usr/local/Cellar") {
   if (isWin) {
     return path.join(home, "AppData", "Local", "gitcode-cli", "bin");
   }
-  const candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  let candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  // On Intel Macs /usr/local is Homebrew's domain: writing there upsets
+  // brew doctor and blocks a future "brew install gc". Skip the candidate
+  // when the Homebrew layout is present.
+  try {
+    fs.statSync(brewCellarPath);
+    const filtered = candidates.filter((dir) => dir !== "/usr/local/bin");
+    if (filtered.length) candidates = filtered;
+  } catch {
+    // No Homebrew layout; the candidates stand.
+  }
   for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -444,6 +454,15 @@ function runGc(bin, args) {
   return spawnSync(bin, args, { encoding: "utf8" });
 }
 
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
+}
+
 // Replace a completion file atomically and never write through a symlink:
 // an existing `_gc` symlink could point anywhere in the user's tree, and a
 // plain overwrite would clobber the target outside our directory.
@@ -691,14 +710,17 @@ function quotePowerShell(value) {
 }
 
 function installHelp() {
+  // Both bin names route to this wrapper; show the one the platform's
+  // users actually type (PowerShell reserves "gc" as Get-Content).
+  const invoked = process.platform === "win32" ? "gitcode" : "gc";
   return [
     "Install bundled gc and gitcode binaries outside the npm package directory.",
     "",
     "Usage:",
-    "  gitcode install [--target-dir <directory>] [--no-modify-path]",
+    `  ${invoked} install [--target-dir <directory>] [--no-modify-path]`,
     "",
     "Flags:",
-    "  --target-dir <directory>  Install into an explicit directory",
+    "  --target-dir <directory>  Install into an explicit directory (also --target-dir=<directory>)",
     "  --no-modify-path           Do not update the Windows user PATH",
     "  -h, --help                Show this help",
     "",
@@ -995,7 +1017,7 @@ async function runInstall(args = []) {
 
     const v = runGc(dst, ["version"]);
     if (v.status !== 0) {
-      throw new Error(`installed binary health check failed: ${(v.stderr || "unknown error").trim()}`);
+      throw new Error(`installed binary health check failed: ${commandFailureDetail(v, "no error output")}`);
     }
     versionLine = (v.stdout || "").split("\n")[0] || "(gc version failed)";
     writeInstallMetadata(dir, {
