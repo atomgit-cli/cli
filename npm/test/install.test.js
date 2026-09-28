@@ -658,6 +658,26 @@ test("install reports an actionable refusal for a symlink loop at the primary ta
   assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
 });
 
+test("install reports an actionable refusal for a symlink loop at the alias target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-alias-loop-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const realGc = path.join(binDir, "gc");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  fs.writeFileSync(realGc, "binary");
+  if (!createFileSymlinkOrSkip(t, "gitcode", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "alias-loop-reject", { allowedSymlinkTarget: realGc }),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      !/ELOOP/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(realGc, "utf8"), "binary");
+});
+
 test("install refuses symlinks inside the nested dependency tree of another package", (t) => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-nested-"));
   const packageBin = path.join(root, "project", "node_modules", "pkg-a", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");

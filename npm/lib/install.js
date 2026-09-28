@@ -175,7 +175,10 @@ function isAllowedAliasSymlink(dst, allowedTarget) {
       linkTargetStat.dev === targetStat.dev &&
       linkTargetStat.ino === targetStat.ino;
   } catch (error) {
-    if (["ENOENT", "EINVAL"].includes(error.code)) return false;
+    // ELOOP (self/mutual symlink loops) falls through to the refusal path
+    // like ENOENT/EINVAL so users get the actionable refusal message
+    // instead of a raw errno.
+    if (["ENOENT", "EINVAL", "ELOOP"].includes(error.code)) return false;
     throw error;
   }
 }

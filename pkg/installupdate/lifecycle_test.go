@@ -3,9 +3,11 @@ package installupdate
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,50 @@ func TestResolveNodeFallsBackWhenRecordedRuntimeIsMissing(t *testing.T) {
 	recorded := filepath.Join(t.TempDir(), "missing-node")
 	if got := resolveNode(recorded); got == recorded {
 		t.Fatalf("resolveNode() kept missing recorded runtime %q", got)
+	}
+}
+
+func TestStartDetachedRunsInOwnSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX session semantics only")
+	}
+	dir := t.TempDir()
+	reportFile := filepath.Join(dir, "child-report")
+	// After Setsid the child is a session leader: its process group id equals
+	// its own pid. A plain fork keeps the parent's group, where pid != pgid.
+	script := fmt.Sprintf("#!/bin/sh\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\" > %s\nsleep 1\n", reportFile)
+	node := filepath.Join(dir, "fake-node")
+	if err := os.WriteFile(node, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := &Manifest{
+		Distribution: "npm-bootstrap",
+		Version:      "1.2.3",
+		TargetDir:    dir,
+		Node:         node,
+		Helper:       filepath.Join(dir, "helper.js"),
+		path:         filepath.Join(dir, ".gitcode-install.json"),
+	}
+	if err := StartDetached(manifest, false); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(reportFile)
+		if err == nil {
+			// The shell truncates the file before writing, so tolerate
+			// partial reads until the full "pid pgid" report lands.
+			if fields := strings.Fields(strings.TrimSpace(string(data))); len(fields) == 2 {
+				if fields[0] != fields[1] {
+					t.Fatalf("detached helper is not a session leader: pid=%s pgid=%s", fields[0], fields[1])
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached helper did not report in time")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

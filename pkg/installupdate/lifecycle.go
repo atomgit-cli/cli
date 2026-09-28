@@ -176,6 +176,7 @@ func StartDetached(manifest *Manifest, force bool) error {
 	}
 	cmd := exec.Command(node, args...)
 	cmd.Env = updaterEnvironment()
+	cmd.SysProcAttr = detachAttrs()
 	if err := cmd.Start(); err != nil {
 		return err
 	}

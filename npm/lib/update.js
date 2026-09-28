@@ -16,6 +16,9 @@ const { npmInvocation, readInstallMetadata, stateDir } = require("./install-meta
 const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
+// Locks older than 15 minutes are reclaimed. The worst-case hold is the
+// check budget (63s) plus a failed install rolled back with health checks
+// (~723s total); keep any timeout adjustment comfortably under this bound.
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const CHECK_ATTEMPTS = 3;
 const CHECK_TIMEOUT_MS = 20000;
@@ -67,9 +70,15 @@ function updaterEnvironment(env = process.env) {
 }
 
 function appendLog(message, env = process.env) {
-  const file = path.join(stateDir(env), "update.log");
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  try {
+    const file = path.join(stateDir(env), "update.log");
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  } catch {
+    // Logging is best-effort: an unwritable update.log (root-owned file,
+    // read-only directory) must never turn a successful update into a
+    // reported failure or replace the real result summary.
+  }
 }
 
 // Collapses an error into one bounded line so failure summaries stay readable
@@ -200,7 +209,10 @@ function healthCheck(metadata, expectedVersion) {
   const wrapper = globalWrapper(metadata);
   const result = spawnSync(process.execPath, [wrapper, "version", "--json"], {
     encoding: "utf8",
-    timeout: 10000,
+    // The first run after an --ignore-scripts install must discover global
+    // metadata (two npm invocations of 5s each) before spawning the binary;
+    // 10s turned that into false-negative rollbacks on slow machines.
+    timeout: 30000,
     windowsHide: true,
     env: updaterEnvironment(),
   });
@@ -324,7 +336,11 @@ function runUpdate(options = {}) {
     const state = readJSON(stateFile);
     state.lastChecked = new Date(now).toISOString();
     state.nextCheck = now + TTL_MS;
-    state.summary = { message: result.message, shown: !options.background };
+    // A "current" result carries no action for the user: queueing it would
+    // print "X is current." once a day in the default notify mode. Stale
+    // "available" summaries are cleared so users never see outdated notices.
+    if (result.status === "current") delete state.summary;
+    else state.summary = { message: result.message, shown: !options.background };
     writeJSON(stateFile, state);
     appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;

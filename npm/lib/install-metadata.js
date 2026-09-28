@@ -148,7 +148,17 @@ function discoverGlobalInstall(packageRoot, options = {}) {
   if (root.status !== 0 || prefix.status !== 0) return null;
   const pathAPI = isWin ? path.win32 : path.posix;
   const expectedRoot = normalizePath(root.stdout.trim(), isWin);
-  const actualRoot = normalizePath(pathAPI.resolve(packageRoot, "..", ".."), isWin);
+  // The container that must equal `npm root -g` sits one level above the
+  // package for unscoped names (atomgit-cli) and two levels above for scoped
+  // ones (@gitcode-cli/cli). Resolving a fixed two levels misclassifies the
+  // recommended unscoped coordinate as npm-local after its first self-update
+  // (the updater installs with --ignore-scripts, wiping recorded metadata).
+  const resolvedPackage = pathAPI.resolve(packageRoot);
+  const container = pathAPI.dirname(resolvedPackage);
+  const actualRoot = normalizePath(
+    pathAPI.basename(container).startsWith("@") ? pathAPI.dirname(container) : container,
+    isWin
+  );
   return {
     schema: 1,
     distribution: expectedRoot === actualRoot ? "npm" : "npm-local",

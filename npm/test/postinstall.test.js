@@ -65,6 +65,33 @@ test("runtime discovery distinguishes global and project-local npm packages", ()
   assert.strictEqual(local.distribution, "npm-local");
 });
 
+test("runtime discovery recognizes unscoped global installs on every platform", () => {
+  const runner = (command, args) =>
+    ({ status: 0, stdout: args.includes("root") ? "/prefix/lib/node_modules\n" : "/prefix\n" });
+  const options = {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    env: {},
+  };
+  const linux = discoverGlobalInstall("/prefix/lib/node_modules/atomgit-cli", options);
+  assert.strictEqual(linux.global, true);
+  assert.strictEqual(linux.distribution, "npm");
+
+  const windows = discoverGlobalInstall("C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\atomgit-cli", {
+    ...options,
+    platform: "win32",
+    runner: (command, args) =>
+      ({ status: 0, stdout: args.includes("root") ? "C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\r\n" : "C:\\Users\\u\\AppData\\Roaming\\npm\r\n" }),
+  });
+  assert.strictEqual(windows.global, true);
+  assert.strictEqual(windows.distribution, "npm");
+
+  const local = discoverGlobalInstall("/workspace/node_modules/atomgit-cli", options);
+  assert.strictEqual(local.global, false);
+  assert.strictEqual(local.distribution, "npm-local");
+});
+
 test("runtime discovery recognizes pnpm installs without invoking npm", () => {
   const runner = () => {
     throw new Error("npm must not be invoked for a pnpm install");
