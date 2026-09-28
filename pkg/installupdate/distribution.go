@@ -42,10 +42,13 @@ func DetectDistribution(env map[string]string, binary string) string {
 		strings.Contains(normalized, "/node_modules/@atomgit-cli/cli/"),
 		strings.Contains(normalized, "/node_modules/atomgit-cli/"):
 		return "npm"
+	case strings.Contains(normalized, "/uv/tools/"):
+		// Must precede the pypi marker: a uv tool's venv binary lives under
+		// .../uv/tools/<name>/lib/pythonX/site-packages/gc_cli/bin/ and would
+		// otherwise be reported as plain pypi.
+		return "uv"
 	case strings.Contains(normalized, "/site-packages/gc_cli/bin/"):
 		return "pypi"
-	case strings.Contains(normalized, "/uv/tools/"):
-		return "uv"
 	case strings.Contains(normalized, "/cellar/gc/"),
 		strings.Contains(normalized, "/opt/homebrew/"),
 		strings.Contains(normalized, "/.linuxbrew/"):

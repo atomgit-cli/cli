@@ -980,24 +980,37 @@ test("foreignChannelHint accepts interpreter arguments and Windows PE shims", ()
   fs.writeFileSync(odd, "#!/usr/bin/env python3 /opt/tool.py\n");
   assert.strictEqual(foreignChannelHint(odd), "");
 
-  // Windows pip console shims are PE binaries embedding a python path.
+  // Windows pip console shims: a PE stub with the shebang appended deep
+  // into the launcher (distlib layout), in front of the zip payload.
   const shim = path.join(root, "gc.exe");
-  const pe = Buffer.concat([
+  fs.writeFileSync(shim, Buffer.concat([
     Buffer.from([0x4d, 0x5a, 0x90, 0x00]),
-    Buffer.from(`C:\\Python311\\python.exe".*\x00pkg-resources\x00`, "utf8"),
-  ]);
-  fs.writeFileSync(shim, pe);
+    Buffer.alloc(150 * 1024, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+    Buffer.from("PK\x03\x04zip-payload", "utf8"),
+  ]));
   assert.match(foreignChannelHint(shim, true), /pip uninstall gitcode-cli/);
-  // A PE binary without python markers stays unrecognized.
+  // A PE binary without the embedded python shebang stays unrecognized.
   const plain = path.join(root, "plain.exe");
-  fs.writeFileSync(plain, Buffer.from([0x4d, 0x5a, 0x90, 0x00, 1, 2, 3, 4]));
+  fs.writeFileSync(plain, Buffer.concat([Buffer.from([0x4d, 0x5a]), Buffer.alloc(2048, 1)]));
   assert.strictEqual(foreignChannelHint(plain, true), "");
+  // A shebang past the 1 MiB read window is out of scope by design.
+  const far = path.join(root, "far.exe");
+  fs.writeFileSync(far, Buffer.concat([
+    Buffer.from([0x4d, 0x5a]),
+    Buffer.alloc(1 << 20, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+  ]));
+  assert.strictEqual(foreignChannelHint(far, true), "");
 });
 
 test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-lock-"));
   const lock = acquireInstallLock(root);
   assert.strictEqual(fs.existsSync(lock), true);
+  // The lock name must never join the leftover families: the sweep would
+  // then delete a live lock mid-install.
+  assert.strictEqual(isTransactionLeftoverName(path.basename(lock)), false);
   // A second install while the lock is fresh is refused.
   assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
   releaseInstallLock(lock);
@@ -1044,6 +1057,8 @@ test("parseInstallArgs accepts --target-dir= forms and dash-prefixed names", () 
   assert.strictEqual(parseInstallArgs(["--target-dir", "./-weird"]).targetDir, path.resolve("./-weird"));
   // A known flag as the value still means a missing value.
   assert.throws(() => parseInstallArgs(["--target-dir", "--no-modify-path"]), /\.\/-name or --target-dir=-name/);
+  // Any "--"-prefixed value is rejected, not just the known flags.
+  assert.throws(() => parseInstallArgs(["--target-dir", "--unknown-flag"]), /requires a directory value/);
   assert.throws(() => parseInstallArgs(["--target-dir"]), /requires a directory value/);
   assert.throws(() => parseInstallArgs(["--target-dir="]), /requires a directory value/);
   assert.throws(() => parseInstallArgs(["--target-dirx"]), /unknown install argument/);

@@ -668,8 +668,6 @@ function persistWindowsUserPath(dir, options = {}) {
   }
 }
 
-const INSTALL_FLAG_NAMES = new Set(["--target-dir", "--no-modify-path", "-h", "--help"]);
-
 function parseInstallArgs(args) {
   const options = { targetDir: "", modifyPath: true };
   for (let index = 0; index < args.length; index += 1) {
@@ -677,10 +675,10 @@ function parseInstallArgs(args) {
     if (arg === "--target-dir") {
       const value = args[index + 1];
       index += 1;
-      // In the space-separated form a value that is itself a known flag is
-      // almost certainly a missing value; dash-prefixed directory names are
-      // still expressible as ./-name or --target-dir=-name.
-      if (!value || (value.startsWith("-") && INSTALL_FLAG_NAMES.has(value))) {
+      // In the space-separated form a value starting with "--" is almost
+      // certainly a missed flag (known or not); single-dash directory names
+      // are still expressible as ./-name or --target-dir=-name.
+      if (!value || value.startsWith("--")) {
         throw new Error(
           "--target-dir requires a directory value (use ./-name or --target-dir=-name for dash-prefixed names)"
         );
@@ -792,7 +790,9 @@ function foreignChannelHint(file, isWin = process.platform === "win32") {
   try {
     const fd = fs.openSync(file, "r");
     try {
-      const buf = Buffer.alloc(4096);
+      // 1 MiB covers distlib's launcher stubs (~100 KB+); the embedded
+      // shebang sits far past any 4 KB window.
+      const buf = Buffer.alloc(1 << 20);
       const bytes = fs.readSync(fd, buf, 0, buf.length, 0);
       content = buf.toString("utf8", 0, bytes);
     } finally {
@@ -808,9 +808,11 @@ function foreignChannelHint(file, isWin = process.platform === "win32") {
   if (/^#!\s*(?:(?:\S*\/)?env(?:\s+-\S+)*\s+python|\S*python)([0-9.]*)?(?:\s+-\S+)*\s*$/.test(firstLine)) {
     return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
-  // Windows pip console shims are PE binaries without a shebang; the distlib
-  // stub embeds the interpreter path, which always contains "python".
-  if (isWin && content.startsWith("MZ") && content.toLowerCase().includes("python")) {
+  // Windows pip console shims are PE binaries with no shebang line at the
+  // top: distlib appends "#!<python.exe path>\r\n" well into the stub, in
+  // front of the zip payload. Anchor on the embedded shebang so ordinary
+  // PE binaries never match.
+  if (isWin && content.startsWith("MZ") && /#![^\r\n]{0,400}pythonw?\.exe/i.test(content)) {
     return 'pip console executable (PE shim); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
   return "";
@@ -892,9 +894,18 @@ function acquireInstallLock(dir, now = Date.now()) {
     try {
       fs.unlinkSync(lock);
     } catch {
-      // Raced with another reclaimer; our claim below fails loudly if it won.
+      // Raced with another reclaimer; the claim below settles it.
     }
-    return claim();
+    try {
+      return claim();
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      // Both reclaimers raced: the other one won the recreated lock.
+      throw new Error(
+        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+          `retry in a moment or remove the lock if you are certain none is running`
+      );
+    }
   }
 }
 
