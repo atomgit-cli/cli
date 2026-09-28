@@ -132,7 +132,10 @@ func managerMessage(distribution string) string {
 	case "pypi":
 		return "This installation is managed by Python; upgrade it explicitly with pipx or pip in its environment."
 	case "uv":
-		return "This installation is managed by uv; run uv tool upgrade gc."
+		// The tool name is the install requirement (gitcode-cli); a
+		// `uv tool install --from gitcode-cli <alias>` install would need
+		// its custom name.
+		return "This installation is managed by uv; run \"uv tool upgrade gitcode-cli\"."
 	case "homebrew":
 		return "This installation is managed by Homebrew; run brew upgrade gc."
 	case "deb", "rpm", "system-package":

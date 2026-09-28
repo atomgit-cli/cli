@@ -1249,6 +1249,29 @@ test("chooseGlobalBinDir avoids the Homebrew domain when the layout is present",
   );
 });
 
+test("install gives uv-specific guidance for a uv tool symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-uv-link-"));
+  const uvBin = path.join(root, ".local", "share", "uv", "tools", "gitcode-cli", "bin", "gc");
+  fs.mkdirSync(path.dirname(uvBin), { recursive: true });
+  fs.writeFileSync(uvBin, "uv-shim");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, uvBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "uv-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /uv tool uninstall gitcode-cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-provider-path-"));
   const early = path.join(root, "early");

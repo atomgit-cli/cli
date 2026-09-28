@@ -77,6 +77,18 @@ def ensure_executable(binary_path: Path) -> None:
         binary_path.chmod(0o755)
 
 
+def detect_distribution() -> str:
+    """Report the installation channel for the distribution env.
+
+    uv-managed tools run from .../uv/tools/<name>/... venvs; reporting "uv"
+    (instead of the blanket "pypi") makes `gc update` suggest
+    "uv tool upgrade" rather than running pip inside the uv-managed
+    environment — which is exactly what uv tells users not to do.
+    """
+    prefix = str(Path(sys.prefix).resolve()).replace("\\", "/")
+    return "uv" if "/uv/tools/" in prefix else "pypi"
+
+
 def main() -> int:
     """Main entry point for the GitCode CLI command."""
     try:
@@ -85,7 +97,7 @@ def main() -> int:
         ensure_executable(binary_path)
         env = os.environ.copy()
         env.setdefault(COMMAND_NAME_ENV, get_command_name())
-        env.setdefault(DISTRIBUTION_ENV, "pypi")
+        env.setdefault(DISTRIBUTION_ENV, detect_distribution())
         env.setdefault(ENTRYPOINT_ENV, str(Path(sys.argv[0]).resolve()))
         env.setdefault(BINARY_ENV, str(binary_path.resolve()))
 
