@@ -128,6 +128,15 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 	}
 	if err := StartDetached(manifest, false); err != nil {
 		fmt.Fprintf(errOut, "update check skipped: %v\n", err)
+		// A missing or broken helper fails on every command; without a
+		// backoff this prints on each invocation forever. Rate-limit the
+		// retry to hourly (a repaired install or a successful update
+		// resets the schedule; the JS helper owns the finer backoff).
+		_ = mutateStateLocked(statePath, func(current *updateState) {
+			if current.NextCheck <= time.Now().UnixMilli() {
+				current.NextCheck = time.Now().Add(time.Hour).UnixMilli()
+			}
+		})
 	}
 }
 

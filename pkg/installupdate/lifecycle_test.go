@@ -141,6 +141,38 @@ func TestDisabledHonorsConfigFileWhenEnvValueIsInvalid(t *testing.T) {
 	}
 }
 
+func TestAfterCommandBacksOffWhenHelperIsUnspawnable(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
+	t.Setenv("GC_STATE_DIR", stateDir)
+	// A manifest whose recorded node runtime cannot spawn: StartDetached's
+	// cmd.Start fails on every command (a relative Node value is returned
+	// verbatim by resolveNode, so "missing-node" fails to exec).
+	manifest := Manifest{Distribution: "npm-bootstrap", Version: "1.2.3", TargetDir: dir, Helper: filepath.Join(dir, "missing.js"), Node: "missing-node"}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	AfterCommand(nil, out, false, false)
+	state := readState(StatePath(nil))
+	if state.NextCheck <= time.Now().UnixMilli() {
+		t.Fatalf("a failed spawn must push nextCheck forward, got %d", state.NextCheck)
+	}
+	if state.NextCheck > time.Now().Add(time.Hour).UnixMilli() {
+		t.Fatalf("the backoff is hourly, got %d", state.NextCheck)
+	}
+	// The notice is still shown on the first run (the mutate ran before the
+	// spawn attempt); the printed skip line confirms the failure path.
+	if !strings.Contains(out.String(), "update check skipped") {
+		t.Fatalf("the skip line must still be printed: %q", out.String())
+	}
+}
+
 func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	now := time.Unix(100, 0)
 	if got := DueAt(now); got != now.Add(24*time.Hour).UnixMilli() {
