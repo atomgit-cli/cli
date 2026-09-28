@@ -150,9 +150,41 @@ func TestInspectNpmLocalSkipsGlobalPrefixConflict(t *testing.T) {
 	}
 }
 
+func TestInspectPnpmProjectDependencyIsNotAChannelConflict(t *testing.T) {
+	projBin := t.TempDir()
+	home := t.TempDir()
+	packageRoot := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(projBin, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A project-level pnpm dependency: the recorded metadata says
+	// global:false, and PATH resolving through the project's
+	// node_modules/.bin is pnpm's designed behavior.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"pnpm","global":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := Inspect([]string{
+		"PATH=" + projBin,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
+		"PNPM_HOME=" + home,
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			t.Fatalf("a project-level pnpm dependency must not report a channel conflict: %q", conflict)
+		}
+	}
+}
+
 func TestInspectPnpmComparesAgainstPnpmHome(t *testing.T) {
 	oldDir := t.TempDir()
 	home := t.TempDir()
+	packageRoot := t.TempDir()
 	name := "gitcode"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -160,9 +192,15 @@ func TestInspectPnpmComparesAgainstPnpmHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(oldDir, name), []byte("test"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A global pnpm install records {distribution: "pnpm", global: true}.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"pnpm","global":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	environ := []string{
 		"PATH=" + oldDir,
 		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
 		"PNPM_HOME=" + home,
 	}
 	report := Inspect(environ, runtime.GOOS, "", "", "")
@@ -183,6 +221,7 @@ func TestInspectPnpmComparesAgainstPnpmHome(t *testing.T) {
 	clean := Inspect([]string{
 		"PATH=" + home + string(os.PathListSeparator) + oldDir,
 		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
 		"PNPM_HOME=" + home,
 	}, runtime.GOOS, "", "", "")
 	for _, conflict := range clean.Conflicts {

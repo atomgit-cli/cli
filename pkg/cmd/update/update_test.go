@@ -47,7 +47,7 @@ func TestManagerMessageCoversDetectedChannels(t *testing.T) {
 		"deb":               "package manager",
 		"rpm":               "package manager",
 		"pypi":              "pipx or pip",
-		"uv":                "uv tool upgrade gc",
+		"uv":                "uv tool upgrade gitcode-cli",
 		"npm":               "npm",
 		"pnpm":              "npm gitcode wrapper",
 		"npm-local":         "npm gitcode wrapper",

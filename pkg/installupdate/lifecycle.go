@@ -147,6 +147,10 @@ func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	return true
 }
 
+// retireLockFile renames a stale lock out of the way; a package-level seam
+// so the losing-reclaimer race can be tested deterministically.
+var retireLockFile = os.Rename
+
 func acquireStateLock(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -159,10 +163,29 @@ func acquireStateLock(path string) (*os.File, error) {
 	if statErr != nil || time.Since(info.ModTime()) <= updateLockStale {
 		return nil, err
 	}
-	if removeErr := os.Remove(path); removeErr != nil {
-		return nil, removeErr
+	// Atomic reclaim: renaming the stale lock to a private name lets exactly
+	// one of two racing reclaimers win. The loser's rename fails (the winner
+	// already retired the lock) and its claim then hits the winner's fresh
+	// lock — removing the shared path instead would delete each other's
+	// fresh locks and let both believe they hold it.
+	retired := fmt.Sprintf("%s.retired-%d", path, os.Getpid())
+	if renameErr := retireLockFile(path, retired); renameErr != nil {
+		return nil, err
 	}
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// Re-verify staleness on the retired file: a fresh claim may have
+	// landed between the check above and the rename, and renaming a live
+	// lock away would silently break its holder. Restore and yield then.
+	if retiredInfo, statErr := os.Stat(retired); statErr == nil &&
+		time.Since(retiredInfo.ModTime()) <= updateLockStale {
+		_ = os.Rename(retired, path)
+		return nil, err
+	}
+	_ = os.Remove(retired)
+	lock, claimErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if claimErr != nil {
+		return nil, claimErr
+	}
+	return lock, nil
 }
 
 // StatePath returns the npm-bootstrap update state file, scoped per package
@@ -372,6 +395,16 @@ func resolveUpdateMode(envValue, cfgValue string) string {
 func configUpdateMode(cfg config.Config) string {
 	if cfg == nil {
 		return ""
+	}
+	// Get() honors GC_UPDATE_MODE first, which returns the (possibly
+	// invalid) environment text verbatim and masks exactly the configured
+	// value we need here. Read the file directly when the implementation
+	// supports it; foreign Config implementations fall back to Get.
+	if reader, ok := cfg.(interface {
+		FileGet(host, key string) (string, error)
+	}); ok {
+		value, _ := reader.FileGet("gitcode.com", "update.mode")
+		return value
 	}
 	value, _ := cfg.Get("gitcode.com", "update.mode")
 	return value

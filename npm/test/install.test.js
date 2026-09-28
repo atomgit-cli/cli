@@ -1026,6 +1026,21 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   const reclaimed = acquireInstallLock(root);
   assert.strictEqual(fs.readFileSync(reclaimed, "utf8").trim().split(" ")[0], String(process.pid));
   releaseInstallLock(reclaimed);
+
+  // The losing reclaimer of a stale-lock race is refused, not double-holding.
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "");
+  fs.utimesSync(path.join(root, ".gc-install-lock"), old, old);
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
 });
 
 test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {
@@ -1232,6 +1247,29 @@ test("chooseGlobalBinDir avoids the Homebrew domain when the layout is present",
     chooseGlobalBinDir("/home/u", false, [fallback], path.join(root, "absent")),
     fallback
   );
+});
+
+test("install gives uv-specific guidance for a uv tool symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-uv-link-"));
+  const uvBin = path.join(root, ".local", "share", "uv", "tools", "gitcode-cli", "bin", "gc");
+  fs.mkdirSync(path.dirname(uvBin), { recursive: true });
+  fs.writeFileSync(uvBin, "uv-shim");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, uvBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "uv-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /uv tool uninstall gitcode-cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
 });
 
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {

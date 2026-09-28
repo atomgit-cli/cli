@@ -339,7 +339,31 @@ function acquireLock(file, now = Date.now()) {
     if (error.code !== "EEXIST") throw error;
     try {
       if (now - fs.statSync(file).mtimeMs > LOCK_STALE_MS) {
-        fs.unlinkSync(file);
+        // Atomic reclaim: renaming the stale lock to a private name lets
+        // exactly one of two racing reclaimers win. The loser's rename
+        // fails with ENOENT (the winner already retired it) and its claim
+        // then hits the winner's fresh lock (EEXIST) — unlinking the
+        // shared path instead would delete each other's fresh locks and
+        // let both believe they hold it.
+        const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+        fs.renameSync(file, retired);
+        // Re-verify staleness on the retired file: a fresh claim may have
+        // landed between the check above and this rename, and renaming a
+        // live lock away would silently break its holder. Restore and
+        // yield in that case.
+        if (now - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
+          try {
+            fs.renameSync(retired, file);
+          } catch {
+            // Someone claimed the path while we held their lock aside.
+          }
+          return null;
+        }
+        try {
+          fs.unlinkSync(retired);
+        } catch {
+          // Best effort; a stranded .retired-* file is inert debris.
+        }
         return fs.openSync(file, "wx", 0o600);
       }
     } catch {

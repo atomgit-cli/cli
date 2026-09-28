@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
 
 func TestLoadBootstrapManifestAdjacentToBinary(t *testing.T) {
@@ -76,6 +78,66 @@ func TestAfterCommandDoesNotOverwriteStateOwnedByUpdater(t *testing.T) {
 	state := readState(StatePath(nil))
 	if out.Len() != 0 || state.NextCheck != initial.NextCheck || state.Summary.Shown {
 		t.Fatalf("state was changed while updater lock was held: %#v, output %q", state, out.String())
+	}
+}
+
+func TestAcquireStateLockLosingReclaimerDoesNotDoubleHold(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "update-state.json.lock")
+	if err := os.WriteFile(lockPath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-16 * time.Minute)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	original := retireLockFile
+	defer func() { retireLockFile = original }()
+
+	// The losing reclaimer: the winner retired the stale lock first, so the
+	// rename fails and the loser must treat the lock as busy.
+	retireLockFile = func(string, string) error { return os.ErrNotExist }
+	if lock, err := acquireStateLock(lockPath); err == nil {
+		lock.Close()
+		t.Fatal("the losing reclaimer must not acquire the lock")
+	}
+
+	// With the race gone the stale lock is still reclaimable.
+	retireLockFile = original
+	lock, err := acquireStateLock(lockPath)
+	if err != nil {
+		t.Fatalf("stale lock must still be reclaimable: %v", err)
+	}
+	lock.Close()
+}
+
+func TestDisabledHonorsConfigFileWhenEnvValueIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"version":1,"hosts":{"gitcode.com":{"update.mode":"off"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Neutralize the CI detectors so disabled() reflects the mode logic
+	// only (on CI runners these are set and would mask every assertion).
+	for _, name := range []string{"CI", "GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION", "GC_NO_UPDATE_CHECK"} {
+		t.Setenv(name, "")
+	}
+	cfg := config.New()
+	// An invalid GC_UPDATE_MODE must fall back to the configured "off"
+	// instead of silently re-enabling the checks — the env text would mask
+	// the file value through Get().
+	t.Setenv("GC_UPDATE_MODE", "banana")
+	if !disabled(cfg, false, false) {
+		t.Fatal("config=off with GC_UPDATE_MODE=banana must be disabled")
+	}
+	t.Setenv("GC_UPDATE_MODE", "")
+	if !disabled(cfg, false, false) {
+		t.Fatal("config=off with no env override must be disabled")
+	}
+	t.Setenv("GC_UPDATE_MODE", "notify")
+	if disabled(cfg, false, false) {
+		t.Fatal("a valid env value still wins")
 	}
 }
 

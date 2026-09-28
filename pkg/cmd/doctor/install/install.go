@@ -278,7 +278,10 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 		// set so a shadowed pnpm global install is reported instead of
 		// silently skipped. Without PNPM_HOME there is no expected
 		// directory to compare against, so stay quiet rather than guess.
-		if home := env["PNPM_HOME"]; home != "" {
+		// Project-level pnpm dependencies (global:false) legitimately
+		// resolve through the owning project's node_modules/.bin — only a
+		// global install compares against PNPM_HOME.
+		if home := env["PNPM_HOME"]; home != "" && pnpmGlobal(env[packageRootEnv]) {
 			if selected := report.Commands["gitcode"].Selected; selected != "" &&
 				normalizedPath(filepath.Dir(selected), goos) != normalizedPath(home, goos) {
 				report.Conflicts = append(report.Conflicts, "another gitcode command appears before the pnpm global bin directory (PNPM_HOME)")
@@ -312,6 +315,28 @@ func npmPrefix(packageRoot string) string {
 		return ""
 	}
 	return metadata.Prefix
+}
+
+// pnpmGlobal reports whether the recorded pnpm install is a global one.
+// Project-level pnpm dependencies are recorded as {distribution: "pnpm",
+// global: false}: their PATH resolution through the owning project's
+// node_modules/.bin is pnpm's designed behavior, not a channel conflict.
+// A missing or unreadable manifest reports false (no comparison).
+func pnpmGlobal(packageRoot string) bool {
+	if packageRoot == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(packageRoot, ".gitcode-install.json"))
+	if err != nil {
+		return false
+	}
+	var metadata struct {
+		Global bool `json:"global"`
+	}
+	if json.Unmarshal(data, &metadata) != nil {
+		return false
+	}
+	return metadata.Global
 }
 
 func normalizedPath(value, goos string) string {

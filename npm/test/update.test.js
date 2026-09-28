@@ -536,6 +536,57 @@ test("cross-process lock permits only one owner", () => {
   releaseLock(lock, second);
 });
 
+test("the losing reclaimer of a stale lock does not double-hold", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-update-lock-race-"));
+  const lock = path.join(dir, "update.lock");
+  const stale = new Date(Date.now() - 16 * 60 * 1000);
+  fs.writeFileSync(lock, "");
+  fs.utimesSync(lock, stale, stale);
+  const originalRenameSync = fs.renameSync;
+  try {
+    // Simulate the losing reclaimer: the winner retired the stale lock
+    // between our stat and our rename.
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.strictEqual(acquireLock(lock), null, "the loser must not hold the lock");
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // With the race gone the stale lock is still reclaimable.
+  const reclaimed = acquireLock(lock);
+  assert.notStrictEqual(reclaimed, null);
+  releaseLock(lock, reclaimed);
+});
+
+test("a reclaimer that steals a fresh lock restores it and yields", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-update-lock-steal-"));
+  const lock = path.join(dir, "update.lock");
+  const stale = new Date(Date.now() - 16 * 60 * 1000);
+  fs.writeFileSync(lock, "");
+  fs.utimesSync(lock, stale, stale);
+  const originalStatSync = fs.statSync;
+  try {
+    // Simulate the stolen-lock case: another process claimed a fresh lock
+    // between our staleness check and our rename, so the file we renamed
+    // away is live, not stale.
+    fs.statSync = (p) => {
+      if (String(p).includes(".retired-")) {
+        return { mtimeMs: Date.now() };
+      }
+      return originalStatSync(p);
+    };
+    assert.strictEqual(acquireLock(lock), null, "the thief must yield");
+  } finally {
+    fs.statSync = originalStatSync;
+  }
+  // The live lock was restored to its original path.
+  assert.strictEqual(fs.existsSync(lock), true);
+  assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.startsWith("update.lock")), ["update.lock"]);
+});
+
 test("writeJSON cleans up its temp file when the rename fails", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-writejson-fail-"));
   const target = path.join(root, "update-state.json");
