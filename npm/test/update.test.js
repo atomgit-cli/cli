@@ -11,6 +11,7 @@ const {
   acquireLock,
   checkLatest,
   compareVersions,
+  currentVsLatest,
   disabledForInvocation,
   errorFingerprint,
   exactInstallArgs,
@@ -190,6 +191,63 @@ test("registry checks fail after exhausting the retry budget", { timeout: 30000 
   const { stub, attemptsFile } = flakyNpmStub(dir, 3);
   assert.throws(() => checkLatest({ npm: stub }), /ECONNRESET/);
   assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 3);
+});
+
+test("deterministic registry errors fail fast without retrying", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-e404-"));
+  const attemptsFile = path.join(dir, "attempts");
+  const stub = path.join(dir, "e404-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const fs = require('fs');",
+    `const n = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
+    `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(n + 1));`,
+    'process.stderr.write("npm error code E404\\n");',
+    "process.exit(1);",
+    "",
+  ].join("\n"));
+  assert.throws(() => checkLatest({ npm: stub }), /E404/);
+  assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 1, "E404 must not be retried");
+});
+
+test("a prerelease current version is an upgrade path, garbage is not", () => {
+  assert.deepStrictEqual(currentVsLatest("0.14.1", "0.15.0"), { comparison: -1, prerelease: false });
+  assert.deepStrictEqual(currentVsLatest("0.15.0", "0.15.0"), { comparison: 0, prerelease: false });
+  // A manual @next install with a stable latest: available, not an error.
+  assert.deepStrictEqual(currentVsLatest("0.14.1-rc.1", "0.15.0"), { comparison: -1, prerelease: true });
+  assert.deepStrictEqual(currentVsLatest("v0.14.1-rc.1", "0.15.0"), { comparison: -1, prerelease: true });
+  // Garbage versions and prerelease latests still fail loudly.
+  assert.deepStrictEqual(currentVsLatest("banana", "0.15.0"), { comparison: null, prerelease: false });
+  assert.deepStrictEqual(currentVsLatest("0.14.1", "0.15.0-rc.1"), { comparison: null, prerelease: false });
+});
+
+test("a failed rollback tells the user how to recover manually", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-rollback-fail-"));
+  const stateDir = path.join(dir, "state");
+  const stub = path.join(dir, "install-fail-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const args = process.argv.slice(2);",
+    'if (args.includes("view")) { process.stdout.write(\'"9.9.9"\\n\'); process.exit(0); }',
+    'process.stderr.write("npm install EACCES from stub\\n"); process.exit(1);',
+    "",
+  ].join("\n"));
+  const stateFile = path.join(stateDir, "update-state.json");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    assert.throws(
+      () => runUpdate({
+        stateFile,
+        mode: "auto",
+        metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+      }),
+      (error) => /rollback failed/.test(error.message) && /npm install -g/.test(error.message)
+    );
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.match(state.summary.message, /npm install -g/, "the failure summary must carry the manual recovery hint");
 });
 
 test("runUpdate failure summaries carry the real error for the next launch", { timeout: 30000 }, () => {

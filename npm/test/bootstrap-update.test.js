@@ -87,6 +87,45 @@ test("bootstrap registry checks fail after exhausting the retry budget", () => {
   assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), CHECK_ATTEMPTS);
 });
 
+test("bootstrap registry checks fail fast on deterministic errors", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-e404-"));
+  const attemptsFile = path.join(dir, "attempts");
+  const stub = path.join(dir, "e404-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const fs = require('fs');",
+    `const n = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
+    `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(n + 1));`,
+    'process.stderr.write("npm error code E404\\n");',
+    "process.exit(1);",
+    "",
+  ].join("\n"));
+  assert.throws(() => latestVersion({ npm: stub }), /E404/);
+  assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 1, "E404 must not be retried");
+});
+
+test("a prerelease bootstrap current is reported as available", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-prerelease-"));
+  const { stub } = flakyNpmStub(root, 0, "0.0.2");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1-rc.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--check", "--json", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: path.join(root, "state") },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.strictEqual(payload.status, "available");
+  assert.match(payload.message, /0\.0\.2 is available/);
+  assert.match(payload.message, /prerelease/);
+});
+
 test("bootstrap background current check queues no summary and clears stale notices", { timeout: 30000 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-current-"));
   const stateDir = path.join(root, "state");

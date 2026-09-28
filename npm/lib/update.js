@@ -250,6 +250,10 @@ function checkLatest(metadata) {
       return latest;
     }
     lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    // Deterministic registry errors (package deleted or renamed, auth or
+    // forbidden): retrying cannot fix them, so fail fast instead of burning
+    // the attempt budget on every scheduled check.
+    if (DETERMINISTIC_NPM_ERROR.test(String(result.stderr || ""))) break;
     if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
   }
   throw lastError;
@@ -337,6 +341,29 @@ function shouldOnlyNotify(options) {
   return Boolean(options.checkOnly || (options.mode === "notify" && options.background));
 }
 
+// npm error codes that retrying cannot fix (404 package deleted/renamed,
+// 401/403 auth). Mirrors lib/bootstrap-update-helper.js.
+const DETERMINISTIC_NPM_ERROR = /code E(40[01345]|42[89])/;
+
+function isPrereleaseVersion(value) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(value || "").trim());
+}
+
+// Compares the installed version against the stable latest. A prerelease
+// current (a manual @next install) with a stable latest is a legitimate
+// upgrade path: report it as available instead of an unactionable
+// "cannot compare" that would keep failing on every scheduled check. A
+// garbage current version is not a prerelease and still fails loudly.
+// Mirrors lib/bootstrap-update-helper.js.
+function currentVsLatest(current, latest) {
+  const comparison = compareVersions(current, latest);
+  if (comparison != null) return { comparison, prerelease: false };
+  if (isPrereleaseVersion(current) && stableVersion(latest) != null) {
+    return { comparison: -1, prerelease: true };
+  }
+  return { comparison: null, prerelease: false };
+}
+
 function performUpdate(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, "..");
   const metadata = options.metadata || readInstallMetadata(packageRoot);
@@ -358,11 +385,12 @@ function performUpdate(options = {}) {
     throw new Error("automatic update is available only for a global npm installation");
   }
   const latest = checkLatest(metadata);
-  const comparison = compareVersions(pkg.version, latest);
+  const { comparison, prerelease } = currentVsLatest(pkg.version, latest);
   if (comparison == null) throw new Error(`cannot compare versions ${pkg.version} and ${latest}`);
   if (comparison >= 0) return resultObject("current", latest, `GitCode CLI ${pkg.version} is current.`);
   if (shouldOnlyNotify(options)) {
-    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}).`);
+    const note = prerelease ? ", a prerelease" : "";
+    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}${note}).`);
   }
 
   try {
@@ -373,10 +401,17 @@ function performUpdate(options = {}) {
     try {
       installExact(metadata, pkg.version);
       healthCheck(metadata, pkg.version);
-      throw new Error(`${error.message}; restored ${pkg.version}`);
+      const restored = new Error(`${error.message}; restored ${pkg.version}`);
+      // Explicit marker: a rollback failure whose text happens to contain
+      // "restored" must not be mistaken for a successful restore.
+      restored.restored = true;
+      throw restored;
     } catch (rollbackError) {
-      if (rollbackError.message.includes("restored")) throw rollbackError;
-      throw new Error(`${error.message}; rollback failed: ${rollbackError.message}`);
+      if (rollbackError.restored) throw rollbackError;
+      throw new Error(
+        `${error.message}; rollback failed: ${rollbackError.message}; ` +
+          `recover manually with "npm install -g ${PACKAGE}@${pkg.version}"`
+      );
     }
   }
 }
@@ -487,6 +522,7 @@ module.exports = {
   appendLog,
   checkLatest,
   compareVersions,
+  currentVsLatest,
   disabledForInvocation,
   errorFingerprint,
   exactInstallArgs,

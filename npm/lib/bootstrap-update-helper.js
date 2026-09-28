@@ -160,6 +160,29 @@ function errorFingerprint(error) {
   return crypto.createHash("sha256").update(summarizeError(error)).digest("hex").slice(0, 16);
 }
 
+// npm error codes that retrying cannot fix (404 package deleted/renamed,
+// 401/403 auth). Mirrors lib/update.js.
+const DETERMINISTIC_NPM_ERROR = /code E(40[01345]|42[89])/;
+
+function isPrereleaseVersion(value) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(value || "").trim());
+}
+
+// Compares the installed version against the stable latest. A prerelease
+// current (a manual @next install) with a stable latest is a legitimate
+// upgrade path: report it as available instead of an unactionable
+// "cannot compare" that would keep failing on every scheduled check. A
+// garbage current version is not a prerelease and still fails loudly.
+// Mirrors lib/update.js.
+function currentVsLatest(current, latest) {
+  const comparison = compareVersions(current, latest);
+  if (comparison != null) return { comparison, prerelease: false };
+  if (isPrereleaseVersion(current) && stableVersion(latest) != null) {
+    return { comparison: -1, prerelease: true };
+  }
+  return { comparison: null, prerelease: false };
+}
+
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -251,6 +274,10 @@ function latestVersion(manifest) {
       return version;
     }
     lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    // Deterministic registry errors (package deleted or renamed, auth or
+    // forbidden): retrying cannot fix them, so fail fast instead of burning
+    // the attempt budget on every scheduled check. Mirrors lib/update.js.
+    if (DETERMINISTIC_NPM_ERROR.test(String(result.stderr || ""))) break;
     if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
   }
   throw lastError;
@@ -340,13 +367,14 @@ function run(options) {
   if (descriptor == null) return { status: "busy", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Another update is running." };
   try {
     const latest = latestVersion(manifest);
-    const comparison = compareVersions(manifest.version, latest);
+    const { comparison, prerelease } = currentVsLatest(manifest.version, latest);
     let result;
     if (comparison == null) throw new Error(`cannot compare ${manifest.version} and ${latest}`);
     if (comparison >= 0) {
       result = { status: "current", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${manifest.version} is current.` };
     } else if (options.check || (updateMode() === "notify" && !options.force)) {
-      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available.` };
+      const note = prerelease ? ", a prerelease" : "";
+      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}).` };
     } else if (updateMode() === "off" && !options.force) {
       result = { status: "disabled", distribution: "npm-bootstrap", current: manifest.version, latest, message: "Automatic updates are disabled." };
     } else {

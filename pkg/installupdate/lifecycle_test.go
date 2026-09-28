@@ -3,6 +3,7 @@ package installupdate
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -82,6 +83,22 @@ func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	now := time.Unix(100, 0)
 	if got := DueAt(now); got != now.Add(24*time.Hour).UnixMilli() {
 		t.Fatalf("DueAt() = %d", got)
+	}
+}
+
+func TestCheckFailureDetailPrefersReasonOverRawExit(t *testing.T) {
+	// --json mode prints the error message to stdout.
+	if got := checkFailureDetail(`{"status":"error","message":"registry reset"}`, "", errors.New("exit status 1")); got != "registry reset" {
+		t.Fatalf("json detail = %q", got)
+	}
+	// Plain mode prints "update failed: <reason>" to stderr; the prefix must
+	// be stripped so it is not double-wrapped by "update check failed:".
+	if got := checkFailureDetail("", "update failed: cannot compare 1 and 2\n", errors.New("exit status 1")); got != "cannot compare 1 and 2" {
+		t.Fatalf("stderr detail = %q", got)
+	}
+	// Nothing captured: the raw run error stands.
+	if got := checkFailureDetail("", "", errors.New("exit status 1")); got != "exit status 1" {
+		t.Fatalf("raw detail = %q", got)
 	}
 }
 

@@ -225,9 +225,41 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
-	cmd.Stdout = out
-	cmd.Stderr = errOut
-	return cmd.Run()
+	// Capture the streams so a failed check can surface the helper's reason
+	// in the returned error (matching CheckNow's wrapping) instead of a bare
+	// "exit status 1"; everything captured is still forwarded to the
+	// caller's writers.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if out != nil {
+		cmd.Stdout = io.MultiWriter(out, &stdout)
+	}
+	if errOut != nil {
+		cmd.Stderr = io.MultiWriter(errOut, &stderr)
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("update check failed: %s", truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err)))
+	}
+	return nil
+}
+
+// checkFailureDetail extracts the helper's failure reason: the JSON error
+// message first (--json mode prints it to stdout), then the helper's stderr
+// line with its own "update failed: " prefix stripped (avoiding double
+// wrapping), then the raw run error.
+func checkFailureDetail(stdout, stderr string, runErr error) string {
+	var parsed struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(stdout), &parsed) == nil && parsed.Message != "" {
+		return parsed.Message
+	}
+	line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(stderr), "update failed:"))
+	if line != "" {
+		return line
+	}
+	return runErr.Error()
 }
 
 // CheckResult mirrors the bootstrap helper's JSON result for a foreground
