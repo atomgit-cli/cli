@@ -271,7 +271,7 @@ ARM64：
 
     brew upgrade gc
 
-shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。
+shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。渠道检测先解析软链再匹配 Homebrew 布局（Apple Silicon `/opt/homebrew`、Intel Mac `/usr/local`、Linuxbrew `/home/linuxbrew/.linuxbrew`），bin 目录软链与 Cellar 实路径均可识别。
 
 ### npm (跨平台)
 
