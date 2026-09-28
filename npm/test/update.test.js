@@ -16,9 +16,11 @@ const {
   globalWrapper,
   npmCommand,
   releaseLock,
+  runUpdate,
   shouldSchedule,
   shouldOnlyNotify,
   stableVersion,
+  summarizeError,
   updateMode,
   updaterEnvironment,
   updateStatePath,
@@ -156,6 +158,68 @@ test("global updater falls back when the recorded npm runtime is stale", () => {
   const command = npmCommand({ npm: path.join(os.tmpdir(), "missing-npm-cli.js") });
   assert.ok(command.command);
   assert.notDeepStrictEqual(command.prefix, [path.join(os.tmpdir(), "missing-npm-cli.js")]);
+});
+
+function flakyNpmStub(dir, failures) {
+  const attemptsFile = path.join(dir, "attempts");
+  const stub = path.join(dir, "flaky-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const fs = require('fs');",
+    `const attempts = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
+    `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(attempts + 1));`,
+    `if (attempts < ${failures}) { process.stderr.write("network ECONNRESET from stub\\n"); process.exit(1); }`,
+    'process.stdout.write(\'"1.2.3"\\n\');',
+    "",
+  ].join("\n"));
+  return { stub, attemptsFile };
+}
+
+test("registry checks retry transient failures before giving up", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-retry-"));
+  const { stub, attemptsFile } = flakyNpmStub(dir, 2);
+  assert.strictEqual(checkLatest({ npm: stub }), "1.2.3");
+  assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 3);
+});
+
+test("registry checks fail after exhausting the retry budget", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-retry-exhaust-"));
+  const { stub, attemptsFile } = flakyNpmStub(dir, 3);
+  assert.throws(() => checkLatest({ npm: stub }), /ECONNRESET/);
+  assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 3);
+});
+
+test("runUpdate failure summaries carry the real error for the next launch", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-fail-"));
+  const stateDir = path.join(dir, "state");
+  const { stub } = flakyNpmStub(dir, Infinity);
+  const stateFile = path.join(stateDir, "update-state.json");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    assert.throws(
+      () => runUpdate({
+        stateFile,
+        metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+      }),
+      /ECONNRESET/
+    );
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.match(state.summary.message, /^Automatic update failed: /);
+  assert.match(state.summary.message, /ECONNRESET/);
+  assert.ok(!state.summary.message.includes("run gitcode update for details"), "dead-end notice must be gone");
+  assert.strictEqual(state.summary.shown, true);
+  const log = fs.readFileSync(path.join(stateDir, "update.log"), "utf8");
+  assert.match(log, /status=error detail=.*ECONNRESET/);
+});
+
+test("summarizeError collapses and bounds error text", () => {
+  assert.strictEqual(summarizeError(new Error("boom")), "boom");
+  assert.strictEqual(summarizeError(null), "unknown error");
+  assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
 });
 
 test("global health checks execute the wrapper inside the recorded prefix", () => {

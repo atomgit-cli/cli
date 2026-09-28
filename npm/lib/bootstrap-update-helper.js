@@ -19,6 +19,10 @@ const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 15 * 60 * 1000;
+const CHECK_ATTEMPTS = 3;
+const CHECK_TIMEOUT_MS = 20000;
+const CHECK_RETRY_DELAY_MS = 1000;
+const INSTALL_TIMEOUT_MS = 300000;
 const UPDATE_ENV_ALLOWLIST = new Set([
   "ALL_PROXY", "APPDATA", "COMSPEC", "GC_CONFIG_DIR", "GC_STATE_DIR", "GC_UPDATE_MODE",
   "HOME", "HTTP_PROXY", "HTTPS_PROXY", "LANG", "LC_ALL", "LOCALAPPDATA", "NO_PROXY",
@@ -95,6 +99,18 @@ function appendLog(message) {
   fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
 }
 
+// Collapses an error into one bounded line so failure summaries stay readable
+// on the next launch while still carrying the real cause (registry resets,
+// timeouts, spawn failures) instead of a generic dead-end notice.
+function summarizeError(error) {
+  const text = String((error && error.message) || error || "unknown error").replace(/\s+/g, " ").trim();
+  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function stableVersion(value) {
   const match = String(value || "").trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   return match ? match.slice(1).map(Number) : null;
@@ -159,16 +175,22 @@ function runNpm(manifest, args, timeout) {
 }
 
 function latestVersion(manifest) {
-  const result = runNpm(
-    manifest,
-    ["view", PACKAGE, "dist-tags.latest", "--json"],
-    10000
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "npm registry check failed").trim());
-  const version = JSON.parse(result.stdout);
-  if (!stableVersion(version)) throw new Error(`registry latest is not stable: ${version}`);
-  return version;
+  let lastError;
+  for (let attempt = 1; attempt <= CHECK_ATTEMPTS; attempt += 1) {
+    const result = runNpm(
+      manifest,
+      ["view", PACKAGE, "dist-tags.latest", "--json"],
+      CHECK_TIMEOUT_MS
+    );
+    if (!result.error && result.status === 0) {
+      const version = JSON.parse(result.stdout);
+      if (!stableVersion(version)) throw new Error(`registry latest is not stable: ${version}`);
+      return version;
+    }
+    lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
+  }
+  throw lastError;
 }
 
 function waitForParent(pid) {
@@ -211,7 +233,7 @@ function installLatest(manifest, latest) {
     "--target-dir",
     manifest.targetDir,
   ];
-  const result = runNpm(manifest, args, 120000);
+  const result = runNpm(manifest, args, INSTALL_TIMEOUT_MS);
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error((result.stderr || `npm exec exited ${result.status}`).trim());
   healthCheck(manifest, latest);
@@ -295,9 +317,9 @@ function main(args = process.argv.slice(2)) {
       const file = statePath();
       const state = readJSON(file);
       state.nextCheck = Date.now() + TTL_MS;
-      state.summary = { message: "Automatic update failed; run gitcode update for details.", shown: false };
+      state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: false };
       writeJSON(file, state);
-      appendLog("status=error; run an explicit update for details");
+      appendLog(`status=error detail="${summarizeError(error)}"`);
     }
     if (!options || !options.background) {
       if (options && options.json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
@@ -310,5 +332,6 @@ function main(args = process.argv.slice(2)) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  compareVersions, main, npmCommand, parseArgs, stableVersion, updateMode, updaterEnvironment, withNpmIsolation,
+  CHECK_ATTEMPTS, compareVersions, latestVersion, main, npmCommand, parseArgs, stableVersion, summarizeError,
+  updateMode, updaterEnvironment, withNpmIsolation,
 };

@@ -3383,7 +3383,9 @@ gc update --json
 
 - npm global wrapper 只从官方 `https://registry.npmjs.org` 更新**所安装坐标**的精确包 `<所装坐标>@<stable latest>`（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json，不跨坐标安装）；不会更新其他全局 npm 包，并使用 `--ignore-scripts` 禁止更新包生命周期脚本。
 - npm bootstrap 使用安装 manifest 和独立 helper，在当前进程退出后原子替换 `gc` / `gitcode`，下一次启动生效。
+- 显式 `gc update`（npm bootstrap）先在前台完成版本检查：已是最新 stable 时直接返回 `current`，不调度任何替换；存在新版本才调度原子替换；检查失败立即透出底层错误（如 registry 连接重置）并以非零退出码结束。
 - stable 版本不会自动进入 prerelease，也不会降级。
+- 版本检查与安装均有有界重试（应对 registry 网络抖动）；后台失败摘要携带真实错误原因（超长截断），不再输出无效指引。
 - 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码，摘要在下次启动写入 stderr 一次。
 - updater 子进程使用最小环境白名单，不继承 GitCode/npm/GitHub/云平台凭证或用户 npm registry 配置；仅保留 PATH、系统目录、状态/配置目录、代理和 CA 等运行所需变量。
 - `--check` 只查询 stable `latest`，不安装。

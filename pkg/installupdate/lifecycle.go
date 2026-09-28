@@ -2,6 +2,7 @@
 package installupdate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -191,6 +192,53 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	cmd.Stdout = out
 	cmd.Stderr = errOut
 	return cmd.Run()
+}
+
+// CheckResult mirrors the bootstrap helper's JSON result for a foreground
+// update check.
+type CheckResult struct {
+	Status       string `json:"status"`
+	Distribution string `json:"distribution"`
+	Current      string `json:"current"`
+	Latest       string `json:"latest"`
+	Message      string `json:"message"`
+}
+
+// CheckNow runs a foreground update check and parses the helper's result.
+// A failed check returns the helper's error message so callers can surface
+// the underlying cause instead of a generic failure notice.
+func CheckNow(manifest *Manifest) (*CheckResult, error) {
+	node := resolveNode(manifest.Node)
+	args := []string{manifest.Helper, "--check", "--json", "--manifest", manifest.ManifestPath()}
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(node, args...)
+	cmd.Env = updaterEnvironment()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	var result CheckResult
+	parseErr := json.Unmarshal(stdout.Bytes(), &result)
+	if parseErr == nil && result.Status != "error" {
+		return &result, nil
+	}
+	detail := ""
+	if parseErr == nil {
+		detail = result.Message
+	}
+	if detail == "" {
+		detail = strings.TrimSpace(stderr.String())
+	}
+	if detail == "" {
+		switch {
+		case runErr != nil:
+			detail = runErr.Error()
+		case parseErr != nil:
+			detail = parseErr.Error()
+		default:
+			detail = "unknown update check failure"
+		}
+	}
+	return nil, fmt.Errorf("update check failed: %s", detail)
 }
 
 func resolveNode(recorded string) string {

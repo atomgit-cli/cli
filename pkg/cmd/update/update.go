@@ -20,6 +20,13 @@ type result struct {
 	Message      string `json:"message"`
 }
 
+// checkNow and startDetached are seams for tests; production uses the
+// installupdate implementations.
+var (
+	checkNow      = installupdate.CheckNow
+	startDetached = installupdate.StartDetached
+)
+
 // NewCmdUpdate creates the update command.
 func NewCmdUpdate(_ *cmdutil.Factory) *cobra.Command {
 	var checkOnly bool
@@ -30,8 +37,10 @@ func NewCmdUpdate(_ *cmdutil.Factory) *cobra.Command {
 		Long: `Update GitCode CLI through the channel that owns the current installation.
 
 Global npm wrappers update the installed npm coordinate (atomgit-cli,
-@atomgit-cli/cli, or @gitcode-cli/cli) directly. npm-bootstrap installs
-schedule an atomic replacement after the current process exits. Other package
+@atomgit-cli/cli, or @gitcode-cli/cli) directly. npm-bootstrap installs run
+a foreground update check first: when a newer stable version exists, the
+atomic replacement is scheduled after the current process exits; otherwise
+the current version is reported and nothing is scheduled. Other package
 managers remain user-controlled and are never invoked or removed implicitly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manifest, err := installupdate.LoadBootstrapManifest()
@@ -39,15 +48,7 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 				if checkOnly {
 					return installupdate.RunCheck(manifest, jsonOutput, cmd.OutOrStdout(), cmd.ErrOrStderr())
 				}
-				if err := installupdate.StartDetached(manifest, true); err != nil {
-					return err
-				}
-				return writeResult(cmd, jsonOutput, result{
-					Status:       "scheduled",
-					Distribution: "npm-bootstrap",
-					Current:      manifest.Version,
-					Message:      "Update scheduled; the new stable version will be used on the next launch.",
-				})
+				return runBootstrapUpdate(cmd, manifest, jsonOutput)
 			}
 
 			distribution := detectDistribution()
@@ -58,6 +59,38 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "Check for an update without installing it")
 	cmdutil.AddJSONFlag(cmd, &jsonOutput)
 	return cmd
+}
+
+// runBootstrapUpdate checks the registry in the foreground, then schedules the
+// detached replacement only when a newer stable version exists. Check failures
+// surface the helper's error message with a non-zero exit code.
+func runBootstrapUpdate(cmd *cobra.Command, manifest *installupdate.Manifest, jsonOutput bool) error {
+	check, err := checkNow(manifest)
+	if err != nil {
+		if jsonOutput {
+			_ = writeResult(cmd, true, result{Status: "error", Distribution: "npm-bootstrap", Current: manifest.Version, Message: err.Error()})
+		}
+		return err
+	}
+	if check.Status == "available" {
+		if err := startDetached(manifest, true); err != nil {
+			return err
+		}
+		return writeResult(cmd, jsonOutput, result{
+			Status:       "scheduled",
+			Distribution: "npm-bootstrap",
+			Current:      manifest.Version,
+			Latest:       check.Latest,
+			Message:      "Update scheduled; the new stable version will be used on the next launch.",
+		})
+	}
+	return writeResult(cmd, jsonOutput, result{
+		Status:       check.Status,
+		Distribution: "npm-bootstrap",
+		Current:      manifest.Version,
+		Latest:       check.Latest,
+		Message:      check.Message,
+	})
 }
 
 // detectDistribution resolves the installation channel from the process
