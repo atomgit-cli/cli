@@ -21,7 +21,7 @@ Flags:
 
 This wrapper command manages global npm installs (atomgit-cli,
 @atomgit-cli/cli, @gitcode-cli/cli). npm-bootstrap installations are
-handled by the ${COMMAND} binary itself. Other channels (pip, Homebrew, deb, rpm)
+handled by the ${COMMAND} binary itself. Other channels (pip, uv, Homebrew, deb, rpm)
 stay user-controlled and are never invoked implicitly.
 `;
 

@@ -38,7 +38,7 @@ npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@lat
 (For scoped coordinates, additionally pin the scope registry, e.g. `--@atomgit-cli:registry=https://registry.npmjs.org`.)
 
 Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions.
-If an older installation left a same-directory `gitcode -> gc` alias, or bin symlinks resolving into one of our own npm package trees — a classic global install or a project-level `node_modules` (`proj/node_modules/@gitcode-cli/cli/...`) of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) — bootstrap migrates those verified links transactionally; links to any other target are never overwritten.
+If an older installation left a same-directory `gitcode -> gc` alias, or bin symlinks resolving into one of our own npm package trees — a classic global install or a project-level `node_modules` (`proj/node_modules/@gitcode-cli/cli/...`) of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) — bootstrap migrates those verified links transactionally; pnpm (`/pnpm/global/` or `/.pnpm/` store) and yarn (`/yarn/global/`) symlinks are refused with their own removal guidance even when they resolve into our coordinates; links to any other target are never overwritten.
 On Windows it installs both `gc.exe` and `gitcode.exe`, then prepends the install directory to the persistent user PATH. Pass `--no-modify-path` to opt out. An npx child process cannot refresh the already-running PowerShell process, so the installer prints explicit Chinese instructions for refreshing `$env:Path` immediately or closing all PowerShell/Windows Terminal windows before reopening. It never changes the machine PATH or removes another package manager's entry. Use `gitcode` in PowerShell because `gc` is the built-in `Get-Content` alias.
 
 An explicit `--target-dir` replaces regular `gc`/`gitcode` files inside that directory. Do not point it at Python Scripts, an npm prefix, or another package manager-owned directory.
@@ -76,7 +76,7 @@ GC_NO_UPDATE_CHECK=1 gitcode version
 
 ### `refusing non-regular install target`
 
-The bootstrap installer refuses to replace a symlink at the install target. Symlinks resolving into one of our own npm package trees — global or project-level, outermost `node_modules` — of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) are migrated automatically: rerun the install command. For any other symlink the error names the link target and the remediation:
+The bootstrap installer refuses to replace a symlink at the install target. Symlinks resolving into one of our own npm package trees — global or project-level, outermost `node_modules` — of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) are migrated automatically (pnpm `/pnpm/global/` / `/.pnpm/` store and yarn `/yarn/global/` symlinks are refused instead, with `pnpm remove -g` / `yarn global remove` guidance): rerun the install command. For any other symlink the error names the link target and the remediation:
 
 - A symlink into `node_modules/gitcode-cli/` belongs to the third-party npm package `gitcode-cli`, which is not AtomGit CLI: run `npm uninstall -g gitcode-cli` (check `npm prefix -g`), or remove the symlink.
 - Otherwise remove the stale symlink manually, or install to another directory with `--target-dir <dir>`.

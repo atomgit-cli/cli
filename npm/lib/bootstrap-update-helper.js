@@ -63,6 +63,15 @@ function writeJSON(file, value) {
       fs.renameSync(temp, file);
     } catch (error) {
       if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      // Retry once without unlinking: a concurrent writer may have just
+      // replaced the target, and the plain retry (or a transient lock)
+      // avoids destroying their write. Mirrors lib/update.js.
+      try {
+        fs.renameSync(temp, file);
+        return;
+      } catch {
+        // Fall through to the replace below (Windows rename-over-existing).
+      }
       fs.unlinkSync(file);
       fs.renameSync(temp, file);
     }
@@ -384,6 +393,31 @@ function acquireLock(file) {
   }
 }
 
+// Releases a state lock after verifying the holder identity: if the lock
+// was reclaimed as stale while we were stalled, the path now holds someone
+// else's fresh lock and removing it would let a third process double-hold.
+// Mirrors lib/update.js.
+function releaseLock(file, descriptor) {
+  try {
+    const held = fs.fstatSync(descriptor);
+    const current = fs.statSync(file);
+    if (held.ino !== current.ino) return;
+  } catch {
+    return;
+  } finally {
+    try {
+      fs.closeSync(descriptor);
+    } catch {
+      // Best effort.
+    }
+  }
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // Stale bootstrap locks are visible and can be removed by the user.
+  }
+}
+
 function run(options) {
   const manifest = readJSON(options.manifest);
   if (manifest.distribution !== "npm-bootstrap" || !manifest.targetDir || !manifest.version) {
@@ -446,12 +480,7 @@ function run(options) {
     appendLog(`package=${PACKAGE} channel=npm-bootstrap status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;
   } finally {
-    fs.closeSync(descriptor);
-    try {
-      fs.unlinkSync(lock);
-    } catch {
-      // Stale bootstrap locks are visible and can be removed by the user.
-    }
+    releaseLock(lock, descriptor);
   }
 }
 
@@ -467,7 +496,11 @@ function main(args = process.argv.slice(2)) {
       recordBackgroundFailure(error);
     }
     if (!options || !options.background) {
-      if (options && options.json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
+      // parseArgs failures leave options unset: detect --json from the raw
+      // argv so JSON consumers still get a JSON error object (mirrors
+      // lib/update-helper.js).
+      const json = options ? options.json : args.includes("--json");
+      if (json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
       else process.stderr.write(`update failed: ${error.message}\n`);
     }
     return 1;
@@ -512,12 +545,7 @@ function recordBackgroundFailure(error) {
     }
     writeJSON(file, state);
   } finally {
-    fs.closeSync(descriptor);
-    try {
-      fs.unlinkSync(lock);
-    } catch {
-      // Best effort; stale locks are reclaimed after LOCK_STALE_MS.
-    }
+    releaseLock(lock, descriptor);
   }
   appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}"`);
 }

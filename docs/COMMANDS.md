@@ -3351,10 +3351,11 @@ gc doctor install --json
 
 - 完全离线，无需认证；不读取或打印 Token。
 - 输出当前 `version` / `commit` / `built`、`distribution`、wrapper `entrypoint`、实际 `binary`，以及 `gc` / `gitcode` 在 PATH 中的全部 `candidates` 与 `selected`。
-- `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`uv`、`deb`、`rpm`、`homebrew` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断；uv 工具经 Python wrapper 按 venv 布局（`/uv/tools/`）识别为 `uv` 并在更新指引中给 `uv tool upgrade gitcode-cli`——`--from` 别名安装需以实际工具名为准；`system-package` 仅剩 env 显式声明一种来源——dpkg/rpm 均未认领属主的 `/usr/bin` 手工拷贝按 `archive-or-source` 给指引）。
+- `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`uv`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断；uv 工具经 Python wrapper 按 venv 布局（`/uv/tools/`）识别为 `uv` 并在更新指引中给 `uv tool upgrade gitcode-cli`——`--from` 别名安装需以实际工具名为准；`system-package` 仅由 env 显式声明产生，检测路径不再产出——dpkg/rpm 均未认领属主的 `/usr/bin` 手工拷贝按 `archive-or-source` 给指引）。
 - Windows 会报告 PowerShell 内置 `gc`/`Get-Content` alias 风险，并建议使用 `gitcode`，不会建议全局删除系统 alias。
 - 只给出 `conflicts` 和 `recommendations`；不会修改 PATH、shell profile、认证配置，也不会调用其他包管理器卸载软件。
-- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。
+- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。安装目录不在 PATH 的 bootstrap 安装（全路径调用）会单独报 `not on PATH` 冲突。
+- bootstrap 渠道（Go 二进制）在无法拉起更新 helper（node 运行时缺失等）时，将重试限流为每小时一次（正常退避仍由 JS helper 的指数策略管理）。
 - `--json` 只向 stdout 写一个稳定 JSON 对象，适合安装器、CI 与 AI 代理消费。
 
 npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`（POSIX 上等价入口为 `gc install`；`--target-dir` 亦接受 `--target-dir=<directory>` 等号形式，`-` 开头的目录名可用 `./-name` 或 `--target-dir=-name` 表达）；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。默认目录选择会避开 Homebrew 域（检测到 `/usr/local/Cellar` 布局时跳过 `/usr/local/bin` 候选）。
@@ -3368,7 +3369,7 @@ npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directo
 - 目标目录含分号、空字符或不是绝对 Windows 路径时，不得生成任何 PATH 修改命令，只能提示更换目录或直接运行已安装程序。
 
 - Linux/macOS 安装时，如果历史版本留下的 `gitcode` 符号链接解析后精确指向同目录常规 `gc` 文件，bootstrap 会在同一安装事务中自动迁移该别名，无需用户先删除。
-- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖，**但解析进自家 npm 坐标包树（classic 全局安装或项目级最外层 `node_modules`）的软链会被采纳迁移**；pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）拒绝并给出 `pnpm remove -g <坐标>` 指引；Windows 不迁移非自家软链。
+- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖，**但解析进自家 npm 坐标包树（classic 全局安装或项目级最外层 `node_modules`）的软链会被采纳迁移**；pnpm（`/pnpm/global/` 或 `/.pnpm/` 存储）与 yarn（`/yarn/global/`）布局的软链即便解析进自家坐标也一律拒绝，分别给出 `pnpm remove -g <坐标>` / `yarn global remove <坐标>` 指引；Windows 不迁移非自家软链。
 - 别名迁移保留事务唯一备份；后续二进制校验、健康检查或 metadata 写入失败时，旧 `gc` 与原始链接会按逆序原样回滚。
 
 <a id="gitcode-update"></a>
@@ -3410,7 +3411,7 @@ gc config set update.mode off --json
 - `notify`：默认值；后台检查 stable 新版本，在下一次启动提示 `gitcode update`，不自动安装。
 - `auto`：用户明确启用后，后台检查并应用 stable 更新。
 - `off`：不联网检查，不自动更新。
-- 配置保存在 `~/.config/gc/config.json` 的 `gitcode.com` host 下；`GC_UPDATE_MODE` 优先于文件配置。
+- 配置保存在 `~/.config/gc/config.json` 的 `gitcode.com` host 下；`GC_UPDATE_MODE` 为合法值（`auto`/`notify`/`off`）时优先于文件配置，非法值回落到文件配置。
 - 首次 npm 命令会在 stderr 说明默认策略和退出方式。
 - `CI=true`、`--no-interactive`、`--no-update-check`、`GC_NO_UPDATE_CHECK=1` 均禁用隐式后台检查、联网与自动应用；显式 `update` / `update --check` 仍由用户主动控制。
 

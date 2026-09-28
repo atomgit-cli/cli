@@ -84,3 +84,46 @@ class WrapperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DetectDistributionTests(unittest.TestCase):
+    def test_uv_tool_venv_reports_uv(self):
+        for prefix in (
+            "/home/u/.local/share/uv/tools/gitcode-cli",
+            "C:\\Users\\u\\AppData\\Roaming\\uv\\tools\\gc",
+        ):
+            with mock.patch("sys.prefix", prefix):
+                with mock.patch("pathlib.Path.resolve", return_value=Path(prefix)):
+                    self.assertEqual(wrapper.detect_distribution(), "uv", prefix)
+
+    def test_ordinary_venv_reports_pypi(self):
+        for prefix in ("/usr", "/home/u/venv", "C:\\Users\\u\\venv"):
+            with mock.patch("sys.prefix", prefix):
+                with mock.patch("pathlib.Path.resolve", return_value=Path(prefix)):
+                    self.assertEqual(wrapper.detect_distribution(), "pypi", prefix)
+
+    def test_main_declares_uv_channel_for_uv_tools(self):
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured.update(kwargs.get("env") or {})
+            return mock.Mock(returncode=0)
+
+        binary = Path("/tmp/fake-gc")
+        with mock.patch("gc_cli.wrapper.get_binary_path", return_value=binary):
+            with mock.patch("gc_cli.wrapper.ensure_executable"):
+                with mock.patch("subprocess.run", side_effect=fake_run):
+                    with mock.patch("sys.argv", ["gitcode", "version"]):
+                        with mock.patch(
+                            "sys.prefix", "/home/u/.local/share/uv/tools/gitcode-cli"
+                        ):
+                            with mock.patch(
+                                "pathlib.Path.resolve", return_value=Path("/home/u/.local/share/uv/tools/gitcode-cli")
+                            ):
+                                wrapper.main()
+
+        self.assertEqual(captured.get(wrapper.DISTRIBUTION_ENV), "uv")
+
+
+if __name__ == "__main__":
+    unittest.main()

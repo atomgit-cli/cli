@@ -58,6 +58,15 @@ function writeJSON(file, value) {
       fs.renameSync(temp, file);
     } catch (error) {
       if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      // Retry once without unlinking: a concurrent writer may have just
+      // replaced the target, and the plain retry (or a transient lock)
+      // avoids destroying their write. Mirrors lib/bootstrap-update-helper.js.
+      try {
+        fs.renameSync(temp, file);
+        return;
+      } catch {
+        // Fall through to the replace below (Windows rename-over-existing).
+      }
       fs.unlinkSync(file);
       fs.renameSync(temp, file);
     }
@@ -376,13 +385,26 @@ function acquireLock(file, now = Date.now()) {
 function releaseLock(file, descriptor) {
   if (descriptor == null) return;
   try {
-    fs.closeSync(descriptor);
+    // Identity check: if this lock was reclaimed as stale while we were
+    // stalled, the path now holds someone else's fresh lock — removing it
+    // would let a third process double-hold. Only unlink what we opened.
+    const held = fs.fstatSync(descriptor);
+    const current = fs.statSync(file);
+    if (held.ino !== current.ino) return;
+  } catch {
+    // The lock file is already gone; nothing to release.
+    return;
   } finally {
     try {
-      fs.unlinkSync(file);
+      fs.closeSync(descriptor);
     } catch {
-      // Best effort; stale locks are recovered on the next attempt.
+      // Best effort.
     }
+  }
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // Best effort; stale locks are recovered on the next attempt.
   }
 }
 

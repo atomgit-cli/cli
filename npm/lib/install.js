@@ -254,7 +254,11 @@ function pnpmChannelSymlinkError(dst) {
     // Broken link: the raw text still carries the pnpm marker.
   }
   const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
-  if (!surface.includes("/pnpm/")) return null;
+  // Two markers: the default global layout (.../pnpm/global/...) and the
+  // store layout (/.pnpm/<name>@<version>/...) — the store marker survives
+  // custom PNPM_HOME naming. Keep in sync with isPnpmEnvironment's layout
+  // marker in install-metadata.js.
+  if (!surface.includes("/pnpm/global/") && !surface.includes("/.pnpm/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -849,6 +853,7 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
     if (shadow.scope === "user") {
       lines.push(`  注意：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
       lines.push("  该提供者位于用户 PATH，重新打开 PowerShell/Windows Terminal 窗口后本安装将优先生效。");
+      lines.push("  若同一提供者同时位于系统 PATH，重开后仍由其优先生效；请运行 gitcode doctor install 确认全部来源。");
     } else if (shadow.scope === "system") {
       lines.push(`  警告：PATH 中 "${shadow.name}" 解析到 ${shadow.provider}，重开窗口也无法解决（该提供者位于系统 PATH 或 shell 配置，合并顺序在用户 PATH 之前）。`);
       lines.push("  请卸载旧提供者，或由管理员将本安装目录加入系统 PATH 并置于其前；运行 gitcode doctor install 查看全部来源。");
@@ -1019,6 +1024,16 @@ function acquireInstallLock(dir, now = Date.now()) {
 }
 
 function releaseInstallLock(lock) {
+  try {
+    // Identity check via the pid token written at claim time: if this lock
+    // was reclaimed as stale while we were stalled, the path now holds
+    // another install's fresh lock and must not be removed.
+    const holder = fs.readFileSync(lock, "utf8").trim().split(" ")[0];
+    if (holder !== String(process.pid)) return;
+  } catch {
+    // The lock file is already gone; nothing to release.
+    return;
+  }
   try {
     fs.unlinkSync(lock);
   } catch {

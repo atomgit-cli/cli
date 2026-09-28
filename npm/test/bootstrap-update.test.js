@@ -242,6 +242,73 @@ test("a permanent failure stops scheduled helper runs even when due", { timeout:
   assert.strictEqual(fs.existsSync(path.join(root, "attempts")), false, "the flaky npm stub must not be invoked");
 });
 
+test("an unwritable update.log never turns a successful bootstrap check into a failure", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-log-fail-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  // A directory at the log path makes appendFileSync fail (EISDIR); the
+  // check must still succeed (mirrors the npm-channel test).
+  fs.mkdirSync(path.join(stateDir, "update.log"));
+  const { stub } = flakyNpmStub(root, 0, "0.0.1");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--check", "--json", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.strictEqual(payload.status, "current");
+});
+
+test("bootstrap --json reports argument errors as JSON", () => {
+  // parseArgs throws before options exists; the raw-argv --json detection
+  // must keep the JSON contract (mirrors the npm channel).
+  const result = spawnSync(process.execPath, [
+    path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"),
+    "--json", "--bogus-flag", "--manifest", "/nonexistent",
+  ], { encoding: "utf8", timeout: 20000, env: { PATH: process.env.PATH, HOME: process.env.HOME } });
+  assert.strictEqual(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.strictEqual(payload.status, "error");
+  assert.match(payload.message, /unknown updater argument/);
+});
+
+test("a background bootstrap update re-checks the TTL under the lock", { timeout: 30000 }, () => {  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-cached-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const { stub, attemptsFile } = flakyNpmStub(root, 0, "9.9.9");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  // Not due: a background helper spawned milliseconds after a foreground
+  // check must not repeat it (mirrors the npm channel's under-lock recheck).
+  fs.writeFileSync(path.join(stateDir, "update-state.json"), JSON.stringify({
+    nextCheck: Date.now() + 60 * 60 * 1000,
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
+  assert.strictEqual(state.status, undefined, "a cached run must not touch the state");
+  assert.strictEqual(fs.existsSync(attemptsFile), false, "the npm stub must not be invoked");
+});
+
 test("bootstrap stale-lock reclamation stays single-owner under a reclaim race", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-lock-race-"));
   const stateDir = path.join(root, "state");

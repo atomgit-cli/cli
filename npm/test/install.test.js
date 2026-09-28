@@ -1041,6 +1041,14 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   } finally {
     fs.renameSync = originalRenameSync;
   }
+
+  // A release never removes a lock reclaimed by another install: rewrite
+  // the pid token, release, and the other holder's lock must survive.
+  const ours = acquireInstallLock(root);
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "999999 2000-01-01T00:00:00.000Z\n");
+  releaseInstallLock(ours);
+  assert.strictEqual(fs.existsSync(path.join(root, ".gc-install-lock")), true);
+  fs.unlinkSync(path.join(root, ".gc-install-lock"));
 });
 
 test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {

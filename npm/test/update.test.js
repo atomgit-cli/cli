@@ -683,6 +683,48 @@ test("writeJSON cleans up its temp file when the rename fails", () => {
   assert.deepStrictEqual(fs.readdirSync(root), []);
 });
 
+test("writeJSON retries a transient rename failure without destroying the target", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-writejson-retry-"));
+  const target = path.join(root, "update-state.json");
+  fs.writeFileSync(target, '{"mine":true}');
+  const originalRenameSync = fs.renameSync;
+  let calls = 0;
+  try {
+    fs.renameSync = (from, to) => {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error("EPERM: operation not permitted");
+        error.code = "EPERM";
+        throw error;
+      }
+      return originalRenameSync(from, to);
+    };
+    writeJSON(target, { nextCheck: 1 });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  assert.strictEqual(calls, 2, "the second attempt must succeed without unlinking");
+  assert.strictEqual(JSON.parse(fs.readFileSync(target, "utf8")).nextCheck, 1);
+});
+
+test("releaseLock never removes a reclaimed lock it no longer holds", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-releaselock-"));
+  const lock = path.join(root, "update-state.json.lock");
+  const first = acquireLock(lock);
+  assert.notStrictEqual(first, null);
+  // Simulate a stale reclaim while we hold the fd: retire our lock, let
+  // another process claim a fresh one at the same path.
+  fs.renameSync(lock, `${lock}.retired-x`);
+  fs.writeFileSync(lock, "", { flag: "wx" });
+  releaseLock(lock, first);
+  // The fresh holder's lock survives our release.
+  assert.strictEqual(fs.existsSync(lock), true);
+  // A normal release still removes our own lock.
+  const second = acquireLock(`${lock}.new`);
+  releaseLock(`${lock}.new`, second);
+  assert.strictEqual(fs.existsSync(`${lock}.new`), false);
+});
+
 test("update state paths are scoped per package and channel unless overridden", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-state-path-"));
   const env = { XDG_STATE_HOME: root, LOCALAPPDATA: path.join(root, "la") };

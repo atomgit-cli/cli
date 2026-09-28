@@ -94,6 +94,13 @@ jobs:
           npm test --prefix npm
           npm run test:upgrade --prefix npm
 
+      - name: Run Python wrapper tests
+        # The gc_cli wrapper (uv/pypi channel detection, binary resolution)
+        # is otherwise only covered by the wheel smoke test.
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: python3 -m unittest tests.test_wrapper -v
+
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v6
