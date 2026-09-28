@@ -87,11 +87,23 @@ function writeInstallMetadata(packageRoot, values) {
   }
   fs.writeFileSync(temp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   try {
-    fs.renameSync(temp, target);
+    try {
+      fs.renameSync(temp, target);
+    } catch (error) {
+      if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      fs.unlinkSync(target);
+      fs.renameSync(temp, target);
+    }
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
-    fs.unlinkSync(target);
-    fs.renameSync(temp, target);
+    // Never strand the temp file: a .gitcode-install.json.tmp-* residue in
+    // the bin directory used to match no leftover prefix on either side
+    // (JS sweep and doctor leftovers) and survived forever.
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
   }
   return target;
 }

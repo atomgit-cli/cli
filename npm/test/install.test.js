@@ -896,9 +896,12 @@ test("sweepTransactionLeftovers removes stale regular leftovers only", (t) => {
     "gitcode.tmp-111-abc": { content: "stale", mtime: stale, removed: true },
     "gitcode-update-helper.js.backup-old": { content: "stale", mtime: stale, removed: true },
     ".gc-install-probe-999": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-old-1-abc": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-fresh": { content: "fresh", mtime: new Date(now), removed: false },
     "gc.tmp-222-fresh": { content: "fresh", mtime: new Date(now), removed: false },
     "gc": { content: "binary", mtime: stale, removed: false },
     "gitcode": { content: "binary", mtime: stale, removed: false },
+    ".gitcode-install.json": { content: "{}", mtime: stale, removed: false },
     "unrelated.backup-not-ours": { content: "x", mtime: stale, removed: false },
   };
   for (const [name, spec] of Object.entries(files)) {
@@ -927,11 +930,12 @@ test("isTransactionLeftoverName matches only installer transaction artifacts", (
     "gitcode.backup-1-abc", "gitcode.tmp-1-abc",
     "gitcode.exe.backup-1-abc", "gitcode.exe.tmp-1-abc",
     "gitcode-update-helper.js.backup-1-abc", "gitcode-update-helper.js.tmp-1-abc",
+    ".gitcode-install.json.tmp-1-abc", ".gitcode-install.json.backup-1-abc",
     ".gc-install-probe-123", ".gc-write-probe",
   ]) {
     assert.strictEqual(isTransactionLeftoverName(name), true, name);
   }
-  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", "other.backup-x", "gcbackup-1"]) {
+  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", ".gitcode-install.json", "other.backup-x", "gcbackup-1"]) {
     assert.strictEqual(isTransactionLeftoverName(name), false, name);
   }
 });

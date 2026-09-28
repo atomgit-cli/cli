@@ -147,10 +147,13 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 
 // transactionLeftoverPrefixes matches the temp/backup file names an
 // interrupted bootstrap install can leave behind (see npm/lib/install.js).
+// Keep in sync with LEFTOVER_PREFIXES there: a prefix known to only one
+// side creates a report-without-cleanup loop.
 var transactionLeftoverPrefixes = []string{
 	"gc.backup-", "gc.tmp-", "gc.exe.backup-", "gc.exe.tmp-",
 	"gitcode.backup-", "gitcode.tmp-", "gitcode.exe.backup-", "gitcode.exe.tmp-",
 	"gitcode-update-helper.js.backup-", "gitcode-update-helper.js.tmp-",
+	".gitcode-install.json.backup-", ".gitcode-install.json.tmp-",
 	".gc-install-probe-", ".gc-write-probe",
 }
 

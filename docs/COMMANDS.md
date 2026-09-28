@@ -3354,7 +3354,7 @@ gc doctor install --json
 - `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断）。
 - Windows 会报告 PowerShell 内置 `gc`/`Get-Content` alias 风险，并建议使用 `gitcode`，不会建议全局删除系统 alias。
 - 只给出 `conflicts` 和 `recommendations`；不会修改 PATH、shell profile、认证配置，也不会调用其他包管理器卸载软件。
-- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。
+- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。
 - `--json` 只向 stdout 写一个稳定 JSON 对象，适合安装器、CI 与 AI 代理消费。
 
 npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。

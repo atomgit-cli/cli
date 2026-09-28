@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict } = require("../lib/install-metadata");
+const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict, writeInstallMetadata } = require("../lib/install-metadata");
 const { isGlobalInstall, runPostinstall } = require("../lib/postinstall");
 
 test("normalizes Windows paths case-insensitively and trims separators", () => {
@@ -220,4 +220,21 @@ test("a project-level pnpm dependency is pnpm but not global", () => {
   });
   assert.strictEqual(metadata.distribution, "pnpm");
   assert.strictEqual(metadata.global, false);
+});
+
+test("writeInstallMetadata cleans up its temp file when the rename fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-metadata-fail-"));
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("EACCES: permission denied");
+      error.code = "EACCES";
+      throw error;
+    };
+    assert.throws(() => writeInstallMetadata(root, { distribution: "npm" }), /EACCES/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // Neither the metadata file nor a stranded .gitcode-install.json.tmp-*.
+  assert.deepStrictEqual(fs.readdirSync(root), []);
 });

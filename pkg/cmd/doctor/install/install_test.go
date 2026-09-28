@@ -198,6 +198,7 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 		".gc-install-probe-789",
 		"gc.exe.backup-123-abc",
 		"gitcode.exe.tmp-456-def",
+		".gitcode-install.json.tmp-789-xyz",
 	}
 	for _, leftover := range leftovers {
 		if err := os.WriteFile(filepath.Join(dir, leftover), []byte("x"), 0o644); err != nil {

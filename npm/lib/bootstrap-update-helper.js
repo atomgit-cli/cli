@@ -59,11 +59,22 @@ function writeJSON(file, value) {
   const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   try {
-    fs.renameSync(temp, file);
+    try {
+      fs.renameSync(temp, file);
+    } catch (error) {
+      if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      fs.unlinkSync(file);
+      fs.renameSync(temp, file);
+    }
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
-    fs.unlinkSync(file);
-    fs.renameSync(temp, file);
+    // Never strand the temp file: an update-state.json.tmp-* residue
+    // matches no sweep prefix and would outlive the failed write.
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
   }
 }
 

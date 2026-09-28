@@ -340,6 +340,24 @@ test("cross-process lock permits only one owner", () => {
   releaseLock(lock, second);
 });
 
+test("writeJSON cleans up its temp file when the rename fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-writejson-fail-"));
+  const target = path.join(root, "update-state.json");
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("EBUSY: resource busy or locked");
+      error.code = "EBUSY";
+      throw error;
+    };
+    assert.throws(() => writeJSON(target, { nextCheck: 1 }), /EBUSY/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // Neither the target nor a stranded update-state.json.tmp-* remains.
+  assert.deepStrictEqual(fs.readdirSync(root), []);
+});
+
 test("update helper parser accepts check/json/background only", () => {
   assert.deepStrictEqual(parseArgs(["--check", "--json"]), {
     background: false,
