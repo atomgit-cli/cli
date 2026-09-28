@@ -118,6 +118,11 @@ func TestDisabledHonorsConfigFileWhenEnvValueIsInvalid(t *testing.T) {
 		[]byte(`{"version":1,"hosts":{"gitcode.com":{"update.mode":"off"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Neutralize the CI detectors so disabled() reflects the mode logic
+	// only (on CI runners these are set and would mask every assertion).
+	for _, name := range []string{"CI", "GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION", "GC_NO_UPDATE_CHECK"} {
+		t.Setenv(name, "")
+	}
 	cfg := config.New()
 	// An invalid GC_UPDATE_MODE must fall back to the configured "off"
 	// instead of silently re-enabling the checks — the env text would mask
