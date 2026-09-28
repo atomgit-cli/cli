@@ -238,3 +238,14 @@ test("writeInstallMetadata cleans up its temp file when the rename fails", () =>
   // Neither the metadata file nor a stranded .gitcode-install.json.tmp-*.
   assert.deepStrictEqual(fs.readdirSync(root), []);
 });
+
+test("writeInstallMetadata stays readable by other users in shared directories", () => {
+  if (process.platform === "win32") {
+    // Windows ignores the POSIX permission bits; the mode is advisory only.
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-metadata-mode-"));
+  writeInstallMetadata(root, { distribution: "npm" });
+  const mode = fs.statSync(path.join(root, ".gitcode-install.json")).mode & 0o777;
+  assert.strictEqual(mode, 0o644, "shared bin directories must keep the manifest world-readable");
+});

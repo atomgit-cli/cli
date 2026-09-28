@@ -85,7 +85,11 @@ function writeInstallMetadata(packageRoot, values) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  fs.writeFileSync(temp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  // 0644: the bootstrap manifest lands in shared bin directories (e.g.
+  // /usr/local/bin), where a root install with 0600 would hide it from
+  // every other user and silently disable their update notifications.
+  // The content carries no secrets (schema, coordinate, version, paths).
+  fs.writeFileSync(temp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o644, flag: "wx" });
   try {
     try {
       fs.renameSync(temp, target);

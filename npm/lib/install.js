@@ -444,6 +444,33 @@ function runGc(bin, args) {
   return spawnSync(bin, args, { encoding: "utf8" });
 }
 
+// Replace a completion file atomically and never write through a symlink:
+// an existing `_gc` symlink could point anywhere in the user's tree, and a
+// plain overwrite would clobber the target outside our directory.
+function writeCompletionFile(target, content) {
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink()) {
+      return { skipped: true };
+    }
+  } catch {
+    // Target does not exist yet.
+  }
+  const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+  fs.writeFileSync(temp, content, { mode: 0o644, flag: "wx" });
+  try {
+    renameReplace(temp, target);
+  } catch (error) {
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
+  }
+  return { skipped: false };
+}
+
 function installCompletions(bin, home) {
   const installed = [];
   for (const shell of ["bash", "zsh", "fish"]) {
@@ -453,7 +480,11 @@ function installCompletions(bin, home) {
     if (!target) continue;
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, res.stdout, { mode: 0o644 });
+      const written = writeCompletionFile(target, res.stdout);
+      if (written.skipped) {
+        process.stdout.write(`Skipped ${shell} completion: ${target} is a symlink\n`);
+        continue;
+      }
       installed.push(`${shell}: ${target}`);
     } catch {
       /* skip unwritable */
@@ -618,22 +649,39 @@ function persistWindowsUserPath(dir, options = {}) {
   }
 }
 
+const INSTALL_FLAG_NAMES = new Set(["--target-dir", "--no-modify-path", "-h", "--help"]);
+
 function parseInstallArgs(args) {
   const options = { targetDir: "", modifyPath: true };
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--target-dir") {
-      if (!args[index + 1] || args[index + 1].startsWith("-")) {
-        throw new Error("--target-dir requires a directory value");
-      }
-      options.targetDir = path.resolve(args[index + 1]);
+    const arg = args[index];
+    if (arg === "--target-dir") {
+      const value = args[index + 1];
       index += 1;
+      // In the space-separated form a value that is itself a known flag is
+      // almost certainly a missing value; dash-prefixed directory names are
+      // still expressible as ./-name or --target-dir=-name.
+      if (!value || (value.startsWith("-") && INSTALL_FLAG_NAMES.has(value))) {
+        throw new Error(
+          "--target-dir requires a directory value (use ./-name or --target-dir=-name for dash-prefixed names)"
+        );
+      }
+      options.targetDir = path.resolve(value);
       continue;
     }
-    if (args[index] === "--no-modify-path") {
+    if (arg.startsWith("--target-dir=")) {
+      const value = arg.slice("--target-dir=".length);
+      if (!value) {
+        throw new Error("--target-dir requires a directory value");
+      }
+      options.targetDir = path.resolve(value);
+      continue;
+    }
+    if (arg === "--no-modify-path") {
       options.modifyPath = false;
       continue;
     }
-    throw new Error(`unknown install argument: ${args[index]}`);
+    throw new Error(`unknown install argument: ${arg}`);
   }
   return options;
 }
@@ -717,12 +765,12 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
 
 // Detect a foreign-channel regular file occupying an install target (e.g. a
 // pip console script). Returns "" when nothing recognizable is found.
-function foreignChannelHint(file) {
+function foreignChannelHint(file, isWin = process.platform === "win32") {
   let content = "";
   try {
     const fd = fs.openSync(file, "r");
     try {
-      const buf = Buffer.alloc(256);
+      const buf = Buffer.alloc(4096);
       const bytes = fs.readSync(fd, buf, 0, buf.length, 0);
       content = buf.toString("utf8", 0, bytes);
     } finally {
@@ -732,8 +780,16 @@ function foreignChannelHint(file) {
     return "";
   }
   const firstLine = content.split("\n", 1)[0];
-  if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
+  // Python shebangs may carry interpreter options (python3 -E, env -S
+  // python3); only options are accepted after the interpreter, never a
+  // script path (the file itself is the script).
+  if (/^#!\s*(?:(?:\S*\/)?env(?:\s+-\S+)*\s+python|\S*python)([0-9.]*)?(?:\s+-\S+)*\s*$/.test(firstLine)) {
     return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
+  }
+  // Windows pip console shims are PE binaries without a shebang; the distlib
+  // stub embeds the interpreter path, which always contains "python".
+  if (isWin && content.startsWith("MZ") && content.toLowerCase().includes("python")) {
+    return 'pip console executable (PE shim); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
   return "";
 }
@@ -777,6 +833,54 @@ function ensureUsableInstallDir(dir) {
       `install directory is not usable: ${dir} (${error.message})\n` +
         `check the path and permissions, or choose another directory with --target-dir <dir>`
     );
+  }
+}
+
+// Cross-process install lock for the bin directory. Without it two
+// concurrent installs with different transaction IDs can interleave: A
+// renames the target to its backup, B sees a missing target and installs
+// fresh, then A's late rollback restores the old version over B's winner.
+// The lock name intentionally matches no leftover prefix — a crashed
+// install leaves it behind and stale reclaim (not the sweep) is the
+// recovery path.
+const INSTALL_LOCK_STALE_MS = 10 * 60 * 1000;
+
+function acquireInstallLock(dir, now = Date.now()) {
+  const lock = path.join(dir, ".gc-install-lock");
+  const claim = () => {
+    fs.writeFileSync(lock, `${process.pid} ${new Date(now).toISOString()}\n`, { flag: "wx", mode: 0o644 });
+    return lock;
+  };
+  try {
+    return claim();
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(lock).mtimeMs;
+    } catch {
+      return claim(); // the holder released between our failure and stat
+    }
+    if (now - mtimeMs < INSTALL_LOCK_STALE_MS) {
+      throw new Error(
+        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+          `retry in a moment or remove the lock if you are certain none is running`
+      );
+    }
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      // Raced with another reclaimer; our claim below fails loudly if it won.
+    }
+    return claim();
+  }
+}
+
+function releaseInstallLock(lock) {
+  try {
+    fs.unlinkSync(lock);
+  } catch {
+    // Best effort: a stranded lock self-heals after INSTALL_LOCK_STALE_MS.
   }
 }
 
@@ -862,11 +966,9 @@ async function runInstall(args = []) {
 
   const dir = options.targetDir || chooseGlobalBinDir(home, isWin);
   ensureUsableInstallDir(dir);
-  const swept = sweepTransactionLeftovers(dir);
-  if (swept > 0) {
-    process.stdout.write(`Swept ${swept} leftover file(s) from a previously interrupted install in ${dir}\n`);
-  }
-
+  // Hold the bin-directory lock across the sweep, the transaction, and any
+  // rollback so concurrent installs cannot interleave (see acquireInstallLock).
+  const installLock = acquireInstallLock(dir);
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
   const helper = path.join(dir, "gitcode-update-helper.js");
@@ -875,6 +977,10 @@ async function runInstall(args = []) {
   const transaction = [];
   let versionLine;
   try {
+    const swept = sweepTransactionLeftovers(dir);
+    if (swept > 0) {
+      process.stdout.write(`Swept ${swept} leftover file(s) from a previously interrupted install in ${dir}\n`);
+    }
     transaction.push(replacePath(src, dst, transactionID));
     transaction.push(replacePath(src, alias, transactionID, aliasOptions));
     // The bootstrap update helper runs from the bin directory, outside the
@@ -917,6 +1023,8 @@ async function runInstall(args = []) {
       );
     }
     throw error;
+  } finally {
+    releaseInstallLock(installLock);
   }
 
   // Completions (posix only; Windows shell completion differs).
@@ -965,7 +1073,8 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile,
+  firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
   sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,
