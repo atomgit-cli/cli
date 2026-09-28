@@ -352,6 +352,7 @@ function recordBackgroundFailure(error) {
   }
   try {
     const state = readJSON(file);
+    state.lastChecked = new Date().toISOString();
     state.nextCheck = Date.now() + TTL_MS;
     state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: false };
     writeJSON(file, state);

@@ -16,6 +16,9 @@ const { npmInvocation, readInstallMetadata, stateDir } = require("./install-meta
 const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
+// Locks older than 15 minutes are reclaimed. The worst-case hold is the
+// check budget (63s) plus a failed install rolled back with health checks
+// (~723s total); keep any timeout adjustment comfortably under this bound.
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const CHECK_ATTEMPTS = 3;
 const CHECK_TIMEOUT_MS = 20000;

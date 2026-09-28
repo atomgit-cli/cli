@@ -230,15 +230,46 @@ test("a current check queues no next-launch summary and clears stale notices", {
   const stateFile = path.join(stateDir, "update-state.json");
   writeJSON(stateFile, { summary: { message: "GitCode CLI 9.9.9 is available.", shown: false } });
   const { stub } = flakyNpmStub(dir, 0, "0.0.1");
-  const result = runUpdate({
-    stateFile,
-    background: true,
-    metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
-  });
-  assert.strictEqual(result.status, "current");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      background: true,
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(result.status, "current");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.strictEqual(state.summary, undefined, "current results must not queue a daily notice");
   assert.ok(state.nextCheck > Date.now());
+});
+
+test("an available update still queues the next-launch summary", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-available-"));
+  const stateDir = path.join(dir, "state");
+  const stateFile = path.join(stateDir, "update-state.json");
+  const { stub } = flakyNpmStub(dir, 0, "9.9.9");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      background: true,
+      mode: "notify",
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(result.status, "available");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.match(state.summary.message, /9\.9\.9 is available/);
+  assert.strictEqual(state.summary.shown, false);
 });
 
 test("an unwritable update.log never turns a successful check into a failure", { timeout: 30000 }, () => {

@@ -120,14 +120,14 @@ func TestStartDetachedRunsInOwnSession(t *testing.T) {
 	for {
 		data, err := os.ReadFile(reportFile)
 		if err == nil {
-			fields := strings.Fields(strings.TrimSpace(string(data)))
-			if len(fields) != 2 {
-				t.Fatalf("unexpected child report %q", string(data))
+			// The shell truncates the file before writing, so tolerate
+			// partial reads until the full "pid pgid" report lands.
+			if fields := strings.Fields(strings.TrimSpace(string(data))); len(fields) == 2 {
+				if fields[0] != fields[1] {
+					t.Fatalf("detached helper is not a session leader: pid=%s pgid=%s", fields[0], fields[1])
+				}
+				return
 			}
-			if fields[0] != fields[1] {
-				t.Fatalf("detached helper is not a session leader: pid=%s pgid=%s", fields[0], fields[1])
-			}
-			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("detached helper did not report in time")
