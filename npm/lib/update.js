@@ -86,11 +86,14 @@ function updaterEnvironment(env = process.env) {
   return clean;
 }
 
-function appendLog(message, env = process.env) {
+// Appends to the shared update.log at the state root. The `file` override
+// exists so callers (and tests) that inject a custom state file can keep
+// the log beside it instead of writing to the production state directory.
+function appendLog(message, env = process.env, file) {
   try {
-    const file = path.join(stateDir(env), "update.log");
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+    const target = file || path.join(stateDir(env), "update.log");
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(target, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
   } catch {
     // Logging is best-effort: an unwritable update.log (root-owned file,
     // read-only directory) must never turn a successful update into a
@@ -103,8 +106,15 @@ function appendLog(message, env = process.env) {
 // timeouts, spawn failures) instead of a generic dead-end notice.
 function summarizeError(error) {
   const raw = (error && (error.message || error.code)) || error;
-  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
-  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+  let text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
+  if (text.length > 200) {
+    let cut = text.slice(0, 200);
+    // Do not leave an orphaned high surrogate at the cut boundary.
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    text = `${cut}...`;
+  }
+  return text;
 }
 
 // Permanent update failures: retrying cannot fix them (the on-disk install
@@ -298,6 +308,10 @@ function installExact(metadata, version) {
 function exactInstallArgs(metadata, version) {
   return [
     "install", "-g", `${PACKAGE}@${version}`, "--ignore-scripts", "--no-audit", "--no-fund",
+    // A 60s fetch timeout lets npm's own fetch-retries finish inside the
+    // 300s overall budget; with the npm default (300s) a single stalled
+    // request consumes the whole budget and the retries never run.
+    "--fetch-timeout=60000",
     "--prefix", metadata.prefix,
   ];
 }
@@ -390,7 +404,7 @@ function performUpdate(options = {}) {
   if (comparison >= 0) return resultObject("current", latest, `GitCode CLI ${pkg.version} is current.`);
   if (shouldOnlyNotify(options)) {
     const note = prerelease ? ", a prerelease" : "";
-    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}${note}).`);
+    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}${note}); run "gitcode update" to install it.`);
   }
 
   try {
@@ -439,7 +453,7 @@ function runUpdate(options = {}) {
     if (result.status === "current") delete state.summary;
     else state.summary = { message: result.message, shown: !options.background };
     writeJSON(stateFile, state);
-    appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
+    appendLog(`package=${PACKAGE} channel=npm status=${result.status} current=${result.current} latest=${result.latest || "none"}`, process.env, options.logFile);
     return result;
   } catch (error) {
     const now = Date.now();
@@ -462,7 +476,7 @@ function runUpdate(options = {}) {
       state.lastErrorFingerprint = fingerprint;
     }
     writeJSON(stateFile, state);
-    appendLog(`status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`);
+    appendLog(`package=${PACKAGE} channel=npm status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`, process.env, options.logFile);
     throw error;
   } finally {
     releaseLock(lockFile, descriptor);

@@ -58,6 +58,9 @@ test("exact updates and rollbacks stay inside the recorded npm prefix", () => {
     "--prefix", "/isolated/prefix",
   ]);
   assert.ok(args.includes("--ignore-scripts"));
+  // A 60s fetch timeout keeps npm's own fetch-retries inside the overall
+  // install budget.
+  assert.ok(args.includes("--fetch-timeout=60000"));
   assert.ok(args.includes(`${pkgName}@1.2.3`), `exact install must target the installed coordinate ${pkgName}`);
 });
 
@@ -275,7 +278,7 @@ test("runUpdate failure summaries carry the real error for the next launch", { t
   assert.ok(!state.summary.message.includes("run gitcode update for details"), "dead-end notice must be gone");
   assert.strictEqual(state.summary.shown, true);
   const log = fs.readFileSync(path.join(stateDir, "update.log"), "utf8");
-  assert.match(log, /status=error detail=.*ECONNRESET/);
+  assert.match(log, /package=\S+ channel=npm status=error detail=.*ECONNRESET/);
 });
 
 test("summarizeError collapses and bounds error text", () => {
@@ -284,6 +287,12 @@ test("summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
   assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
   assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
+  // The cut must not leave an orphaned high surrogate (broken UTF-16).
+  const bounded = summarizeError(new Error(`x${"😀".repeat(150)}`));
+  assert.ok(bounded.endsWith("..."));
+  const body = bounded.slice(0, -3);
+  const last = body.charCodeAt(body.length - 1);
+  assert.ok(!(last >= 0xd800 && last <= 0xdbff), "cut must not end on a lone high surrogate");
 });
 
 test("failureBackoffMs grows exponentially and caps at the daily TTL", () => {

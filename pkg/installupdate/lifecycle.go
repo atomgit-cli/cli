@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
@@ -311,10 +312,11 @@ func CheckNow(manifest *Manifest) (*CheckResult, error) {
 
 // truncateDetail bounds helper error details to one collapsed line so failure
 // summaries and JSON output stay readable regardless of npm stderr volume.
+// Truncation is rune-aware: slicing mid-codepoint would emit broken UTF-8.
 func truncateDetail(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
-	if len(text) > 200 {
-		text = text[:200] + "..."
+	if utf8.RuneCountInString(text) > 200 {
+		text = string([]rune(text)[:200]) + "..."
 	}
 	if text == "" {
 		text = "unknown update check failure"

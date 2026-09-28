@@ -86,8 +86,7 @@ func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	}
 }
 
-func TestCheckFailureDetailPrefersReasonOverRawExit(t *testing.T) {
-	// --json mode prints the error message to stdout.
+func TestCheckFailureDetailPrefersReasonOverRawExit(t *testing.T) { // --json mode prints the error message to stdout.
 	if got := checkFailureDetail(`{"status":"error","message":"registry reset"}`, "", errors.New("exit status 1")); got != "registry reset" {
 		t.Fatalf("json detail = %q", got)
 	}
@@ -99,6 +98,23 @@ func TestCheckFailureDetailPrefersReasonOverRawExit(t *testing.T) {
 	// Nothing captured: the raw run error stands.
 	if got := checkFailureDetail("", "", errors.New("exit status 1")); got != "exit status 1" {
 		t.Fatalf("raw detail = %q", got)
+	}
+}
+
+func TestTruncateDetailIsRuneSafe(t *testing.T) {
+	text := strings.Repeat("汉", 250) // 750 bytes, 250 runes
+	got := truncateDetail(text)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
+	}
+	runes := []rune(strings.TrimSuffix(got, "..."))
+	if len(runes) != 200 {
+		t.Fatalf("expected 200 runes after truncation, got %d", len(runes))
+	}
+	for _, r := range runes {
+		if r == 0xfffd {
+			t.Fatal("replacement character leaked into the truncation")
+		}
 	}
 }
 

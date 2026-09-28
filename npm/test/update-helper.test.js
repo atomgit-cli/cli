@@ -39,7 +39,8 @@ test("gc update --help prints the wrapper help and exits zero", () => {
     process.stdout.write = original;
   }
   const output = chunks.join("");
-  assert.ok(output.includes("Usage: gc update"), output);
+  const command = process.platform === "win32" ? "gitcode" : "gc";
+  assert.ok(output.includes(`Usage: ${command} update`), output);
   assert.ok(output.includes("--check"), output);
   assert.ok(output.includes("--no-interactive"), output);
   assert.strictEqual(output, UPDATE_HELP);

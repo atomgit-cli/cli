@@ -296,7 +296,7 @@ test("bootstrap failure summaries carry the real error instead of a dead-end not
   assert.ok(!state.summary.message.includes("run gitcode update for details"), "dead-end notice must be gone");
   assert.strictEqual(state.summary.shown, false);
   const log = fs.readFileSync(path.join(stateDir, "update.log"), "utf8");
-  assert.match(log, /status=error detail=.*ECONNRESET/);
+  assert.match(log, /package=\S+ channel=npm-bootstrap status=error detail=.*ECONNRESET/);
 });
 
 test("bootstrap summarizeError collapses and bounds error text", () => {
@@ -304,6 +304,12 @@ test("bootstrap summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(null), "unknown error");
   assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
   assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
+  // The cut must not leave an orphaned high surrogate (broken UTF-16).
+  const bounded = summarizeError(new Error(`x${"😀".repeat(150)}`));
+  assert.ok(bounded.endsWith("..."));
+  const body = bounded.slice(0, -3);
+  const last = body.charCodeAt(body.length - 1);
+  assert.ok(!(last >= 0xd800 && last <= 0xdbff), "cut must not end on a lone high surrogate");
   const long = new Error(`x${"a".repeat(400)}`);
   assert.strictEqual(summarizeError(long).length, 203);
   assert.ok(summarizeError(new Error("line1\nline2")).includes("line1 line2"));

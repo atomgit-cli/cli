@@ -131,8 +131,15 @@ function appendLog(message) {
 // timeouts, spawn failures) instead of a generic dead-end notice.
 function summarizeError(error) {
   const raw = (error && (error.message || error.code)) || error;
-  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
-  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+  let text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
+  if (text.length > 200) {
+    let cut = text.slice(0, 200);
+    // Do not leave an orphaned high surrogate at the cut boundary.
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    text = `${cut}...`;
+  }
+  return text;
 }
 
 // Permanent update failures: retrying cannot fix them (the on-disk install
@@ -283,6 +290,10 @@ function latestVersion(manifest) {
   throw lastError;
 }
 
+// Waits for the parent process to exit before replacing binaries. Known
+// limitation: if the parent dies and its pid is reused by an unrelated
+// process, the wait spins its full 30s and then reports a spurious
+// failure (which enters the backoff). Rare, self-limiting, accepted.
 function waitForParent(pid) {
   if (!pid) return;
   const deadline = Date.now() + 30000;
@@ -317,6 +328,9 @@ function installLatest(manifest, latest) {
     "--yes",
     `--package=${PACKAGE}@${latest}`,
     "--ignore-scripts",
+    // A 60s fetch timeout lets npm's own fetch-retries finish inside the
+    // 300s overall budget (see lib/update.js exactInstallArgs).
+    "--fetch-timeout=60000",
     "--",
     "gitcode",
     "install",
@@ -374,7 +388,7 @@ function run(options) {
       result = { status: "current", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${manifest.version} is current.` };
     } else if (options.check || (updateMode() === "notify" && !options.force)) {
       const note = prerelease ? ", a prerelease" : "";
-      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}).` };
+      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}); run "gitcode update" to install it.` };
     } else if (updateMode() === "off" && !options.force) {
       result = { status: "disabled", distribution: "npm-bootstrap", current: manifest.version, latest, message: "Automatic updates are disabled." };
     } else {
@@ -399,7 +413,7 @@ function run(options) {
     if (result.status === "current") delete fresh.summary;
     else fresh.summary = { message: result.message, shown: !options.background };
     writeJSON(stateFile, fresh);
-    appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;
   } finally {
     fs.closeSync(descriptor);
@@ -439,7 +453,7 @@ function recordBackgroundFailure(error) {
   const lock = `${file}.lock`;
   const descriptor = acquireLock(lock);
   if (descriptor == null) {
-    appendLog(`status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
     return;
   }
   try {
@@ -473,7 +487,7 @@ function recordBackgroundFailure(error) {
       // Best effort; stale locks are reclaimed after LOCK_STALE_MS.
     }
   }
-  appendLog(`status=error detail="${summarizeError(error)}"`);
+  appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}"`);
 }
 
 if (require.main === module) process.exitCode = main();

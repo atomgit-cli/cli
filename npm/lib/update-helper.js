@@ -4,9 +4,12 @@
 
 const { runUpdate } = require("./update");
 
+// PowerShell reserves "gc" as Get-Content; show the name Windows users run.
+const COMMAND = process.platform === "win32" ? "gitcode" : "gc";
+
 const UPDATE_HELP = `Check for or apply an npm-channel update.
 
-Usage: gc update [flags]
+Usage: ${COMMAND} update [flags]
 
 Flags:
   --check            Check for an update without installing it
@@ -18,7 +21,7 @@ Flags:
 
 This wrapper command manages global npm installs (atomgit-cli,
 @atomgit-cli/cli, @gitcode-cli/cli). npm-bootstrap installations are
-handled by the gc binary itself. Other channels (pip, Homebrew, deb, rpm)
+handled by the ${COMMAND} binary itself. Other channels (pip, Homebrew, deb, rpm)
 stay user-controlled and are never invoked implicitly.
 `;
 
