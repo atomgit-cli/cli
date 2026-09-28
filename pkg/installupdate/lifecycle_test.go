@@ -149,6 +149,11 @@ func TestAfterCommandBacksOffWhenHelperIsUnspawnable(t *testing.T) {
 	}
 	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
 	t.Setenv("GC_STATE_DIR", stateDir)
+	// Neutralize the CI detectors: on CI runners disabled() short-circuits
+	// and AfterCommand returns before the spawn (and the backoff) runs.
+	for _, name := range []string{"CI", "GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION", "GC_NO_UPDATE_CHECK"} {
+		t.Setenv(name, "")
+	}
 	// A manifest whose recorded node runtime cannot spawn: StartDetached's
 	// cmd.Start fails on every command (a relative Node value is returned
 	// verbatim by resolveNode, so "missing-node" fails to exec).
