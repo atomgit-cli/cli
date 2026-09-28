@@ -15,6 +15,7 @@ const {
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
   persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
   rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
+  windowsPathShadowing,
 } = require("../lib/install");
 
 test("copied update helper gets the npm coordinate injected and loads standalone", () => {
@@ -218,7 +219,11 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const calls = [];
   const runner = (executable, args, options) => {
     calls.push({ executable, args, options });
-    return { status: 0, stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true}', stderr: "" };
+    return {
+      status: 0,
+      stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true,"previous":"C:\\\\Python311\\\\Scripts"}',
+      stderr: "",
+    };
   };
   const env = {
     SystemRoot: "C:\\Windows",
@@ -230,6 +235,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const result = persistWindowsUserPath(dir, { env, runner, fileExists: () => true });
   assert.deepStrictEqual(result, {
     ok: true, changed: true, registryKind: "ExpandString", broadcasted: true,
+    previousUserPath: "C:\\Python311\\Scripts",
   });
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].executable, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
@@ -238,6 +244,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   assert.match(script, /DoNotExpandEnvironmentNames/);
   assert.match(script, /GetValueKind\('Path'\)/);
   assert.match(script, /SetValue\('Path', \$next, \$kind\)/);
+  assert.match(script, /previous = \[string\]\$current/);
   assert.match(script, /Mutex.*Global\\GitCodeCli\.UserPath/);
   assert.match(script, /path-mutex-id/);
   assert.match(script, /File\]::Move\(\$candidatePath, \$mutexIdPath\)/);
@@ -277,7 +284,7 @@ test("persistWindowsUserPath reports idempotence from the same registry transact
     },
   });
   assert.deepStrictEqual(result, {
-    ok: true, changed: false, registryKind: "String", broadcasted: true,
+    ok: true, changed: false, registryKind: "String", broadcasted: true, previousUserPath: null,
   });
   assert.strictEqual(calls, 1);
 });
@@ -347,6 +354,70 @@ test("Windows PATH guidance never emits PATH commands for an unsafe directory", 
   assert.doesNotMatch(guidance, /SetEnvironmentVariable/);
   assert.doesNotMatch(guidance, /\$env:Path/);
   assert.match(guidance, /gitcode\.exe' version/);
+});
+
+test("windowsPathShadowing classifies providers by old User PATH membership", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-fn-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const system = windowsPathShadowing(install, env, install);
+  assert.strictEqual(system.length, 1);
+  assert.strictEqual(system[0].name, "gitcode");
+  assert.strictEqual(system[0].provider, path.join(early, "gitcode.exe"));
+  assert.strictEqual(system[0].scope, "system");
+
+  const user = windowsPathShadowing(install, env, early);
+  assert.strictEqual(user[0].scope, "user");
+
+  const expanded = windowsPathShadowing(install, { PATH: `${early};${install}`, EARLY: early }, "%EARLY%");
+  assert.strictEqual(expanded[0].scope, "user");
+
+  const unknown = windowsPathShadowing(install, env, null);
+  assert.strictEqual(unknown[0].scope, "unknown");
+
+  // The freshly installed dir providing its own names is not a shadow.
+  const clean = windowsPathShadowing(install, { PATH: `${install}` }, null);
+  assert.deepStrictEqual(clean, []);
+});
+
+test("Windows PATH guidance distinguishes reopen-fixable from persistent shadowing", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-guide-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const systemScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, env
+  );
+  assert.match(systemScope, /重开窗口也无法解决/);
+  assert.match(systemScope, /系统 PATH/);
+  assert.match(systemScope, /gitcode doctor install/);
+
+  const userScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: early }, env
+  );
+  assert.match(userScope, /重新打开 PowerShell\/Windows Terminal 窗口后本安装将优先生效/);
+
+  const unknownScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true }, env
+  );
+  assert.match(unknownScope, /若该提供者来自系统 PATH/);
+
+  // No earlier provider: no shadowing lines at all.
+  const clean = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, { PATH: `${install}` }
+  );
+  assert.doesNotMatch(clean, /先于本安装目录/);
 });
 
 test("install rollback restores only files touched by the current transaction", () => {

@@ -13,7 +13,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 const { resolveBinaryName, isSupported } = require("./platform");
-const { normalizePath, writeInstallMetadata } = require("./install-metadata");
+const { commandCandidates, normalizePath, writeInstallMetadata } = require("./install-metadata");
 const pkg = require("../package.json");
 
 const PLATFORMS_DIR = path.join(__dirname, "..", "bin", "platforms");
@@ -77,7 +77,7 @@ const WINDOWS_UPDATE_USER_PATH = [
   "    } catch { $broadcasted = $false }",
   "  }",
   "} finally { if ($mutexHeld) { $mutex.ReleaseMutex() }; $mutex.Dispose() }",
-  "@{ changed = [bool]$changed; kind = $kind.ToString(); broadcasted = [bool]$broadcasted } | ConvertTo-Json -Compress",
+  "@{ changed = [bool]$changed; kind = $kind.ToString(); broadcasted = [bool]$broadcasted; previous = [string]$current } | ConvertTo-Json -Compress",
 ].join("; ");
 
 function bundledBinaryPath() {
@@ -512,6 +512,40 @@ function prependWindowsUserPath(dir, current = "", env = process.env) {
   return `${dir};${entries.join(";")}`;
 }
 
+// Shadowing report for a fresh Windows install at `dir`: which command names
+// resolve to an earlier provider on the merged PATH. New Windows processes
+// concatenate System PATH before User PATH, and the installer only prepends
+// `dir` to the User PATH — so a provider inside the old User PATH
+// (`userPathValue`) is overtaken in new windows, while a provider anywhere
+// else (System PATH, shell profile injection) keeps winning regardless.
+// `userPathValue === null` means the old User PATH is unknown.
+function windowsPathShadowing(dir, env, userPathValue) {
+  const shadows = [];
+  const wanted = normalizePath(dir, true);
+  const userEntries = new Set();
+  if (typeof userPathValue === "string") {
+    for (const entry of userPathValue.split(";")) {
+      const unquoted = entry.trim().replace(/^"|"$/g, "");
+      if (!unquoted) continue;
+      userEntries.add(normalizePath(expandWindowsEnvironment(unquoted, env), true));
+    }
+  }
+  for (const name of ["gitcode", "gc"]) {
+    const provider = commandCandidates(name, env, true)[0] || "";
+    if (!provider) continue;
+    const providerDir = normalizePath(path.win32.dirname(provider), true);
+    if (providerDir === wanted) continue;
+    shadows.push({
+      name,
+      provider,
+      scope: typeof userPathValue === "string"
+        ? (userEntries.has(providerDir) ? "user" : "system")
+        : "unknown",
+    });
+  }
+  return shadows;
+}
+
 function windowsPowerShellExecutable(env) {
   const systemRoot = environmentValue(env, "SystemRoot") || environmentValue(env, "WINDIR");
   if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
@@ -577,6 +611,7 @@ function persistWindowsUserPath(dir, options = {}) {
       changed: parsed.changed,
       registryKind: parsed.kind,
       broadcasted: parsed.broadcasted,
+      previousUserPath: typeof parsed.previous === "string" ? parsed.previous : null,
     };
   } catch (error) {
     return { ok: false, error: `解析 Windows PATH 更新结果失败：${error.message}` };
@@ -658,6 +693,23 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
     lines.push("  或者关闭全部 PowerShell/Windows Terminal 窗口后重新打开，再运行 gitcode version。");
   } else {
     lines.push("  请运行 gitcode version 验证当前版本。");
+  }
+  // Deeper shadowing analysis on the merged PATH: an earlier provider keeps
+  // winning in new windows unless it lives inside the old User PATH.
+  const userPathValue = result.ok && options.modifyPath && typeof result.previousUserPath === "string"
+    ? result.previousUserPath
+    : null;
+  for (const shadow of windowsPathShadowing(dir, env, userPathValue)) {
+    if (shadow.scope === "user") {
+      lines.push(`  注意：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
+      lines.push("  该提供者位于用户 PATH，重新打开 PowerShell/Windows Terminal 窗口后本安装将优先生效。");
+    } else if (shadow.scope === "system") {
+      lines.push(`  警告：PATH 中 "${shadow.name}" 解析到 ${shadow.provider}，重开窗口也无法解决（该提供者位于系统 PATH 或 shell 配置，合并顺序在用户 PATH 之前）。`);
+      lines.push("  请卸载旧提供者，或由管理员将本安装目录加入系统 PATH 并置于其前；运行 gitcode doctor install 查看全部来源。");
+    } else {
+      lines.push(`  警告：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
+      lines.push("  若该提供者来自系统 PATH，重开窗口无法解决：请运行 gitcode doctor install 确认来源，再卸载旧提供者或调整 PATH 顺序。");
+    }
   }
   lines.push("  其他 pip/npm 安装入口不会被自动删除；如需清理，请先运行 gitcode doctor install 确认来源。");
   return `${lines.join("\n")}\n`;
@@ -912,5 +964,5 @@ module.exports = {
   ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
-  sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
+  sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,
 };
