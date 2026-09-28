@@ -138,8 +138,12 @@ test("bootstrap state lands under the package/npm-bootstrap directory", { timeou
   });
   assert.strictEqual(result.status, 0, result.stderr);
   // The untransformed source helper uses the checkout's package name, so
-  // the state must land in <state>/gitcode-cli/<package>/npm-bootstrap/.
-  const stateFile = path.join(root, "gitcode-cli", pkgName, "npm-bootstrap", "update-state.json");
+  // the state must land in <state-root>/<package>/npm-bootstrap/. On
+  // Windows the LOCALAPPDATA branch of stateRoot wins over XDG_STATE_HOME.
+  const base = process.platform === "win32"
+    ? path.join(root, "la", "gitcode-cli")
+    : path.join(root, "gitcode-cli");
+  const stateFile = path.join(base, pkgName, "npm-bootstrap", "update-state.json");
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   assert.ok(state.nextCheck > Date.now());
 });
