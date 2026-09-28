@@ -51,15 +51,25 @@ function expectedGlobalBin(prefix, isWin = process.platform === "win32") {
 
 function pathConflict(prefix, env = process.env, isWin = process.platform === "win32") {
   const expectedDir = normalizePath(expectedGlobalBin(prefix, isWin), isWin);
-  const candidates = commandCandidates("gitcode", env, isWin);
-  const selected = candidates[0] || "";
   const pathAPI = isWin ? path.win32 : path.posix;
-  const selectedDir = selected ? normalizePath(pathAPI.dirname(selected), isWin) : "";
+  // Both command names ship in the npm bin dir; either one being shadowed by
+  // an earlier PATH entry (deb/brew/pip installs provide only "gc", other
+  // tools may reserve "gitcode") hides the npm install from the user.
+  const names = {};
+  for (const name of ["gitcode", "gc"]) {
+    const candidates = commandCandidates(name, env, isWin);
+    const selected = candidates[0] || "";
+    const selectedDir = selected ? normalizePath(pathAPI.dirname(selected), isWin) : "";
+    names[name] = {
+      candidates,
+      selected,
+      shadowed: Boolean(selected && selectedDir !== expectedDir),
+    };
+  }
   return {
     expectedDir: expectedGlobalBin(prefix, isWin),
-    candidates,
-    selected,
-    shadowed: Boolean(selected && selectedDir !== expectedDir),
+    names,
+    shadowed: names.gitcode.shadowed || names.gc.shadowed,
   };
 }
 
