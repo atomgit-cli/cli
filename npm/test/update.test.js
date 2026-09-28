@@ -358,6 +358,23 @@ test("writeJSON cleans up its temp file when the rename fails", () => {
   assert.deepStrictEqual(fs.readdirSync(root), []);
 });
 
+test("update state paths are scoped per package and channel unless overridden", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-state-path-"));
+  const env = { XDG_STATE_HOME: root, LOCALAPPDATA: path.join(root, "la") };
+  const base = process.platform === "win32"
+    ? path.join(root, "la", "gitcode-cli")
+    : path.join(root, "gitcode-cli");
+  assert.strictEqual(
+    updateStatePath(env),
+    path.join(base, pkgName, "npm", "update-state.json")
+  );
+  // An explicit GC_STATE_DIR keeps the legacy flat shared file.
+  assert.strictEqual(
+    updateStatePath({ GC_STATE_DIR: root }),
+    path.join(root, "update-state.json")
+  );
+});
+
 test("update helper parser accepts check/json/background only", () => {
   assert.deepStrictEqual(parseArgs(["--check", "--json"]), {
     background: false,

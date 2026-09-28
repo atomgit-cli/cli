@@ -895,6 +895,10 @@ async function runInstall(args = []) {
     writeInstallMetadata(dir, {
       distribution: "npm-bootstrap",
       version: pkg.version,
+      // Same coordinate injected into the helper copy: the Go side and the
+      // helper both derive <state>/gitcode-cli/<package>/npm-bootstrap/
+      // from it, so they must agree.
+      package: pkg.name,
       targetDir: dir,
       node: process.execPath,
       npm: process.env.npm_execpath || "",

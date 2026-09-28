@@ -32,7 +32,11 @@ type Manifest struct {
 	Node         string `json:"node"`
 	NPM          string `json:"npm"`
 	Helper       string `json:"helper"`
-	path         string
+	// Package is the npm coordinate being bootstrapped. Optional: legacy
+	// manifests lack it and fall back to the flat state path, matching the
+	// old helper that writes the same flat file.
+	Package string `json:"package,omitempty"`
+	path    string
 }
 
 type updateState struct {
@@ -84,7 +88,7 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 	if err != nil {
 		return
 	}
-	statePath := StatePath()
+	statePath := StatePath(manifest)
 	updatesDisabled := disabled(cfg, noUpdate, noInteractive)
 	var state updateState
 	if !mutateStateLocked(statePath, func(current *updateState) {
@@ -146,20 +150,33 @@ func acquireStateLock(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
-// StatePath returns the cross-platform npm update state file.
-func StatePath() string {
+// StatePath returns the npm-bootstrap update state file, scoped per package
+// coordinate and channel so parallel installs (npm-global, other
+// coordinates) do not share nextCheck or summaries. An explicit
+// GC_STATE_DIR keeps the legacy flat file; a legacy manifest without a
+// package name falls back to the flat path too, staying consistent with
+// the old helper copy that writes the same flat file.
+func StatePath(manifest *Manifest) string {
 	if dir := os.Getenv("GC_STATE_DIR"); dir != "" {
 		return filepath.Join(dir, "update-state.json")
 	}
+	root := stateRoot()
+	if manifest != nil && manifest.Package != "" {
+		return filepath.Join(root, manifest.Package, "npm-bootstrap", "update-state.json")
+	}
+	return filepath.Join(root, "update-state.json")
+}
+
+func stateRoot() string {
 	if local := os.Getenv("LOCALAPPDATA"); runtime.GOOS == "windows" && local != "" {
-		return filepath.Join(local, "gitcode-cli", "update-state.json")
+		return filepath.Join(local, "gitcode-cli")
 	}
 	home, _ := os.UserHomeDir()
 	root := os.Getenv("XDG_STATE_HOME")
 	if root == "" {
 		root = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(root, "gitcode-cli", "update-state.json")
+	return filepath.Join(root, "gitcode-cli")
 }
 
 // StartDetached runs the copied bootstrap helper after this process exits.

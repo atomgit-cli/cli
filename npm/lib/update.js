@@ -31,8 +31,14 @@ const UPDATE_ENV_ALLOWLIST = new Set([
   "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 ]);
 
+// Scoped per package coordinate and channel: npm-global and npm-bootstrap
+// installs (and parallel coordinates) each keep their own nextCheck and
+// summary instead of pushing each other's schedule or cross-showing
+// summaries. An explicit GC_STATE_DIR keeps the legacy flat file as a
+// deliberate user (and test) override.
 function updateStatePath(env = process.env) {
-  return path.join(stateDir(env), "update-state.json");
+  if (env.GC_STATE_DIR) return path.join(env.GC_STATE_DIR, "update-state.json");
+  return path.join(stateDir(env), PACKAGE, "npm", "update-state.json");
 }
 
 function readJSON(file, fallback = {}) {

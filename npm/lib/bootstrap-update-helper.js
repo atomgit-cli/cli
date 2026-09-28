@@ -78,13 +78,21 @@ function writeJSON(file, value) {
   }
 }
 
-function statePath(env = process.env) {
-  let root = env.GC_STATE_DIR;
-  if (!root && process.platform === "win32") {
-    root = path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "gitcode-cli");
+function stateRoot(env = process.env) {
+  if (env.GC_STATE_DIR) return env.GC_STATE_DIR;
+  if (process.platform === "win32") {
+    return path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "gitcode-cli");
   }
-  if (!root) root = path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "gitcode-cli");
-  return path.join(root, "update-state.json");
+  return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "gitcode-cli");
+}
+
+// Scoped per package coordinate and channel (mirrors lib/update.js): the
+// bootstrap channel keeps its own nextCheck/summary instead of sharing the
+// npm-global state file. An explicit GC_STATE_DIR keeps the legacy flat
+// file as a deliberate user (and test) override.
+function statePath(env = process.env) {
+  if (env.GC_STATE_DIR) return path.join(env.GC_STATE_DIR, "update-state.json");
+  return path.join(stateRoot(env), PACKAGE, "npm-bootstrap", "update-state.json");
 }
 
 function updateMode(env = process.env) {
@@ -106,7 +114,9 @@ function updaterEnvironment(env = process.env) {
 
 function appendLog(message) {
   try {
-    const file = path.join(path.dirname(statePath()), "update.log");
+    // The log stays shared at the state root (not inside the per-channel
+    // directory): all channels append to one diagnostic timeline.
+    const file = path.join(stateRoot(), "update.log");
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
   } catch {

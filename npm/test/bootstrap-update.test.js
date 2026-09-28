@@ -114,6 +114,36 @@ test("bootstrap background current check queues no summary and clears stale noti
   assert.ok(state.nextCheck > Date.now());
 });
 
+test("bootstrap state lands under the package/npm-bootstrap directory", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-scoped-"));
+  const { stub } = flakyNpmStub(root, 0, "0.0.1");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+    package: pkgName,
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--force", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      XDG_STATE_HOME: root,
+      LOCALAPPDATA: path.join(root, "la"),
+    },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  // The untransformed source helper uses the checkout's package name, so
+  // the state must land in <state>/gitcode-cli/<package>/npm-bootstrap/.
+  const stateFile = path.join(root, "gitcode-cli", pkgName, "npm-bootstrap", "update-state.json");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.ok(state.nextCheck > Date.now());
+});
+
 test("bootstrap failure state writes respect the cross-process lock", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-lock-fail-"));
   const stateDir = path.join(root, "state");
