@@ -47,3 +47,52 @@ test("wrapper exits 127 with a clear message when the binary is missing (ENOENT)
     )
   );
 });
+
+test("wrapper passes the discovered distribution to the binary with npm fallback", { skip: process.platform === "win32" }, () => {
+  const { resolveBinaryName } = require("../lib/platform");
+  const source = path.join(__dirname, "..");
+  // Copy the wrapper's package tree (bin/, lib/, package.json) into a temp
+  // root so metadata discovery writes there instead of this checkout.
+  const makeTree = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-wrapper-dist-"));
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+    fs.copyFileSync(path.join(source, "bin", "gc.js"), path.join(root, "bin", "gc.js"));
+    for (const file of fs.readdirSync(path.join(source, "lib"))) {
+      if (file.endsWith(".js")) fs.copyFileSync(path.join(source, "lib", file), path.join(root, "lib", file));
+    }
+    fs.copyFileSync(path.join(source, "package.json"), path.join(root, "package.json"));
+    // The wrapper resolves the platform binary at bin/platforms/<name>.
+    const platforms = path.join(root, "bin", "platforms");
+    fs.mkdirSync(platforms, { recursive: true });
+    fs.writeFileSync(path.join(platforms, resolveBinaryName(process.platform, process.arch)),
+      "#!/bin/sh\necho \"$GITCODE_CLI_DISTRIBUTION\"\n", { mode: 0o755 });
+    return path.join(root, "bin", "gc.js");
+  };
+  const distributionOf = (wrapper, env) => {
+    try {
+      return execFileSync(process.execPath, [wrapper, "distcheck"], {
+        encoding: "utf8",
+        env: { ...process.env, ...env },
+        timeout: 30000,
+      }).trim();
+    } catch (err) {
+      return `<exit ${err.status == null ? "?" : err.status}: ${(err.stderr || "").trim()}>`;
+    }
+  };
+
+  // A checkout outside npm root -g is a project-local install.
+  assert.strictEqual(distributionOf(makeTree(), {}), "npm-local");
+
+  // pnpm user agent short-circuits discovery to the pnpm channel.
+  assert.strictEqual(
+    distributionOf(makeTree(), { npm_config_user_agent: "pnpm/9.15.9 npm/? node/v20" }),
+    "pnpm"
+  );
+
+  // When discovery cannot run npm at all, the wrapper falls back to npm.
+  const brokenNpm = fs.mkdtempSync(path.join(os.tmpdir(), "gc-wrapper-failnpm-"));
+  const failJs = path.join(brokenNpm, "npm-cli.js");
+  fs.writeFileSync(failJs, "process.exit(1);\n");
+  assert.strictEqual(distributionOf(makeTree(), { npm_execpath: failJs }), "npm");
+});

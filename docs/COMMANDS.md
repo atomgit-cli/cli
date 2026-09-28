@@ -3351,7 +3351,7 @@ gc doctor install --json
 
 - 完全离线，无需认证；不读取或打印 Token。
 - 输出当前 `version` / `commit` / `built`、`distribution`、wrapper `entrypoint`、实际 `binary`，以及 `gc` / `gitcode` 在 PATH 中的全部 `candidates` 与 `selected`。
-- `distribution` 可为 `npm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`。
+- `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断）。
 - Windows 会报告 PowerShell 内置 `gc`/`Get-Content` alias 风险，并建议使用 `gitcode`，不会建议全局删除系统 alias。
 - 只给出 `conflicts` 和 `recommendations`；不会修改 PATH、shell profile、认证配置，也不会调用其他包管理器卸载软件。
 - 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留，含 Windows 的 `.exe` 变体）并建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除。

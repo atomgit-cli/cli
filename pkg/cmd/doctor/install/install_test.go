@@ -82,6 +82,89 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 	}
 }
 
+func TestInspectNpmLocalSkipsGlobalPrefixConflict(t *testing.T) {
+	dir := t.TempDir()
+	packageRoot := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A stale global prefix in the metadata must not produce the npm-global
+	// conflict for a project-local install.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"npm-local","prefix":"/nowhere"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + dir,
+		"GITCODE_CLI_DISTRIBUTION=npm-local",
+		packageRootEnv + "=" + packageRoot,
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	if report.Distribution != "npm-local" {
+		t.Fatalf("Distribution = %q, want npm-local", report.Distribution)
+	}
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "npm global bin") {
+			t.Fatalf("npm-local must not produce the npm-global conflict: %q", conflict)
+		}
+	}
+	found := false
+	for _, rec := range report.Recommendations {
+		if strings.Contains(rec, "project-local npm dependency") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a project-local recommendation, got %#v", report.Recommendations)
+	}
+}
+
+func TestInspectPnpmComparesAgainstPnpmHome(t *testing.T) {
+	oldDir := t.TempDir()
+	home := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + oldDir,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"PNPM_HOME=" + home,
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a PNPM_HOME conflict, got %#v", report.Conflicts)
+	}
+
+	// The selected entry inside PNPM_HOME must not conflict.
+	if err := os.WriteFile(filepath.Join(home, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	clean := Inspect([]string{
+		"PATH=" + home + string(os.PathListSeparator) + oldDir,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"PNPM_HOME=" + home,
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range clean.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			t.Fatalf("selected inside PNPM_HOME must not conflict: %q", conflict)
+		}
+	}
+}
+
 func TestDoctorInstallJSON(t *testing.T) {
 	cmd := NewCmdInstall(cmdutil.TestFactory(), "1.2.3", "abc", "today")
 	out := &bytes.Buffer{}

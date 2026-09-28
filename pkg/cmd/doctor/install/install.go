@@ -209,7 +209,8 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 				fmt.Sprintf("keep the intended %s provider first on PATH and explicitly upgrade or remove the others", command))
 		}
 	}
-	if report.Distribution == "npm" {
+	switch report.Distribution {
+	case "npm":
 		metadataPrefix := npmPrefix(env[packageRootEnv])
 		selected := report.Commands["gitcode"].Selected
 		if metadataPrefix != "" && selected != "" {
@@ -222,6 +223,23 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 				report.Recommendations = append(report.Recommendations, fmt.Sprintf("move %s before %s on PATH, or uninstall the older global channel explicitly", expected, filepath.Dir(selected)))
 			}
 		}
+	case "pnpm":
+		// pnpm records no npm prefix; compare against PNPM_HOME when it is
+		// set so a shadowed pnpm global install is reported instead of
+		// silently skipped. Without PNPM_HOME there is no expected
+		// directory to compare against, so stay quiet rather than guess.
+		if home := env["PNPM_HOME"]; home != "" {
+			if selected := report.Commands["gitcode"].Selected; selected != "" &&
+				normalizedPath(filepath.Dir(selected), goos) != normalizedPath(home, goos) {
+				report.Conflicts = append(report.Conflicts, "another gitcode command appears before the pnpm global bin directory (PNPM_HOME)")
+				report.Recommendations = append(report.Recommendations, fmt.Sprintf("move %s before %s on PATH, or uninstall the older channel explicitly", home, filepath.Dir(selected)))
+			}
+		}
+	case "npm-local":
+		// A project-local dependency is not a global install: the npm
+		// prefix comparison does not apply and would only produce noise.
+		report.Recommendations = append(report.Recommendations,
+			"this is a project-local npm dependency, not a global install; run \"npm install -g <package>\" to switch to the global channel, or manage updates in the owning project")
 	}
 	if len(report.Conflicts) == 0 {
 		report.Recommendations = append(report.Recommendations, "no command conflict detected")
