@@ -135,18 +135,41 @@ function npmInvocation(execPath = process.execPath, env = process.env, platform 
   return { command, prefix: [], metadataPath: command, shell: platform === "win32" };
 }
 
-function isPnpmEnvironment(env, packageRoot, isWin) {
-  if (/^pnpm\//.test(String((env || {}).npm_config_user_agent || ""))) return true;
-  // Fallback for direct invocation outside a pnpm shim: pnpm's global layout.
-  // Windows paths keep backslashes through normalizePath, so unify them.
+function isPnpmEnvironment(env, packageRoot, isWin, options = {}) {
+  const ua = /^pnpm\//.test(String((env || {}).npm_config_user_agent || ""));
+  // Direct invocation outside a pnpm shim falls back to pnpm's global
+  // layout. Windows paths keep backslashes through normalizePath, so unify
+  // them.
   const normalized = normalizePath(packageRoot, isWin).replace(/\\/g, "/");
-  return /\/pnpm\/global\//.test(normalized);
+  if (/\/pnpm\/global\//.test(normalized)) return true;
+  if (!ua) return false;
+  // The UA says pnpm but the package is not in pnpm's layout: an npm-global
+  // install invoked from inside a pnpm script environment would otherwise be
+  // misrecorded as pnpm (empty prefix, updates refused). Confirm against
+  // `npm root -g` before trusting the UA.
+  const runner = options.runner || spawnSync;
+  const invoke = options.npm || npmInvocation(options.execPath, env, isWin ? "win32" : "linux");
+  let result;
+  try {
+    result = runner(invoke.command, [...invoke.prefix, "root", "-g"], {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+      shell: Boolean(invoke.shell),
+    });
+  } catch {
+    return true; // cannot confirm; keep the UA signal
+  }
+  if (!result || result.status !== 0) return true;
+  const globalRoot = normalizePath(String(result.stdout || "").trim(), isWin).replace(/\\/g, "/");
+  if (!globalRoot) return true;
+  return !(normalized === globalRoot || normalized.startsWith(`${globalRoot}/`));
 }
 
 function discoverGlobalInstall(packageRoot, options = {}) {
   const env = options.env || process.env;
   const isWin = (options.platform || process.platform) === "win32";
-  if (isPnpmEnvironment(env, packageRoot, isWin)) {
+  if (isPnpmEnvironment(env, packageRoot, isWin, options)) {
     // pnpm manages its own global layout; the npm-based discovery below
     // (root -g comparison) would misclassify it, and an npm-channel update
     // would install a parallel npm copy.

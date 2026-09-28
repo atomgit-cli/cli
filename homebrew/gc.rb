@@ -42,6 +42,7 @@ class Gc < Formula
 
   def install
     bin.install "gc"
+    bin.install_symlink "gc" => "gitcode"
     bash_completion.install "completions/gc.bash" => "gc"
     zsh_completion.install "completions/gc.zsh" => "_gc"
     fish_completion.install "completions/gc.fish"

@@ -38,6 +38,14 @@ func TestDetectDistributionByBinaryPath(t *testing.T) {
 		// Intel Mac bin symlink, unresolved (missing on disk): the
 		// fallback path keeps the table-test behavior.
 		{"/usr/local/bin/gc", "archive-or-source"},
+		// The pypi marker is anchored to the pip site-packages layout; a
+		// user directory named gc_cli is not a pip install.
+		{"/home/u/gc_cli/bin/gc", "archive-or-source"},
+		{"/home/u/.local/pipx/venvs/gitcode-cli/lib/python3.11/site-packages/gc_cli/bin/gc-linux-amd64", "pypi"},
+		{"/home/u/venv/lib/python3.12/site-packages/gc_cli/bin/gc-linux-arm64", "pypi"},
+		// uv-managed tools.
+		{"/home/u/.local/share/uv/tools/gc/bin/gc", "uv"},
+		{"/home/u/AppData/Roaming/uv/tools/gc/bin/gc.exe", "uv"},
 	}
 	for _, tc := range cases {
 		if got := DetectDistribution(map[string]string{}, tc.binary); got != tc.want {

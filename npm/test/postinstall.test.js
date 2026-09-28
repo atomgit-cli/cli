@@ -222,6 +222,24 @@ test("a project-level pnpm dependency is pnpm but not global", () => {
   assert.strictEqual(metadata.global, false);
 });
 
+test("an npm-global install under a pnpm user agent is confirmed via npm root -g", () => {
+  // An npm global invoked from inside a pnpm script environment carries a
+  // pnpm user agent; the layout check alone would misrecord it as pnpm.
+  const runner = (_command, args) => {
+    if (args.includes("root")) return { status: 0, stdout: "/global/node_modules\n" };
+    if (args.includes("prefix")) return { status: 0, stdout: "/global\n" };
+    throw new Error("unexpected npm invocation");
+  };
+  const metadata = discoverGlobalInstall("/global/node_modules/@gitcode-cli/cli", {
+    npm: { command: "node", prefix: ["npm-cli.js"], metadataPath: "npm-cli.js" },
+    runner,
+    platform: "linux",
+    env: { npm_config_user_agent: "pnpm/9.15.9 npm/? node/v20" },
+  });
+  assert.strictEqual(metadata.distribution, "npm");
+  assert.strictEqual(metadata.global, true);
+});
+
 test("writeInstallMetadata cleans up its temp file when the rename fails", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-metadata-fail-"));
   const originalRenameSync = fs.renameSync;
