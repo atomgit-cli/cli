@@ -125,6 +125,28 @@ func (c *config) Get(host, key string) (string, error) {
 	return values[normalizedKey], nil
 }
 
+// FileGet retrieves a configuration value from the config file only,
+// skipping the environment-variable override that Get applies. Callers that
+// need to distinguish the configured value from an (possibly invalid)
+// environment override use this — e.g. the updater falls back to the
+// configured update.mode when GC_UPDATE_MODE holds an invalid value, which
+// Get cannot express since it returns the environment text verbatim.
+func (c *config) FileGet(host, key string) (string, error) {
+	normalizedKey, err := normalizeConfigKey(key)
+	if err != nil {
+		return "", err
+	}
+	state, err := c.readConfigState()
+	if err != nil {
+		return "", err
+	}
+	values := state.host(host)
+	if values == nil {
+		return "", nil
+	}
+	return values[normalizedKey], nil
+}
+
 // Set stores a configuration value
 func (c *config) Set(host, key, value string) error {
 	normalizedKey, err := normalizeConfigKey(key)

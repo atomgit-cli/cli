@@ -388,6 +388,16 @@ func configUpdateMode(cfg config.Config) string {
 	if cfg == nil {
 		return ""
 	}
+	// Get() honors GC_UPDATE_MODE first, which returns the (possibly
+	// invalid) environment text verbatim and masks exactly the configured
+	// value we need here. Read the file directly when the implementation
+	// supports it; foreign Config implementations fall back to Get.
+	if reader, ok := cfg.(interface {
+		FileGet(host, key string) (string, error)
+	}); ok {
+		value, _ := reader.FileGet("gitcode.com", "update.mode")
+		return value
+	}
 	value, _ := cfg.Get("gitcode.com", "update.mode")
 	return value
 }

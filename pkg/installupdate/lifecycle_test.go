@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
 
 func TestLoadBootstrapManifestAdjacentToBinary(t *testing.T) {
@@ -107,6 +109,31 @@ func TestAcquireStateLockLosingReclaimerDoesNotDoubleHold(t *testing.T) {
 		t.Fatalf("stale lock must still be reclaimable: %v", err)
 	}
 	lock.Close()
+}
+
+func TestDisabledHonorsConfigFileWhenEnvValueIsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"version":1,"hosts":{"gitcode.com":{"update.mode":"off"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.New()
+	// An invalid GC_UPDATE_MODE must fall back to the configured "off"
+	// instead of silently re-enabling the checks — the env text would mask
+	// the file value through Get().
+	t.Setenv("GC_UPDATE_MODE", "banana")
+	if !disabled(cfg, false, false) {
+		t.Fatal("config=off with GC_UPDATE_MODE=banana must be disabled")
+	}
+	t.Setenv("GC_UPDATE_MODE", "")
+	if !disabled(cfg, false, false) {
+		t.Fatal("config=off with no env override must be disabled")
+	}
+	t.Setenv("GC_UPDATE_MODE", "notify")
+	if disabled(cfg, false, false) {
+		t.Fatal("a valid env value still wins")
+	}
 }
 
 func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
