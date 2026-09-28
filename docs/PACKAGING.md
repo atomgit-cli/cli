@@ -289,7 +289,7 @@ CI、审计、不可信项目目录或自定义 npm registry 环境使用完整�
 
 `npm i` / `npm install` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
 
-npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件，因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖。
+npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件（识别为外来渠道入口的目标——如 pip console script——会被拒绝替换并给出卸载指引），因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖，pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引。
 
 正式 npm tarball 不再独立编译二进制：release workflow 的 `artifacts` job 调用 `scripts/prepare-npm-package.sh`，从同一批 GoReleaser 归档/裸二进制组装 npm 包，并将 `.tgz` 纳入 Release SHA-256 清单。`npm` job 只下载已验证的 Release artifact 并执行 OIDC Trusted Publishing；目标版本已存在时，必须下载 registry tarball 与 Release tarball 比对 SHA-256，内容一致才允许幂等跳过。
 

@@ -3360,14 +3360,14 @@ gc doctor install --json
 npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。
 
 - Windows 在用户显式执行 `install` 后，默认将安装目录置于持久 User PATH 前面并删除同目录重复项；只修改当前用户，不修改 Machine PATH、不提权、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。
-- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
+- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；识别为外来渠道入口的目标（如带 python shebang 的 pip console script）会被拒绝替换并给出对应包管理器的卸载指引；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
 - `--no-modify-path` 显式跳过 Windows 持久 PATH 修改，并输出中文 Windows 用户环境变量设置步骤；Linux/macOS 接受该参数但原有 PATH/profile 行为不变。
 - `npx` 子进程无法修改已经运行的父 PowerShell 环境。当前窗口尚未优先包含目标目录时，安装完成输出必须用中文显性给出 `$env:Path` 刷新命令、关闭全部 PowerShell/Windows Terminal 后重开的替代方式，以及 `gitcode version` 验证步骤。
 - Windows 持久化失败不会伪装为 PATH 配置成功；安装器保留已通过校验的二进制，输出中文失败原因、Windows 用户环境变量设置步骤和当前窗口刷新命令。持久写入后的系统广播失败必须单独警告并提示注销后重新登录。
 - 目标目录含分号、空字符或不是绝对 Windows 路径时，不得生成任何 PATH 修改命令，只能提示更换目录或直接运行已安装程序。
 
 - Linux/macOS 安装时，如果历史版本留下的 `gitcode` 符号链接解析后精确指向同目录常规 `gc` 文件，bootstrap 会在同一安装事务中自动迁移该别名，无需用户先删除。
-- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；Windows 不迁移符号链接。
+- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引；Windows 不迁移符号链接。
 - 别名迁移保留事务唯一备份；后续二进制校验、健康检查或 metadata 写入失败时，旧 `gc` 与原始链接会按逆序原样回滚。
 
 <a id="gitcode-update"></a>

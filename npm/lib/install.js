@@ -220,6 +220,41 @@ function resolvesIntoOwnNpmPackage(linkPath) {
   });
 }
 
+// pnpm's global layout nests our own npm package under .../pnpm/.../node_modules/,
+// which resolvesIntoOwnNpmPackage would treat as a classic npm-global leftover
+// and silently migrate. Check the raw link text and the resolved path for a
+// pnpm marker before any adoption decision and refuse instead, keeping the
+// pnpm channel intact (mirrors the Homebrew/pipx symlink refusals).
+function pnpmChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the pnpm marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  if (!surface.includes("/pnpm/")) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a pnpm global installation; run "pnpm remove -g ${coordinate}" first, ` +
+      `or keep pnpm and skip the npm bootstrap install`
+  );
+}
+
 // Channel-specific guidance for foreign symlinks, matched against both the
 // raw link text and the resolved path.
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
@@ -270,6 +305,8 @@ function replacePath(src, dst, transactionID, options = {}) {
   try {
     const stat = fs.lstatSync(dst);
     if (stat.isSymbolicLink()) {
+      const pnpmError = pnpmChannelSymlinkError(dst);
+      if (pnpmError) throw pnpmError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -280,6 +317,11 @@ function replacePath(src, dst, transactionID, options = {}) {
         `refusing non-regular install target: ${dst} is ${kind}; ` +
           `remove it or choose another directory with --target-dir <dir>`
       );
+    } else {
+      // Refuse foreign-channel regular files (e.g. pip console scripts):
+      // replacing would destroy the other channel's entry point on commit.
+      const hint = foreignChannelHint(dst);
+      if (hint) throw foreignChannelTargetError(dst, hint);
     }
     hadOriginal = true;
   } catch (error) {
@@ -303,6 +345,8 @@ function replacePath(src, dst, transactionID, options = {}) {
       if (moveOriginal) {
         fs.renameSync(dst, backup);
         backupReady = true;
+        const pnpmError = pnpmChannelSymlinkError(backup);
+        if (pnpmError) throw pnpmError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -637,9 +681,20 @@ function foreignChannelHint(file) {
   }
   const firstLine = content.split("\n", 1)[0];
   if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
-    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" instead to keep the pip channel';
+    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
   return "";
+}
+
+// Refusal error for a foreign-channel regular file occupying an install
+// target (e.g. a pip console script). The replacement would be transactional,
+// but the backup is deleted on commit, so replacing would permanently destroy
+// the other channel's entry point.
+function foreignChannelTargetError(dst, hint) {
+  return new Error(
+    `refusing to replace foreign install target: ${dst} appears to be a ${hint}\n` +
+      `install to another directory with --target-dir <dir> to keep both channels`
+  );
 }
 
 // First directory on PATH providing the given command name (resolved through
@@ -763,20 +818,6 @@ async function runInstall(args = []) {
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
   const helper = path.join(dir, "gitcode-update-helper.js");
-  // Warn before replacing foreign-channel regular files (e.g. pip console
-  // scripts in the same bin dir): the replacement is transactional, but the
-  // backup is removed on commit and the other channel loses its entry.
-  for (const target of [dst, alias, helper]) {
-    let hint = "";
-    try {
-      if (fs.lstatSync(target).isFile()) hint = foreignChannelHint(target);
-    } catch {
-      // target does not exist yet
-    }
-    if (hint) {
-      process.stdout.write(`Warning: replacing ${target}, which appears to be a ${hint}\n`);
-    }
-  }
   const aliasOptions = isWin ? {} : { allowedSymlinkTarget: dst };
   const transactionID = `${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   const transaction = [];
@@ -868,8 +909,8 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, formatErrorChain, helperPackageNameTransform,
-  installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
-  quotePowerShell, replacePath, rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory,
-  windowsPathGuidance,
+  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
+  helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
+  prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
+  sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
 };

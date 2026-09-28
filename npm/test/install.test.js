@@ -950,6 +950,91 @@ test("install keeps the generic guidance for a non-pipx directory named pipx", (
   );
 });
 
+test("install refuses a pnpm-global symlink instead of adopting it", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-link-"));
+  const pnpmBin = path.join(root, ".local", "share", "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, pnpmBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "pnpm-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(pnpmBin, "utf8"), "pnpm-wrapper");
+});
+
+test("install refuses a pnpm symlink with an absolute target or a broken link", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-abs-"));
+  const pnpmBin = path.join(root, "pnpm", "global", "5", "node_modules", "atomgit-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const absolute = path.join(binDir, "gc");
+  if (!createFileSymlinkOrSkip(t, pnpmBin, absolute)) return;
+  assert.throws(
+    () => replacePath(source, absolute, "pnpm-abs-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g atomgit-cli/.test(message);
+    }
+  );
+  // A broken link whose text still points into a pnpm tree is refused the
+  // same way (the raw link text carries the marker).
+  const broken = path.join(binDir, "gitcode");
+  if (!createFileSymlinkOrSkip(t, path.join(root, "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gone.js"), broken)) return;
+  assert.throws(
+    () => replacePath(source, broken, "pnpm-broken-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(broken).isSymbolicLink(), true);
+});
+
+test("install refuses to replace a pip console script instead of warn-and-destroy", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pip-script-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(target, "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  assert.throws(
+    () => replacePath(source, target, "pip-reject"),
+    (error) => /refusing to replace foreign install target/.test(error.message) &&
+      /pip uninstall gitcode-cli/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  // The refusal happens before any file change: the script is untouched.
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  // A plain regular file (no recognizable foreign-channel shebang) is still
+  // replaced normally.
+  const plain = path.join(binDir, "gitcode");
+  fs.writeFileSync(plain, "old-binary");
+  const record = replacePath(source, plain, "pip-plain");
+  assert.strictEqual(fs.readFileSync(plain, "utf8"), "new");
+  fs.unlinkSync(record.backup);
+});
+
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-provider-path-"));
   const early = path.join(root, "early");
