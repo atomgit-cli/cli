@@ -207,9 +207,20 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "unrelated.backup-x"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A symlink backup (an interrupted alias migration renames the link
+	// itself) must be reported with manual-deletion guidance: the sweep
+	// never removes symlinks, so the rerun-install advice would loop.
+	createdSymlink := true
+	if err := os.Symlink(filepath.Join(dir, "gc"), filepath.Join(dir, "gitcode.backup-sym-789")); err != nil {
+		createdSymlink = false
+	}
+	wantLeftovers := len(leftovers)
+	if createdSymlink {
+		wantLeftovers++
+	}
 	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
-	if len(report.Leftovers) != len(leftovers) {
-		t.Fatalf("Leftovers = %#v, want %d entries", report.Leftovers, len(leftovers))
+	if len(report.Leftovers) != wantLeftovers {
+		t.Fatalf("Leftovers = %#v, want %d entries", report.Leftovers, wantLeftovers)
 	}
 	for _, leftover := range leftovers {
 		found := false
@@ -237,5 +248,16 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 	if !conflict || !recommendation {
 		t.Fatalf("expected leftover conflict and recommendation, got conflicts=%#v recommendations=%#v",
 			report.Conflicts, report.Recommendations)
+	}
+	if createdSymlink {
+		symlinkRecommendation := false
+		for _, line := range report.Recommendations {
+			if strings.Contains(line, "symlink leftovers") && strings.Contains(line, "manually") {
+				symlinkRecommendation = true
+			}
+		}
+		if !symlinkRecommendation {
+			t.Fatalf("expected manual-deletion recommendation for symlink leftovers, got %#v", report.Recommendations)
+		}
 	}
 }

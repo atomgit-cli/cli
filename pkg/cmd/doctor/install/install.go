@@ -154,26 +154,34 @@ var transactionLeftoverPrefixes = []string{
 	".gc-install-probe-", ".gc-write-probe",
 }
 
-// transactionLeftovers lists interrupted-install leftover files in dir.
-func transactionLeftovers(dir string) []string {
+// transactionLeftovers lists interrupted-install leftovers in dir, split
+// into regular files (sweepable by age after 24h) and symlinks (never
+// swept: a renamed symlink keeps its original mtime, so age cannot prove
+// it is not owned by an active transaction).
+func transactionLeftovers(dir string) (files, symlinks []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	var found []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		for _, prefix := range transactionLeftoverPrefixes {
 			if strings.HasPrefix(entry.Name(), prefix) {
-				found = append(found, filepath.Join(dir, entry.Name()))
+				target := filepath.Join(dir, entry.Name())
+				if entry.Type()&os.ModeSymlink != 0 {
+					symlinks = append(symlinks, target)
+				} else {
+					files = append(files, target)
+				}
 				break
 			}
 		}
 	}
-	sort.Strings(found)
-	return found
+	sort.Strings(files)
+	sort.Strings(symlinks)
+	return files, symlinks
 }
 
 func addDiagnostics(report *Report, env map[string]string, goos string) {
@@ -183,15 +191,28 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 			directories[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
 		}
 	}
+	var leftoverFiles, leftoverSymlinks []string
 	for dir := range directories {
-		report.Leftovers = append(report.Leftovers, transactionLeftovers(dir)...)
+		files, symlinks := transactionLeftovers(dir)
+		leftoverFiles = append(leftoverFiles, files...)
+		leftoverSymlinks = append(leftoverSymlinks, symlinks...)
 	}
+	report.Leftovers = append(report.Leftovers, leftoverFiles...)
+	report.Leftovers = append(report.Leftovers, leftoverSymlinks...)
 	sort.Strings(report.Leftovers)
 	if len(report.Leftovers) > 0 {
 		report.Conflicts = append(report.Conflicts,
 			fmt.Sprintf("interrupted-install leftovers detected (%d file(s))", len(report.Leftovers)))
+	}
+	if len(leftoverFiles) > 0 {
 		report.Recommendations = append(report.Recommendations,
 			"rerun the npm bootstrap install to sweep stale leftovers (regular files older than 24h), or delete the listed files manually")
+	}
+	if len(leftoverSymlinks) > 0 {
+		// Recommending the sweep here would be a no-op loop: the installer
+		// deliberately never removes symlinks, so point at manual deletion.
+		report.Recommendations = append(report.Recommendations,
+			"delete the listed symlink leftovers manually: the installer never removes symlinks automatically (concurrency safety), so rerunning the install will not clear them")
 	}
 	if report.PowerShellGCAlias {
 		report.Conflicts = append(report.Conflicts, `Windows PowerShell may resolve "gc" as the Get-Content alias`)

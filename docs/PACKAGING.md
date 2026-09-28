@@ -378,7 +378,7 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 
 ### 多渠道 PATH 冲突
 
-pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
+pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。对被中断安装的残留文件，常规文件建议重跑 bootstrap 清扫（24 小时以上）或手动删除，符号链接残留明确提示只能手动删除（安装器出于并发安全永不自动清除符号链接）。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
 
 ```bash
 gitcode doctor install
