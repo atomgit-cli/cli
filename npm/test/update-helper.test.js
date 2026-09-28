@@ -26,6 +26,25 @@ test("update parseArgs accepts help and CLI-consistency flags", () => {
   assert.throws(() => parseArgs(["--force"]), /unknown update argument: --force/);
 });
 
+test("update --json reports argument errors as JSON", () => {
+  const chunks = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  try {
+    assert.strictEqual(main(["--json", "--bogus-flag"]), 1);
+  } finally {
+    process.stdout.write = original;
+  }
+  // stdout must carry a single JSON error object (the --json contract),
+  // not a stderr text line.
+  const payload = JSON.parse(chunks.join(""));
+  assert.strictEqual(payload.status, "error");
+  assert.match(payload.message, /unknown update argument/);
+});
+
 test("gc update --help prints the wrapper help and exits zero", () => {
   const chunks = [];
   const original = process.stdout.write;

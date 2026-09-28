@@ -1041,6 +1041,14 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   } finally {
     fs.renameSync = originalRenameSync;
   }
+
+  // A release never removes a lock reclaimed by another install: rewrite
+  // the pid token, release, and the other holder's lock must survive.
+  const ours = acquireInstallLock(root);
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "999999 2000-01-01T00:00:00.000Z\n");
+  releaseInstallLock(ours);
+  assert.strictEqual(fs.existsSync(path.join(root, ".gc-install-lock")), true);
+  fs.unlinkSync(path.join(root, ".gc-install-lock"));
 });
 
 test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {
@@ -1267,6 +1275,29 @@ test("install gives uv-specific guidance for a uv tool symlink", (t) => {
       const message = error.message.split(path.sep).join("/");
       return /refusing non-regular install target/.test(message) &&
         /uv tool uninstall gitcode-cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install gives yarn-specific guidance for a yarn global symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-yarn-link-"));
+  const yarnBin = path.join(root, ".config", "yarn", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(yarnBin), { recursive: true });
+  fs.writeFileSync(yarnBin, "yarn-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, yarnBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "yarn-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /yarn global remove @gitcode-cli\/cli/.test(message);
     }
   );
   assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);

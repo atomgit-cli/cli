@@ -21,7 +21,7 @@ Flags:
 
 This wrapper command manages global npm installs (atomgit-cli,
 @atomgit-cli/cli, @gitcode-cli/cli). npm-bootstrap installations are
-handled by the ${COMMAND} binary itself. Other channels (pip, Homebrew, deb, rpm)
+handled by the ${COMMAND} binary itself. Other channels (pip, uv, Homebrew, deb, rpm)
 stay user-controlled and are never invoked implicitly.
 `;
 
@@ -56,10 +56,15 @@ function main(args = process.argv.slice(2)) {
     return 0;
   } catch (error) {
     if (!options || !options.background) {
-      if (options && options.json) {
-        process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm", current: "", latest: "", message: error.message })}\n`);
+      // parseArgs failures leave options unset: detect --json from the raw
+      // argv so JSON consumers still get a JSON error object.
+      const json = options ? options.json : args.includes("--json");
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm", current: "", latest: "", message: error.summaryMessage || error.message })}\n`);
       } else {
-        process.stderr.write(`update failed: ${error.message}\n`);
+        // Prefer the composed summary message: it carries the repair
+        // guidance a permanent failure recorded, not just the raw error.
+        process.stderr.write(`${error.summaryMessage || `update failed: ${error.message}`}\n`);
       }
     }
     return 1;

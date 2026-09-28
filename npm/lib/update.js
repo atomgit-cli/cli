@@ -58,6 +58,15 @@ function writeJSON(file, value) {
       fs.renameSync(temp, file);
     } catch (error) {
       if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      // Retry once without unlinking: a concurrent writer may have just
+      // replaced the target, and the plain retry (or a transient lock)
+      // avoids destroying their write. Mirrors lib/bootstrap-update-helper.js.
+      try {
+        fs.renameSync(temp, file);
+        return;
+      } catch {
+        // Fall through to the replace below (Windows rename-over-existing).
+      }
       fs.unlinkSync(file);
       fs.renameSync(temp, file);
     }
@@ -376,13 +385,26 @@ function acquireLock(file, now = Date.now()) {
 function releaseLock(file, descriptor) {
   if (descriptor == null) return;
   try {
-    fs.closeSync(descriptor);
+    // Identity check: if this lock was reclaimed as stale while we were
+    // stalled, the path now holds someone else's fresh lock — removing it
+    // would let a third process double-hold. Only unlink what we opened.
+    const held = fs.fstatSync(descriptor);
+    const current = fs.statSync(file);
+    if (held.ino !== current.ino) return;
+  } catch {
+    // The lock file is already gone; nothing to release.
+    return;
   } finally {
     try {
-      fs.unlinkSync(file);
+      fs.closeSync(descriptor);
     } catch {
-      // Best effort; stale locks are recovered on the next attempt.
+      // Best effort.
     }
+  }
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // Best effort; stale locks are recovered on the next attempt.
   }
 }
 
@@ -500,7 +522,13 @@ function runUpdate(options = {}) {
     // "available" summaries are cleared so users never see outdated notices.
     if (result.status === "current") delete state.summary;
     else state.summary = { message: result.message, shown: !options.background };
-    writeJSON(stateFile, state);
+    try {
+      writeJSON(stateFile, state);
+    } catch (writeError) {
+      // The update itself succeeded: a failed state write must not turn it
+      // into a reported failure or feed the backoff accounting.
+      appendLog(`package=${PACKAGE} channel=npm status=state-write-failed detail="${summarizeError(writeError)}"`, process.env, options.logFile);
+    }
     appendLog(`package=${PACKAGE} channel=npm status=${result.status} current=${result.current} latest=${result.latest || "none"}`, process.env, options.logFile);
     return result;
   } catch (error) {
@@ -512,19 +540,39 @@ function runUpdate(options = {}) {
     state.nextCheck = now + failureBackoffMs(streak);
     const fingerprint = errorFingerprint(error);
     const permanent = permanentUpdateError(error);
-    state.permanentError = permanent;
+    // Sticky: a transient failure must not lift the pause a permanent one
+    // recorded — only a successful update proves the environment repaired.
+    state.permanentError = Boolean(state.permanentError) || permanent;
     if (state.lastErrorFingerprint !== fingerprint) {
       let message = `Automatic update failed: ${summarizeError(error)}.`;
       if (permanent) {
         message += /npm-bootstrap install manifest/.test(summarizeError(error))
           ? " Background checks are paused: rerun the npm bootstrap install (npx --yes --package=<coordinate>@latest gitcode install) to repair the install manifest."
           : ' Background checks are paused: reinstall Node.js, then run "gitcode update" to resume background checks.';
+      } else if (state.permanentError) {
+        // The pause is sticky from an earlier unrepaired failure; do not
+        // attribute it to the transient error at hand.
+        message += ' Background checks remain paused from an earlier unrepaired failure; repair it (rerun the bootstrap install or reinstall Node.js), then run "gitcode update".';
       }
       state.summary = { message, shown: !options.background };
       state.lastErrorFingerprint = fingerprint;
+      // Foreground failures surface the full message (including any repair
+      // guidance) through the thrown error; attach it for the CLI entry.
+      error.summaryMessage = message;
+    } else if (!options.background && state.summary) {
+      // The same failure just ran in the foreground and is being printed:
+      // mark it shown (no next-launch replay) and reuse the composed
+      // message so the display stays consistent.
+      state.summary.shown = true;
+      error.summaryMessage = state.summary.message;
     }
-    writeJSON(stateFile, state);
-    appendLog(`package=${PACKAGE} channel=npm status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`, process.env, options.logFile);
+    try {
+      writeJSON(stateFile, state);
+    } catch (writeError) {
+      // Preserve the original failure; the state loss is logged best-effort.
+      appendLog(`package=${PACKAGE} channel=npm status=state-write-failed detail="${summarizeError(writeError)}"`, process.env, options.logFile);
+    }
+    appendLog(`package=${PACKAGE} channel=npm status=error detail="${summarizeError(error)}" streak=${streak}${state.permanentError ? " permanent" : ""}`, process.env, options.logFile);
     throw error;
   } finally {
     releaseLock(lockFile, descriptor);

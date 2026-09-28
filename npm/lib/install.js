@@ -254,7 +254,11 @@ function pnpmChannelSymlinkError(dst) {
     // Broken link: the raw text still carries the pnpm marker.
   }
   const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
-  if (!surface.includes("/pnpm/")) return null;
+  // Two markers: the default global layout (.../pnpm/global/...) and the
+  // store layout (/.pnpm/<name>@<version>/...) — the store marker survives
+  // custom PNPM_HOME naming. Keep in sync with isPnpmEnvironment's layout
+  // marker in install-metadata.js.
+  if (!surface.includes("/pnpm/global/") && !surface.includes("/.pnpm/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -270,12 +274,47 @@ function pnpmChannelSymlinkError(dst) {
   );
 }
 
+// yarn v1 global bin links resolve into ~/.config/yarn/global/node_modules/
+// <own coordinate>/... — the same shape as a classic npm install, so the
+// adoption check below would silently migrate (and destroy) the yarn
+// channel entry. Refuse first, mirroring the pnpm defense.
+function yarnChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the yarn marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  if (!surface.includes("/yarn/global/")) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a yarn global installation; run "yarn global remove ${coordinate}" first, ` +
+      `or keep yarn and skip the npm bootstrap install`
+  );
+}
+
 // Channel-specific guidance for foreign symlinks, matched against both the
 // raw link text and the resolved path.
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
   { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/uv/tools/", guidance: 'this symlink belongs to a uv-managed tool; run "uv tool uninstall gitcode-cli" first, or keep uv and skip the npm bootstrap install' },
+  { marker: "/yarn/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
   { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
 ];
 
@@ -323,6 +362,8 @@ function replacePath(src, dst, transactionID, options = {}) {
     if (stat.isSymbolicLink()) {
       const pnpmError = pnpmChannelSymlinkError(dst);
       if (pnpmError) throw pnpmError;
+      const yarnError = yarnChannelSymlinkError(dst);
+      if (yarnError) throw yarnError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -363,6 +404,8 @@ function replacePath(src, dst, transactionID, options = {}) {
         backupReady = true;
         const pnpmError = pnpmChannelSymlinkError(backup);
         if (pnpmError) throw pnpmError;
+        const yarnError = yarnChannelSymlinkError(backup);
+        if (yarnError) throw yarnError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -459,6 +502,9 @@ function sha256(file) {
 function runGc(bin, args) {
   return spawnSync(bin, args, {
     encoding: "utf8",
+    // A blocked child (AV scanning the fresh binary, hung shell) must not
+    // hang the whole install indefinitely.
+    timeout: 30000,
     env: {
       ...process.env,
       // The installer's own probes must not run the update lifecycle: the
@@ -513,24 +559,31 @@ function writeCompletionFile(target, content) {
 
 function installCompletions(bin, home) {
   const installed = [];
+  const skipped = [];
   for (const shell of ["bash", "zsh", "fish"]) {
     const res = runGc(bin, ["completion", shell]);
-    if (res.status !== 0 || !res.stdout) continue;
+    if (res.status !== 0 || !res.stdout) {
+      skipped.push(`${shell}: completion command failed`);
+      continue;
+    }
     const target = completionTarget(shell, home);
-    if (!target) continue;
+    if (!target) {
+      skipped.push(`${shell}: no completion target`);
+      continue;
+    }
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       const written = writeCompletionFile(target, res.stdout);
       if (written.skipped) {
-        process.stdout.write(`Skipped ${shell} completion: ${target} is a symlink\n`);
+        skipped.push(`${shell}: ${target} is a symlink`);
         continue;
       }
       installed.push(`${shell}: ${target}`);
     } catch {
-      /* skip unwritable */
+      skipped.push(`${shell}: ${target} not writable`);
     }
   }
-  return installed;
+  return { installed, skipped };
 }
 
 // Whether the per-user fallback dir is on PATH (pure).
@@ -671,6 +724,9 @@ function persistWindowsUserPath(dir, options = {}) {
   const result = runner(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_UPDATE_USER_PATH], {
     encoding: "utf8",
     windowsHide: true,
+    // The script itself waits up to 30s on the global PATH mutex; 90s
+    // bounds a hung PowerShell without cutting a legitimate slow wait.
+    timeout: 90000,
     env: windowsPowerShellEnv(env, { GITCODE_CLI_TARGET_DIR: dir }),
   });
   if (result.error || result.status !== 0) {
@@ -797,6 +853,7 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
     if (shadow.scope === "user") {
       lines.push(`  注意：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
       lines.push("  该提供者位于用户 PATH，重新打开 PowerShell/Windows Terminal 窗口后本安装将优先生效。");
+      lines.push("  若同一提供者同时位于系统 PATH，重开后仍由其优先生效；请运行 gitcode doctor install 确认全部来源。");
     } else if (shadow.scope === "system") {
       lines.push(`  警告：PATH 中 "${shadow.name}" 解析到 ${shadow.provider}，重开窗口也无法解决（该提供者位于系统 PATH 或 shell 配置，合并顺序在用户 PATH 之前）。`);
       lines.push("  请卸载旧提供者，或由管理员将本安装目录加入系统 PATH 并置于其前；运行 gitcode doctor install 查看全部来源。");
@@ -968,6 +1025,16 @@ function acquireInstallLock(dir, now = Date.now()) {
 
 function releaseInstallLock(lock) {
   try {
+    // Identity check via the pid token written at claim time: if this lock
+    // was reclaimed as stale while we were stalled, the path now holds
+    // another install's fresh lock and must not be removed.
+    const holder = fs.readFileSync(lock, "utf8").trim().split(" ")[0];
+    if (holder !== String(process.pid)) return;
+  } catch {
+    // The lock file is already gone; nothing to release.
+    return;
+  }
+  try {
     fs.unlinkSync(lock);
   } catch {
     // Best effort: a stranded lock self-heals after INSTALL_LOCK_STALE_MS.
@@ -1027,7 +1094,7 @@ function formatErrorChain(error) {
 }
 
 async function runInstall(args = []) {
-  if (args.length === 1 && ["-h", "--help"].includes(args[0])) {
+  if (args.includes("-h") || args.includes("--help")) {
     process.stdout.write(installHelp());
     return;
   }
@@ -1118,20 +1185,25 @@ async function runInstall(args = []) {
   }
 
   // Completions (posix only; Windows shell completion differs).
-  const completions = isWin ? [] : installCompletions(dst, home);
+  const completions = isWin ? { installed: [], skipped: [] } : installCompletions(dst, home);
   const windowsPathResult = isWin && options.modifyPath
     ? persistWindowsUserPath(dir)
     : { ok: true, changed: false };
 
   process.stdout.write(`Installed gc and gitcode to ${dir}\n`);
   process.stdout.write(`  ${versionLine}\n`);
-  if (completions.length) {
+  if (completions.installed.length) {
     process.stdout.write(`Shell completions installed:\n`);
-    for (const c of completions) process.stdout.write(`  ${c}\n`);
+    for (const c of completions.installed) process.stdout.write(`  ${c}\n`);
   } else if (isWin) {
     process.stdout.write(`Shell completions: skipped on Windows. Run "gc completion bash|powershell" manually if needed.\n`);
   } else {
-    process.stdout.write(`Shell completions: skipped (none writable). Run "gc completion bash|zsh|fish" manually.\n`);
+    process.stdout.write(`Shell completions: none installed. Run "gc completion bash|zsh|fish" manually.\n`);
+  }
+  // Attribution for the skips: a failed completion command is a different
+  // problem than an unwritable target.
+  for (const s of completions.skipped) {
+    process.stdout.write(`  skipped: ${s}\n`);
   }
 
   // PATH registration and guidance.
@@ -1168,4 +1240,5 @@ module.exports = {
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
   sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,
+  yarnChannelSymlinkError,
 };

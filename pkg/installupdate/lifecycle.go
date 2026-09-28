@@ -128,6 +128,15 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 	}
 	if err := StartDetached(manifest, false); err != nil {
 		fmt.Fprintf(errOut, "update check skipped: %v\n", err)
+		// A missing or broken helper fails on every command; without a
+		// backoff this prints on each invocation forever. Rate-limit the
+		// retry to hourly (a repaired install or a successful update
+		// resets the schedule; the JS helper owns the finer backoff).
+		_ = mutateStateLocked(statePath, func(current *updateState) {
+			if current.NextCheck <= time.Now().UnixMilli() {
+				current.NextCheck = time.Now().Add(time.Hour).UnixMilli()
+			}
+		})
 	}
 }
 
@@ -139,7 +148,12 @@ func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	}
 	defer func() {
 		_ = lock.Close()
-		_ = os.Remove(lockPath)
+		// Identity check: if this lock was reclaimed as stale while we were
+		// stalled, the path now holds someone else's fresh lock — removing
+		// it would let a third process double-hold.
+		if data, err := os.ReadFile(lockPath); err == nil && strings.TrimSpace(string(data)) == strconv.Itoa(os.Getpid()) {
+			_ = os.Remove(lockPath)
+		}
 	}()
 	state := readState(path)
 	mutate(&state)
@@ -157,6 +171,12 @@ func acquireStateLock(path string) (*os.File, error) {
 	}
 	lock, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if !os.IsExist(err) {
+		if err == nil {
+			// Record the holder so release can verify identity: a stalled
+			// holder resuming after a stale reclaim must not remove the
+			// reclaimer's fresh lock.
+			_, _ = lock.WriteString(strconv.Itoa(os.Getpid()))
+		}
 		return lock, err
 	}
 	info, statErr := os.Stat(path)
@@ -185,6 +205,7 @@ func acquireStateLock(path string) (*os.File, error) {
 	if claimErr != nil {
 		return nil, claimErr
 	}
+	_, _ = lock.WriteString(strconv.Itoa(os.Getpid()))
 	return lock, nil
 }
 

@@ -206,11 +206,17 @@ func transactionLeftovers(dir string) (files, symlinks []string) {
 }
 
 func addDiagnostics(report *Report, env map[string]string, goos string) {
-	directories := map[string]struct{}{}
+	// PATH-candidate directories only: membership answers "is this
+	// directory on PATH" (the leftover scan below uses a wider set).
+	pathDirs := map[string]struct{}{}
 	for _, command := range []string{"gitcode", "gc"} {
 		for _, candidate := range report.Commands[command].Candidates {
-			directories[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
+			pathDirs[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
 		}
+	}
+	directories := map[string]struct{}{}
+	for dir := range pathDirs {
+		directories[dir] = struct{}{}
 	}
 	// The install directory is not necessarily on PATH, so leftovers there
 	// are invisible to the candidate scan; include the binary and entrypoint
@@ -271,6 +277,20 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 			if normalizedPath(filepath.Dir(selected), goos) != normalizedPath(expected, goos) {
 				report.Conflicts = append(report.Conflicts, "another gitcode command appears before the npm global bin directory")
 				report.Recommendations = append(report.Recommendations, fmt.Sprintf("move %s before %s on PATH, or uninstall the older global channel explicitly", expected, filepath.Dir(selected)))
+			}
+		}
+	case "npm-bootstrap":
+		// The bootstrap layout records its bin directory in the adjacent
+		// manifest. An install directory that is not on PATH (direct
+		// invocation by full path) is invisible to the candidate-based
+		// checks; a shadowed-but-on-PATH install is covered by the
+		// multiple-provider check above.
+		if target := manifestTargetDir(report.Binary); target != "" {
+			if _, ok := pathDirs[normalizedPath(target, goos)]; !ok {
+				report.Conflicts = append(report.Conflicts,
+					fmt.Sprintf("the bootstrap install at %s is not on PATH (invoked directly)", target))
+				report.Recommendations = append(report.Recommendations,
+					fmt.Sprintf("add %s to PATH or remove the other providers so the bootstrap install resolves", target))
 			}
 		}
 	case "pnpm":
@@ -337,6 +357,25 @@ func pnpmGlobal(packageRoot string) bool {
 		return false
 	}
 	return metadata.Global
+}
+
+// manifestTargetDir reads the targetDir recorded in the bootstrap manifest
+// adjacent to the binary (empty when absent or unreadable).
+func manifestTargetDir(binary string) string {
+	if binary == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(binary), ".gitcode-install.json"))
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		TargetDir string `json:"targetDir"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return ""
+	}
+	return manifest.TargetDir
 }
 
 func normalizedPath(value, goos string) string {
