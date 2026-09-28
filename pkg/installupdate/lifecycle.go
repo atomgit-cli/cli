@@ -2,6 +2,8 @@
 package installupdate
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +21,7 @@ import (
 const (
 	updateTTL       = 24 * time.Hour
 	updateLockStale = 15 * time.Minute
+	checkDeadline   = 120 * time.Second
 )
 
 // Manifest describes an npm-bootstrap installation.
@@ -186,11 +189,73 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	if jsonOutput {
 		args = append(args, "--json")
 	}
-	cmd := exec.Command(node, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
 	cmd.Stdout = out
 	cmd.Stderr = errOut
 	return cmd.Run()
+}
+
+// CheckResult mirrors the bootstrap helper's JSON result for a foreground
+// update check.
+type CheckResult struct {
+	Status       string `json:"status"`
+	Distribution string `json:"distribution"`
+	Current      string `json:"current"`
+	Latest       string `json:"latest"`
+	Message      string `json:"message"`
+}
+
+// CheckNow runs a foreground update check and parses the helper's result.
+// A failed check returns the helper's error message so callers can surface
+// the underlying cause instead of a generic failure notice.
+func CheckNow(manifest *Manifest) (*CheckResult, error) {
+	node := resolveNode(manifest.Node)
+	args := []string{manifest.Helper, "--check", "--json", "--manifest", manifest.ManifestPath()}
+	var stdout, stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
+	cmd.Env = updaterEnvironment()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	var result CheckResult
+	parseErr := json.Unmarshal(stdout.Bytes(), &result)
+	if parseErr == nil && result.Status != "error" {
+		return &result, nil
+	}
+	detail := ""
+	if parseErr == nil {
+		detail = result.Message
+	}
+	if detail == "" {
+		detail = strings.TrimSpace(stderr.String())
+	}
+	if detail == "" {
+		switch {
+		case runErr != nil:
+			detail = runErr.Error()
+		case parseErr != nil:
+			detail = parseErr.Error()
+		}
+	}
+	return nil, fmt.Errorf("update check failed: %s", truncateDetail(detail))
+}
+
+// truncateDetail bounds helper error details to one collapsed line so failure
+// summaries and JSON output stay readable regardless of npm stderr volume.
+func truncateDetail(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 200 {
+		text = text[:200] + "..."
+	}
+	if text == "" {
+		text = "unknown update check failure"
+	}
+	return text
 }
 
 func resolveNode(recorded string) string {
