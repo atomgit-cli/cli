@@ -94,9 +94,15 @@ function updaterEnvironment(env = process.env) {
 }
 
 function appendLog(message) {
-  const file = path.join(path.dirname(statePath()), "update.log");
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  try {
+    const file = path.join(path.dirname(statePath()), "update.log");
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  } catch {
+    // Logging is best-effort: an unwritable update.log (root-owned file,
+    // read-only directory) must never turn a successful update into a
+    // reported failure or replace the real result summary.
+  }
 }
 
 // Collapses an error into one bounded line so failure summaries stay readable
@@ -290,10 +296,17 @@ function run(options) {
       result = { status: "updated", distribution: "npm-bootstrap", current: manifest.version, latest, message: `Updated GitCode CLI ${manifest.version} -> ${latest}.` };
     }
     const now = Date.now();
-    state.lastChecked = new Date(now).toISOString();
-    state.nextCheck = now + TTL_MS;
-    state.summary = { message: result.message, shown: !options.background };
-    writeJSON(stateFile, state);
+    // Re-read under the lock: the pre-lock snapshot can be minutes old after
+    // a long check or install, and writing it back would roll back notice
+    // flags or summary state another process recorded meanwhile.
+    const fresh = readJSON(stateFile);
+    fresh.lastChecked = new Date(now).toISOString();
+    fresh.nextCheck = now + TTL_MS;
+    // "current" carries no action for the user; queueing it would print the
+    // notice once a day. Stale "available" summaries are cleared instead.
+    if (result.status === "current") delete fresh.summary;
+    else fresh.summary = { message: result.message, shown: !options.background };
+    writeJSON(stateFile, fresh);
     appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;
   } finally {
@@ -315,12 +328,7 @@ function main(args = process.argv.slice(2)) {
     return 0;
   } catch (error) {
     if (options && options.background) {
-      const file = statePath();
-      const state = readJSON(file);
-      state.nextCheck = Date.now() + TTL_MS;
-      state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: false };
-      writeJSON(file, state);
-      appendLog(`status=error detail="${summarizeError(error)}"`);
+      recordBackgroundFailure(error);
     }
     if (!options || !options.background) {
       if (options && options.json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
@@ -328,6 +336,34 @@ function main(args = process.argv.slice(2)) {
     }
     return 1;
   }
+}
+
+// Records a background failure under the state lock. When the lock is held
+// by another updater the write is skipped entirely: writing without the lock
+// could clobber a pending summary or push nextCheck forward underneath the
+// lock owner.
+function recordBackgroundFailure(error) {
+  const file = statePath();
+  const lock = `${file}.lock`;
+  const descriptor = acquireLock(lock);
+  if (descriptor == null) {
+    appendLog(`status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
+    return;
+  }
+  try {
+    const state = readJSON(file);
+    state.nextCheck = Date.now() + TTL_MS;
+    state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: false };
+    writeJSON(file, state);
+  } finally {
+    fs.closeSync(descriptor);
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      // Best effort; stale locks are reclaimed after LOCK_STALE_MS.
+    }
+  }
+  appendLog(`status=error detail="${summarizeError(error)}"`);
 }
 
 if (require.main === module) process.exitCode = main();

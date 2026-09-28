@@ -160,7 +160,7 @@ test("global updater falls back when the recorded npm runtime is stale", () => {
   assert.notDeepStrictEqual(command.prefix, [path.join(os.tmpdir(), "missing-npm-cli.js")]);
 });
 
-function flakyNpmStub(dir, failures) {
+function flakyNpmStub(dir, failures, version = "1.2.3") {
   const attemptsFile = path.join(dir, "attempts");
   const stub = path.join(dir, "flaky-npm-cli.js");
   fs.writeFileSync(stub, [
@@ -168,7 +168,7 @@ function flakyNpmStub(dir, failures) {
     `const attempts = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
     `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(attempts + 1));`,
     `if (attempts < ${failures}) { process.stderr.write("network ECONNRESET from stub\\n"); process.exit(1); }`,
-    'process.stdout.write(\'"1.2.3"\\n\');',
+    `process.stdout.write(${JSON.stringify(`"${version}"\n`)});`,
     "",
   ].join("\n"));
   return { stub, attemptsFile };
@@ -222,6 +222,47 @@ test("summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
   assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
   assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
+});
+
+test("a current check queues no next-launch summary and clears stale notices", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-current-"));
+  const stateDir = path.join(dir, "state");
+  const stateFile = path.join(stateDir, "update-state.json");
+  writeJSON(stateFile, { summary: { message: "GitCode CLI 9.9.9 is available.", shown: false } });
+  const { stub } = flakyNpmStub(dir, 0, "0.0.1");
+  const result = runUpdate({
+    stateFile,
+    background: true,
+    metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+  });
+  assert.strictEqual(result.status, "current");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.strictEqual(state.summary, undefined, "current results must not queue a daily notice");
+  assert.ok(state.nextCheck > Date.now());
+});
+
+test("an unwritable update.log never turns a successful check into a failure", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-log-fail-"));
+  const stateDir = path.join(dir, "state");
+  fs.mkdirSync(stateDir);
+  fs.mkdirSync(path.join(stateDir, "update.log"), { recursive: false });
+  const stateFile = path.join(stateDir, "update-state.json");
+  const { stub } = flakyNpmStub(dir, 0, "0.0.1");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(result.status, "current");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.strictEqual(state.summary, undefined, "a successful check must not be rewritten as a failure");
+  assert.ok(state.nextCheck > Date.now());
 });
 
 test("global health checks execute the wrapper inside the recorded prefix", () => {

@@ -59,7 +59,7 @@ test("bootstrap updater falls back to PATH when recorded npm is stale", () => {
   assert.notDeepStrictEqual(command.prefix, [missing]);
 });
 
-function flakyNpmStub(dir, failures) {
+function flakyNpmStub(dir, failures, version = "0.0.2") {
   const attemptsFile = path.join(dir, "attempts");
   const stub = path.join(dir, "flaky-npm-cli.js");
   fs.writeFileSync(stub, [
@@ -67,7 +67,7 @@ function flakyNpmStub(dir, failures) {
     `const attempts = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
     `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(attempts + 1));`,
     `if (attempts < ${failures}) { process.stderr.write("network ECONNRESET from stub\\n"); process.exit(1); }`,
-    'process.stdout.write(\'"0.0.2"\\n\');',
+    `process.stdout.write(${JSON.stringify(`"${version}"\n`)});`,
     "",
   ].join("\n"));
   return { stub, attemptsFile };
@@ -85,6 +85,59 @@ test("bootstrap registry checks fail after exhausting the retry budget", () => {
   const { stub, attemptsFile } = flakyNpmStub(dir, CHECK_ATTEMPTS);
   assert.throws(() => latestVersion({ npm: stub }), /ECONNRESET/);
   assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), CHECK_ATTEMPTS);
+});
+
+test("bootstrap background current check queues no summary and clears stale notices", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-current-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const { stub } = flakyNpmStub(root, 0, "0.0.1");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  fs.writeFileSync(path.join(stateDir, "update-state.json"), JSON.stringify({
+    summary: { message: "GitCode CLI 9.9.9 is available.", shown: false },
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--force", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
+  assert.strictEqual(state.summary, undefined, "current results must not queue a daily notice");
+  assert.ok(state.nextCheck > Date.now());
+});
+
+test("bootstrap failure state writes respect the cross-process lock", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-lock-fail-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const stateFile = path.join(stateDir, "update-state.json");
+  const original = JSON.stringify({ nextCheck: 123, noticeShown: true, summary: { message: "pending", shown: false } });
+  fs.writeFileSync(stateFile, original);
+  const lock = fs.openSync(`${stateFile}.lock`, "wx", 0o600);
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({ distribution: "bogus" }));
+  try {
+    const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--manifest", manifestFile], {
+      encoding: "utf8",
+      timeout: 20000,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+    });
+    assert.strictEqual(result.status, 1, result.stderr);
+    assert.strictEqual(fs.readFileSync(stateFile, "utf8"), original, "state must stay untouched while another updater holds the lock");
+    const log = fs.readFileSync(path.join(stateDir, "update.log"), "utf8");
+    assert.match(log, /state locked; summary skipped/);
+  } finally {
+    fs.closeSync(lock);
+    fs.unlinkSync(`${stateFile}.lock`);
+  }
 });
 
 test("bootstrap failure summaries carry the real error instead of a dead-end notice", { timeout: 30000 }, () => {
