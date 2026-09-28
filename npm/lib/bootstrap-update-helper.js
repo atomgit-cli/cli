@@ -401,6 +401,15 @@ function run(options) {
   const descriptor = acquireLock(lock);
   if (descriptor == null) return { status: "busy", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Another update is running." };
   try {
+    // Re-check under the lock (mirrors lib/update.js): a foreground check
+    // that finished while we waited for the lock must not be repeated, and
+    // its freshly written nextCheck/summary must not be overwritten.
+    if (options.background) {
+      const pending = readJSON(stateFile);
+      if (pending.permanentError || (pending.nextCheck && Number(pending.nextCheck) > Date.now())) {
+        return { status: "cached", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Update check is not due yet." };
+      }
+    }
     const latest = latestVersion(manifest);
     const { comparison, prerelease } = currentVsLatest(manifest.version, latest);
     let result;
@@ -486,7 +495,9 @@ function recordBackgroundFailure(error) {
     state.nextCheck = now + failureBackoffMs(streak);
     const fingerprint = errorFingerprint(error);
     const permanent = permanentUpdateError(error);
-    state.permanentError = permanent;
+    // Sticky: a transient failure must not lift the pause a permanent one
+    // recorded — only a successful update proves the environment repaired.
+    state.permanentError = Boolean(state.permanentError) || permanent;
     // Deduplicate by fingerprint: the same failure on the next backoff
     // attempt must not requeue (and reprint) the seen summary.
     if (state.lastErrorFingerprint !== fingerprint) {

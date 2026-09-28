@@ -253,6 +253,84 @@ test("a failed rollback tells the user how to recover manually", { timeout: 3000
   assert.match(state.summary.message, /npm install -g/, "the failure summary must carry the manual recovery hint");
 });
 
+test("a foreground failure surfaces the full summary and never re-queues it", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-foreground-"));
+  const stateDir = path.join(dir, "state");
+  const stateFile = path.join(stateDir, "update-state.json");
+  const { stub } = flakyNpmStub(dir, 99, "0.0.2");
+  const metadata = { global: true, distribution: "npm", prefix: dir, npm: stub };
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  let caught;
+  try {
+    try {
+      runUpdate({ stateFile, metadata });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught, "the update must throw");
+    // The thrown error carries the composed summary (repair guidance
+    // included) so the CLI entry can print the full message.
+    assert.match(caught.summaryMessage, /^Automatic update failed: /);
+    let state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.summary.shown, true, "a foreground failure is displayed now, not re-queued");
+
+    // The same failure again in the foreground must not reset shown.
+    try {
+      runUpdate({ stateFile, metadata });
+    } catch (error) {
+      caught = error;
+    }
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.summary.shown, true, "an identical fingerprint must stay shown");
+    assert.match(caught.summaryMessage, /^Automatic update failed: /);
+
+    // A transient failure must not lift a recorded permanent pause.
+    writeJSON(stateFile, {
+      ...state,
+      permanentError: true,
+      lastErrorFingerprint: "old-fingerprint",
+      summary: { message: "Automatic update failed: earlier.", shown: true },
+    });
+    try {
+      runUpdate({ stateFile, metadata });
+    } catch {
+      // expected
+    }
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.permanentError, true, "the pause is sticky until a success clears it");
+    assert.match(state.summary.message, /remain paused from an earlier unrepaired failure/);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+});
+
+test("a failed state write never turns a successful update into a failure", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-statefail-"));
+  const stateDir = path.join(dir, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const { stub } = flakyNpmStub(dir, 0, "0.0.1");
+  // Make the state file unwritable-by-rename: a directory at the target
+  // path makes writeJSON's rename fail with EISDIR/ENOTEMPTY.
+  const stateFile = path.join(stateDir, "update-state.json");
+  fs.mkdirSync(stateFile);
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      checkOnly: true,
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    // The check succeeded; the state failure must not surface as an error.
+    assert.strictEqual(result.status, "current");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+});
+
 test("runUpdate failure summaries carry the real error for the next launch", { timeout: 30000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-fail-"));
   const stateDir = path.join(dir, "state");

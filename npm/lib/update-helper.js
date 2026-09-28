@@ -56,10 +56,15 @@ function main(args = process.argv.slice(2)) {
     return 0;
   } catch (error) {
     if (!options || !options.background) {
-      if (options && options.json) {
-        process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm", current: "", latest: "", message: error.message })}\n`);
+      // parseArgs failures leave options unset: detect --json from the raw
+      // argv so JSON consumers still get a JSON error object.
+      const json = options ? options.json : args.includes("--json");
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm", current: "", latest: "", message: error.summaryMessage || error.message })}\n`);
       } else {
-        process.stderr.write(`update failed: ${error.message}\n`);
+        // Prefer the composed summary message: it carries the repair
+        // guidance a permanent failure recorded, not just the raw error.
+        process.stderr.write(`${error.summaryMessage || `update failed: ${error.message}`}\n`);
       }
     }
     return 1;
