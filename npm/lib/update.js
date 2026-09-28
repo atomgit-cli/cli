@@ -86,11 +86,14 @@ function updaterEnvironment(env = process.env) {
   return clean;
 }
 
-function appendLog(message, env = process.env) {
+// Appends to the shared update.log at the state root. The `file` override
+// exists so callers (and tests) that inject a custom state file can keep
+// the log beside it instead of writing to the production state directory.
+function appendLog(message, env = process.env, file) {
   try {
-    const file = path.join(stateDir(env), "update.log");
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+    const target = file || path.join(stateDir(env), "update.log");
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(target, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
   } catch {
     // Logging is best-effort: an unwritable update.log (root-owned file,
     // read-only directory) must never turn a successful update into a
@@ -103,8 +106,15 @@ function appendLog(message, env = process.env) {
 // timeouts, spawn failures) instead of a generic dead-end notice.
 function summarizeError(error) {
   const raw = (error && (error.message || error.code)) || error;
-  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
-  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+  let text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
+  if (text.length > 200) {
+    let cut = text.slice(0, 200);
+    // Do not leave an orphaned high surrogate at the cut boundary.
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    text = `${cut}...`;
+  }
+  return text;
 }
 
 // Permanent update failures: retrying cannot fix them (the on-disk install
@@ -141,6 +151,16 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+// Mirrors lib/install.js and lib/bootstrap-update-helper.js.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
+}
+
 function updateMode(env = process.env) {
   const fromEnv = (env.GC_UPDATE_MODE || "").toLowerCase();
   if (["auto", "notify", "off"].includes(fromEnv)) return fromEnv;
@@ -149,18 +169,33 @@ function updateMode(env = process.env) {
   return ["auto", "notify", "off"].includes(configured) ? configured : "notify";
 }
 
+function truthy(value) {
+  return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
+}
+
+// cobra/pflag accepts --flag and --flag=value for boolean flags while the
+// wrapper sees raw argv; --flag=false must not count as set.
+function flagSet(args, name) {
+  return args.some((arg) => arg === name ||
+    (arg.startsWith(`${name}=`) && truthy(arg.slice(name.length + 1))));
+}
+
+// CI detection covers the vendors that do not set CI=true (Jenkins,
+// TeamCity, CodeShip): the variants carry version or build strings, so
+// their mere presence is the signal. Mirrors the Go ciEnvironment.
+function ciEnvironment(env = process.env) {
+  if (truthy(env.CI)) return true;
+  return Boolean(env.GITHUB_ACTIONS || env.BUILD_NUMBER || env.CI_NAME || env.TEAMCITY_VERSION);
+}
+
 function disabledForInvocation(args = [], env = process.env) {
   return (
     truthy(env.GC_NO_UPDATE_CHECK) ||
-    truthy(env.CI) ||
-    args.includes("--no-update-check") ||
-    args.includes("--no-interactive") ||
+    ciEnvironment(env) ||
+    flagSet(args, "--no-update-check") ||
+    flagSet(args, "--no-interactive") ||
     updateMode(env) === "off"
   );
-}
-
-function truthy(value) {
-  return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
 }
 
 function stableVersion(value) {
@@ -240,6 +275,10 @@ function checkLatest(metadata) {
       return latest;
     }
     lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    // Deterministic registry errors (package deleted or renamed, auth or
+    // forbidden): retrying cannot fix them, so fail fast instead of burning
+    // the attempt budget on every scheduled check.
+    if (DETERMINISTIC_NPM_ERROR.test(String(result.stderr || ""))) break;
     if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
   }
   throw lastError;
@@ -264,7 +303,7 @@ function healthCheck(metadata, expectedVersion) {
     env: updaterEnvironment(),
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "updated CLI health check failed").trim());
+  if (result.status !== 0) throw new Error(commandFailureDetail(result, "updated CLI health check failed"));
   const version = JSON.parse(result.stdout).version;
   if (compareVersions(version, expectedVersion) !== 0) {
     throw new Error(`updated CLI reported ${version}, expected ${expectedVersion}`);
@@ -284,6 +323,10 @@ function installExact(metadata, version) {
 function exactInstallArgs(metadata, version) {
   return [
     "install", "-g", `${PACKAGE}@${version}`, "--ignore-scripts", "--no-audit", "--no-fund",
+    // A 60s fetch timeout lets npm's own fetch-retries finish inside the
+    // 300s overall budget; with the npm default (300s) a single stalled
+    // request consumes the whole budget and the retries never run.
+    "--fetch-timeout=60000",
     "--prefix", metadata.prefix,
   ];
 }
@@ -327,6 +370,29 @@ function shouldOnlyNotify(options) {
   return Boolean(options.checkOnly || (options.mode === "notify" && options.background));
 }
 
+// npm error codes that retrying cannot fix (404 package deleted/renamed,
+// 401/403 auth). Mirrors lib/bootstrap-update-helper.js.
+const DETERMINISTIC_NPM_ERROR = /code E(40[01345]|42[89])/;
+
+function isPrereleaseVersion(value) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(value || "").trim());
+}
+
+// Compares the installed version against the stable latest. A prerelease
+// current (a manual @next install) with a stable latest is a legitimate
+// upgrade path: report it as available instead of an unactionable
+// "cannot compare" that would keep failing on every scheduled check. A
+// garbage current version is not a prerelease and still fails loudly.
+// Mirrors lib/bootstrap-update-helper.js.
+function currentVsLatest(current, latest) {
+  const comparison = compareVersions(current, latest);
+  if (comparison != null) return { comparison, prerelease: false };
+  if (isPrereleaseVersion(current) && stableVersion(latest) != null) {
+    return { comparison: -1, prerelease: true };
+  }
+  return { comparison: null, prerelease: false };
+}
+
 function performUpdate(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, "..");
   const metadata = options.metadata || readInstallMetadata(packageRoot);
@@ -348,11 +414,12 @@ function performUpdate(options = {}) {
     throw new Error("automatic update is available only for a global npm installation");
   }
   const latest = checkLatest(metadata);
-  const comparison = compareVersions(pkg.version, latest);
+  const { comparison, prerelease } = currentVsLatest(pkg.version, latest);
   if (comparison == null) throw new Error(`cannot compare versions ${pkg.version} and ${latest}`);
   if (comparison >= 0) return resultObject("current", latest, `GitCode CLI ${pkg.version} is current.`);
   if (shouldOnlyNotify(options)) {
-    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}).`);
+    const note = prerelease ? ", a prerelease" : "";
+    return resultObject("available", latest, `GitCode CLI ${latest} is available (current ${pkg.version}${note}); run "gitcode update" to install it.`);
   }
 
   try {
@@ -363,10 +430,17 @@ function performUpdate(options = {}) {
     try {
       installExact(metadata, pkg.version);
       healthCheck(metadata, pkg.version);
-      throw new Error(`${error.message}; restored ${pkg.version}`);
+      const restored = new Error(`${error.message}; restored ${pkg.version}`);
+      // Explicit marker: a rollback failure whose text happens to contain
+      // "restored" must not be mistaken for a successful restore.
+      restored.restored = true;
+      throw restored;
     } catch (rollbackError) {
-      if (rollbackError.message.includes("restored")) throw rollbackError;
-      throw new Error(`${error.message}; rollback failed: ${rollbackError.message}`);
+      if (rollbackError.restored) throw rollbackError;
+      throw new Error(
+        `${error.message}; rollback failed: ${rollbackError.message}; ` +
+          `recover manually with "npm install -g ${PACKAGE}@${pkg.version}"`
+      );
     }
   }
 }
@@ -377,6 +451,15 @@ function runUpdate(options = {}) {
   const descriptor = acquireLock(lockFile);
   if (descriptor == null) return resultObject("busy", "", "Another GitCode CLI update is already running.");
   try {
+    // Re-check under the lock: two wrappers spawned milliseconds apart both
+    // pass shouldSchedule, and the loser must not repeat the check the
+    // winner just finished. Explicit updates are never TTL-gated.
+    if (options.background) {
+      const pending = readJSON(stateFile);
+      if (pending.permanentError || (pending.nextCheck && Number(pending.nextCheck) > Date.now())) {
+        return resultObject("cached", "", "Update check is not due yet.");
+      }
+    }
     const mode = options.mode || updateMode();
     const result = performUpdate({ ...options, mode });
     const now = Date.now();
@@ -394,7 +477,7 @@ function runUpdate(options = {}) {
     if (result.status === "current") delete state.summary;
     else state.summary = { message: result.message, shown: !options.background };
     writeJSON(stateFile, state);
-    appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
+    appendLog(`package=${PACKAGE} channel=npm status=${result.status} current=${result.current} latest=${result.latest || "none"}`, process.env, options.logFile);
     return result;
   } catch (error) {
     const now = Date.now();
@@ -417,7 +500,7 @@ function runUpdate(options = {}) {
       state.lastErrorFingerprint = fingerprint;
     }
     writeJSON(stateFile, state);
-    appendLog(`status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`);
+    appendLog(`package=${PACKAGE} channel=npm status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`, process.env, options.logFile);
     throw error;
   } finally {
     releaseLock(lockFile, descriptor);
@@ -430,7 +513,9 @@ function shouldSchedule(args = [], env = process.env, now = Date.now()) {
   // A permanent failure stops background scheduling until the user repairs
   // the install; explicit "gitcode update" still works.
   if (state.permanentError) return false;
-  return !state.nextCheck || Number(state.nextCheck) <= now;
+  // A garbage nextCheck (NaN) counts as due: the next write heals it.
+  const next = Number(state.nextCheck);
+  return !state.nextCheck || !Number.isFinite(next) || next <= now;
 }
 
 function showPendingSummary(stderr = process.stderr, env = process.env) {
@@ -449,8 +534,8 @@ function showPendingSummary(stderr = process.stderr, env = process.env) {
   }
 }
 
-function showFirstRunNotice(stderr = process.stderr, env = process.env) {
-  if (disabledForInvocation([], env)) return;
+function showFirstRunNotice(args = [], stderr = process.stderr, env = process.env) {
+  if (disabledForInvocation(args, env)) return;
   const file = updateStatePath(env);
   const lockFile = `${file}.lock`;
   const descriptor = acquireLock(lockFile);
@@ -477,6 +562,7 @@ module.exports = {
   appendLog,
   checkLatest,
   compareVersions,
+  currentVsLatest,
   disabledForInvocation,
   errorFingerprint,
   exactInstallArgs,

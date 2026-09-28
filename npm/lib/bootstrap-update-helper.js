@@ -131,8 +131,15 @@ function appendLog(message) {
 // timeouts, spawn failures) instead of a generic dead-end notice.
 function summarizeError(error) {
   const raw = (error && (error.message || error.code)) || error;
-  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
-  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+  let text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
+  if (text.length > 200) {
+    let cut = text.slice(0, 200);
+    // Do not leave an orphaned high surrogate at the cut boundary.
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    text = `${cut}...`;
+  }
+  return text;
 }
 
 // Permanent update failures: retrying cannot fix them (the on-disk install
@@ -160,8 +167,41 @@ function errorFingerprint(error) {
   return crypto.createHash("sha256").update(summarizeError(error)).digest("hex").slice(0, 16);
 }
 
+// npm error codes that retrying cannot fix (404 package deleted/renamed,
+// 401/403 auth). Mirrors lib/update.js.
+const DETERMINISTIC_NPM_ERROR = /code E(40[01345]|42[89])/;
+
+function isPrereleaseVersion(value) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(value || "").trim());
+}
+
+// Compares the installed version against the stable latest. A prerelease
+// current (a manual @next install) with a stable latest is a legitimate
+// upgrade path: report it as available instead of an unactionable
+// "cannot compare" that would keep failing on every scheduled check. A
+// garbage current version is not a prerelease and still fails loudly.
+// Mirrors lib/update.js.
+function currentVsLatest(current, latest) {
+  const comparison = compareVersions(current, latest);
+  if (comparison != null) return { comparison, prerelease: false };
+  if (isPrereleaseVersion(current) && stableVersion(latest) != null) {
+    return { comparison: -1, prerelease: true };
+  }
+  return { comparison: null, prerelease: false };
+}
+
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+// Mirrors lib/install.js and lib/update.js.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
 }
 
 function stableVersion(value) {
@@ -241,11 +281,19 @@ function latestVersion(manifest) {
       return version;
     }
     lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    // Deterministic registry errors (package deleted or renamed, auth or
+    // forbidden): retrying cannot fix them, so fail fast instead of burning
+    // the attempt budget on every scheduled check. Mirrors lib/update.js.
+    if (DETERMINISTIC_NPM_ERROR.test(String(result.stderr || ""))) break;
     if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
   }
   throw lastError;
 }
 
+// Waits for the parent process to exit before replacing binaries. Known
+// limitation: if the parent dies and its pid is reused by an unrelated
+// process, the wait spins its full 30s and then reports a spurious
+// failure (which enters the backoff). Rare, self-limiting, accepted.
 function waitForParent(pid) {
   if (!pid) return;
   const deadline = Date.now() + 30000;
@@ -269,7 +317,7 @@ function healthCheck(manifest, expected) {
     env: updaterEnvironment(),
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "bootstrap health check failed").trim());
+  if (result.status !== 0) throw new Error(commandFailureDetail(result, "bootstrap health check failed"));
   const actual = JSON.parse(result.stdout).version;
   if (compareVersions(actual, expected) !== 0) throw new Error(`updated CLI reported ${actual}, expected ${expected}`);
 }
@@ -280,6 +328,9 @@ function installLatest(manifest, latest) {
     "--yes",
     `--package=${PACKAGE}@${latest}`,
     "--ignore-scripts",
+    // A 60s fetch timeout lets npm's own fetch-retries finish inside the
+    // 300s overall budget (see lib/update.js exactInstallArgs).
+    "--fetch-timeout=60000",
     "--",
     "gitcode",
     "install",
@@ -330,13 +381,14 @@ function run(options) {
   if (descriptor == null) return { status: "busy", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Another update is running." };
   try {
     const latest = latestVersion(manifest);
-    const comparison = compareVersions(manifest.version, latest);
+    const { comparison, prerelease } = currentVsLatest(manifest.version, latest);
     let result;
     if (comparison == null) throw new Error(`cannot compare ${manifest.version} and ${latest}`);
     if (comparison >= 0) {
       result = { status: "current", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${manifest.version} is current.` };
     } else if (options.check || (updateMode() === "notify" && !options.force)) {
-      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available.` };
+      const note = prerelease ? ", a prerelease" : "";
+      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}); run "gitcode update" to install it.` };
     } else if (updateMode() === "off" && !options.force) {
       result = { status: "disabled", distribution: "npm-bootstrap", current: manifest.version, latest, message: "Automatic updates are disabled." };
     } else {
@@ -361,7 +413,7 @@ function run(options) {
     if (result.status === "current") delete fresh.summary;
     else fresh.summary = { message: result.message, shown: !options.background };
     writeJSON(stateFile, fresh);
-    appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;
   } finally {
     fs.closeSync(descriptor);
@@ -401,7 +453,7 @@ function recordBackgroundFailure(error) {
   const lock = `${file}.lock`;
   const descriptor = acquireLock(lock);
   if (descriptor == null) {
-    appendLog(`status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
     return;
   }
   try {
@@ -435,7 +487,7 @@ function recordBackgroundFailure(error) {
       // Best effort; stale locks are reclaimed after LOCK_STALE_MS.
     }
   }
-  appendLog(`status=error detail="${summarizeError(error)}"`);
+  appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}"`);
 }
 
 if (require.main === module) process.exitCode = main();

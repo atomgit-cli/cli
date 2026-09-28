@@ -11,7 +11,8 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, formatErrorChain,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile,
+  firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
   persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
   rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
@@ -208,6 +209,9 @@ test("parseInstallArgs supports target directory and Windows PATH opt-out", () =
 test("install help documents target directory and Windows PATH opt-out", () => {
   assert.match(installHelp(), /--target-dir <directory>/);
   assert.match(installHelp(), /--no-modify-path/);
+  assert.match(installHelp(), /--target-dir=<directory>/);
+  // The usage line shows the name the platform's users actually type.
+  assert.match(installHelp(), new RegExp(`${process.platform === "win32" ? "gitcode" : "gc"} install \\[`));
 });
 
 test("PowerShell guidance escapes single quotes in target directories", () => {
@@ -958,6 +962,108 @@ test("foreignChannelHint recognizes pip console scripts and ignores binaries", (
   assert.strictEqual(foreignChannelHint(missing), "");
 });
 
+test("foreignChannelHint accepts interpreter arguments and Windows PE shims", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-channel-hint-args-"));
+  // Shebangs with interpreter options must be recognized as pip scripts.
+  for (const shebang of [
+    "#!/usr/bin/env python3 -E",
+    "#!/usr/bin/env -S python3",
+    "#!/usr/bin/env -S python3 -u -E",
+    "#!/usr/local/bin/python3.11 -u",
+  ]) {
+    const script = path.join(root, shebang.replace(/[^a-z0-9]/gi, "_").slice(0, 40));
+    fs.writeFileSync(script, `${shebang}\nimport gc_cli\n`);
+    assert.match(foreignChannelHint(script), /pip uninstall gitcode-cli/, shebang);
+  }
+  // A shebang pointing at a script path (not just options) stays unrecognized.
+  const odd = path.join(root, "odd");
+  fs.writeFileSync(odd, "#!/usr/bin/env python3 /opt/tool.py\n");
+  assert.strictEqual(foreignChannelHint(odd), "");
+
+  // Windows pip console shims: a PE stub with the shebang appended deep
+  // into the launcher (distlib layout), in front of the zip payload.
+  const shim = path.join(root, "gc.exe");
+  fs.writeFileSync(shim, Buffer.concat([
+    Buffer.from([0x4d, 0x5a, 0x90, 0x00]),
+    Buffer.alloc(150 * 1024, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+    Buffer.from("PK\x03\x04zip-payload", "utf8"),
+  ]));
+  assert.match(foreignChannelHint(shim, true), /pip uninstall gitcode-cli/);
+  // A PE binary without the embedded python shebang stays unrecognized.
+  const plain = path.join(root, "plain.exe");
+  fs.writeFileSync(plain, Buffer.concat([Buffer.from([0x4d, 0x5a]), Buffer.alloc(2048, 1)]));
+  assert.strictEqual(foreignChannelHint(plain, true), "");
+  // A shebang past the 1 MiB read window is out of scope by design.
+  const far = path.join(root, "far.exe");
+  fs.writeFileSync(far, Buffer.concat([
+    Buffer.from([0x4d, 0x5a]),
+    Buffer.alloc(1 << 20, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+  ]));
+  assert.strictEqual(foreignChannelHint(far, true), "");
+});
+
+test("acquireInstallLock serializes installs and reclaims stale locks", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-lock-"));
+  const lock = acquireInstallLock(root);
+  assert.strictEqual(fs.existsSync(lock), true);
+  // The lock name must never join the leftover families: the sweep would
+  // then delete a live lock mid-install.
+  assert.strictEqual(isTransactionLeftoverName(path.basename(lock)), false);
+  // A second install while the lock is fresh is refused.
+  assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
+  releaseInstallLock(lock);
+  assert.strictEqual(fs.existsSync(lock), false);
+  // Re-acquire works after release.
+  const again = acquireInstallLock(root);
+  releaseInstallLock(again);
+
+  // A lock older than the stale threshold is reclaimed.
+  const stale = acquireInstallLock(root);
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  fs.utimesSync(stale, old, old);
+  const reclaimed = acquireInstallLock(root);
+  assert.strictEqual(fs.readFileSync(reclaimed, "utf8").trim().split(" ")[0], String(process.pid));
+  releaseInstallLock(reclaimed);
+});
+
+test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completion-"));
+  const target = path.join(root, "_gc");
+  fs.writeFileSync(target, "old");
+  assert.deepStrictEqual(writeCompletionFile(target, "new"), { skipped: false });
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
+
+  // A symlink target is skipped, and whatever it points at stays intact.
+  const victim = path.join(root, "victim");
+  fs.writeFileSync(victim, "precious");
+  fs.unlinkSync(target);
+  if (!createFileSymlinkOrSkip(t, "victim", target)) return;
+  assert.deepStrictEqual(writeCompletionFile(target, "new"), { skipped: true });
+  assert.strictEqual(fs.readFileSync(victim, "utf8"), "precious");
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("parseInstallArgs accepts --target-dir= forms and dash-prefixed names", () => {
+  assert.deepStrictEqual(parseInstallArgs(["--target-dir=/opt/gc"]), {
+    targetDir: path.resolve("/opt/gc"),
+    modifyPath: true,
+  });
+  // Space-separated dash-prefixed directory names are now valid values.
+  const dashed = parseInstallArgs(["--target-dir", "-weird"]);
+  assert.strictEqual(dashed.targetDir, path.resolve("-weird"));
+  // ./-name form keeps working.
+  assert.strictEqual(parseInstallArgs(["--target-dir", "./-weird"]).targetDir, path.resolve("./-weird"));
+  // A known flag as the value still means a missing value.
+  assert.throws(() => parseInstallArgs(["--target-dir", "--no-modify-path"]), /\.\/-name or --target-dir=-name/);
+  // Any "--"-prefixed value is rejected, not just the known flags.
+  assert.throws(() => parseInstallArgs(["--target-dir", "--unknown-flag"]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dir"]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dir="]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dirx"]), /unknown install argument/);
+});
+
 test("install gives Homebrew-specific guidance for a brew-owned symlink", (t) => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-link-"));
   const brewBin = path.join(root, "opt", "homebrew", "Cellar", "gc", "0.14.0", "bin", "gc");
@@ -1108,6 +1214,24 @@ test("install refuses to replace a pip console script instead of warn-and-destro
   const record = replacePath(source, plain, "pip-plain");
   assert.strictEqual(fs.readFileSync(plain, "utf8"), "new");
   fs.unlinkSync(record.backup);
+});
+
+test("chooseGlobalBinDir avoids the Homebrew domain when the layout is present", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-skip-"));
+  const fakeCellar = path.join(root, "Cellar");
+  fs.mkdirSync(fakeCellar);
+  const fallback = path.join(root, "local-bin");
+  // With the Homebrew layout present, /usr/local/bin is skipped even when
+  // it heads the candidate list.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, ["/usr/local/bin", fallback], fakeCellar),
+    fallback
+  );
+  // Injected candidates without /usr/local/bin are unaffected by the check.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, [fallback], path.join(root, "absent")),
+    fallback
+  );
 });
 
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {

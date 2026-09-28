@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
@@ -182,8 +183,9 @@ func StatePath(manifest *Manifest) string {
 }
 
 func stateRoot() string {
-	if local := os.Getenv("LOCALAPPDATA"); runtime.GOOS == "windows" && local != "" {
-		return filepath.Join(local, "gitcode-cli")
+	if runtime.GOOS == "windows" {
+		home, _ := os.UserHomeDir()
+		return windowsStateRoot(os.Getenv("LOCALAPPDATA"), home)
 	}
 	home, _ := os.UserHomeDir()
 	root := os.Getenv("XDG_STATE_HOME")
@@ -191,6 +193,17 @@ func stateRoot() string {
 		root = filepath.Join(home, ".local", "state")
 	}
 	return filepath.Join(root, "gitcode-cli")
+}
+
+// windowsStateRoot mirrors the JS stateDir precedence: LOCALAPPDATA wins,
+// then <home>\AppData\Local. An empty LOCALAPPDATA must not split the Go
+// binary and its JS helper onto different state files (~/.local/state vs
+// ~/AppData/Local) within the same bootstrap channel.
+func windowsStateRoot(localAppData, home string) string {
+	if localAppData != "" {
+		return filepath.Join(localAppData, "gitcode-cli")
+	}
+	return filepath.Join(home, "AppData", "Local", "gitcode-cli")
 }
 
 // StartDetached runs the copied bootstrap helper after this process exits.
@@ -225,9 +238,41 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
-	cmd.Stdout = out
-	cmd.Stderr = errOut
-	return cmd.Run()
+	// Capture the streams so a failed check can surface the helper's reason
+	// in the returned error (matching CheckNow's wrapping) instead of a bare
+	// "exit status 1"; everything captured is still forwarded to the
+	// caller's writers.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if out != nil {
+		cmd.Stdout = io.MultiWriter(out, &stdout)
+	}
+	if errOut != nil {
+		cmd.Stderr = io.MultiWriter(errOut, &stderr)
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("update check failed: %s", truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err)))
+	}
+	return nil
+}
+
+// checkFailureDetail extracts the helper's failure reason: the JSON error
+// message first (--json mode prints it to stdout), then the helper's stderr
+// line with its own "update failed: " prefix stripped (avoiding double
+// wrapping), then the raw run error.
+func checkFailureDetail(stdout, stderr string, runErr error) string {
+	var parsed struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(stdout), &parsed) == nil && parsed.Message != "" {
+		return parsed.Message
+	}
+	line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(stderr), "update failed:"))
+	if line != "" {
+		return line
+	}
+	return runErr.Error()
 }
 
 // CheckResult mirrors the bootstrap helper's JSON result for a foreground
@@ -279,10 +324,11 @@ func CheckNow(manifest *Manifest) (*CheckResult, error) {
 
 // truncateDetail bounds helper error details to one collapsed line so failure
 // summaries and JSON output stay readable regardless of npm stderr volume.
+// Truncation is rune-aware: slicing mid-codepoint would emit broken UTF-8.
 func truncateDetail(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
-	if len(text) > 200 {
-		text = text[:200] + "..."
+	if utf8.RuneCountInString(text) > 200 {
+		text = string([]rune(text)[:200]) + "..."
 	}
 	if text == "" {
 		text = "unknown update check failure"
@@ -303,14 +349,47 @@ func resolveNode(recorded string) string {
 }
 
 func disabled(cfg config.Config, noUpdate, noInteractive bool) bool {
-	if noUpdate || noInteractive || truthy(os.Getenv("GC_NO_UPDATE_CHECK")) || truthy(os.Getenv("CI")) {
+	if noUpdate || noInteractive || truthy(os.Getenv("GC_NO_UPDATE_CHECK")) || ciEnvironment() {
 		return true
 	}
-	mode := strings.ToLower(os.Getenv("GC_UPDATE_MODE"))
-	if mode == "" && cfg != nil {
-		mode, _ = cfg.Get("gitcode.com", "update.mode")
+	return resolveUpdateMode(os.Getenv("GC_UPDATE_MODE"), configUpdateMode(cfg)) == "off"
+}
+
+// resolveUpdateMode mirrors the JS updateMode: an invalid GC_UPDATE_MODE
+// value falls back to the configured mode. The old behavior treated any
+// non-empty value as authoritative, so GC_UPDATE_MODE=banana silently
+// overrode a configured "off" and kept the checks running.
+func resolveUpdateMode(envValue, cfgValue string) string {
+	if m := strings.ToLower(strings.TrimSpace(envValue)); m == "auto" || m == "notify" || m == "off" {
+		return m
 	}
-	return mode == "off"
+	if m := strings.ToLower(strings.TrimSpace(cfgValue)); m == "auto" || m == "notify" || m == "off" {
+		return m
+	}
+	return "notify"
+}
+
+func configUpdateMode(cfg config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	value, _ := cfg.Get("gitcode.com", "update.mode")
+	return value
+}
+
+// ciEnvironment covers the CI vendors that do not set CI=true (Jenkins,
+// TeamCity, CodeShip): the variants carry version or build strings, so
+// their mere presence is the signal. Mirrors the JS ciEnvironment.
+func ciEnvironment() bool {
+	if truthy(os.Getenv("CI")) {
+		return true
+	}
+	for _, name := range []string{"GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION"} {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func truthy(value string) bool {
@@ -348,6 +427,11 @@ func readState(path string) updateState {
 	}
 	var state updateState
 	if json.Unmarshal(data, &state) != nil {
+		// Corrupt state: preserve the bytes beside the file (fixed name, so
+		// it never accumulates) instead of silently wiping noticeShown and
+		// summary on the rewrite in mutateStateLocked. A failed rename still
+		// resets, exactly as before.
+		_ = os.Rename(path, path+".corrupt")
 		return updateState{}
 	}
 	return state

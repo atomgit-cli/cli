@@ -3,6 +3,7 @@ package installupdate
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -85,11 +86,113 @@ func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	}
 }
 
+func TestCheckFailureDetailPrefersReasonOverRawExit(t *testing.T) { // --json mode prints the error message to stdout.
+	if got := checkFailureDetail(`{"status":"error","message":"registry reset"}`, "", errors.New("exit status 1")); got != "registry reset" {
+		t.Fatalf("json detail = %q", got)
+	}
+	// Plain mode prints "update failed: <reason>" to stderr; the prefix must
+	// be stripped so it is not double-wrapped by "update check failed:".
+	if got := checkFailureDetail("", "update failed: cannot compare 1 and 2\n", errors.New("exit status 1")); got != "cannot compare 1 and 2" {
+		t.Fatalf("stderr detail = %q", got)
+	}
+	// Nothing captured: the raw run error stands.
+	if got := checkFailureDetail("", "", errors.New("exit status 1")); got != "exit status 1" {
+		t.Fatalf("raw detail = %q", got)
+	}
+}
+
+func TestTruncateDetailIsRuneSafe(t *testing.T) {
+	text := strings.Repeat("汉", 250) // 750 bytes, 250 runes
+	got := truncateDetail(text)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
+	}
+	runes := []rune(strings.TrimSuffix(got, "..."))
+	if len(runes) != 200 {
+		t.Fatalf("expected 200 runes after truncation, got %d", len(runes))
+	}
+	for _, r := range runes {
+		if r == 0xfffd {
+			t.Fatal("replacement character leaked into the truncation")
+		}
+	}
+}
+
+func TestResolveUpdateModeFallsBackToConfigOnInvalidEnv(t *testing.T) {
+	cases := []struct {
+		envValue, cfgValue, want string
+	}{
+		{"off", "auto", "off"},     // valid env wins
+		{"", "off", "off"},         // empty env falls back to config
+		{"banana", "off", "off"},   // invalid env falls back to config (was: kept checking)
+		{"banana", "", "notify"},   // nothing valid anywhere
+		{" NOTIFY ", "", "notify"}, // trimmed and case-folded
+		{"", "garbage", "notify"},  // invalid config falls back to the default
+	}
+	for _, tc := range cases {
+		if got := resolveUpdateMode(tc.envValue, tc.cfgValue); got != tc.want {
+			t.Fatalf("resolveUpdateMode(%q, %q) = %q, want %q", tc.envValue, tc.cfgValue, got, tc.want)
+		}
+	}
+}
+
+func TestCIEnvironmentCoversVendorsWithoutCIFlag(t *testing.T) {
+	for _, name := range []string{"GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION"} {
+		t.Setenv(name, "1")
+		if !ciEnvironment() {
+			t.Fatalf("%s must be detected as CI", name)
+		}
+		t.Setenv(name, "")
+	}
+	t.Setenv("CI", "")
+	if ciEnvironment() {
+		t.Fatal("no CI variables set must not be detected as CI")
+	}
+	t.Setenv("CI", "true")
+	if !ciEnvironment() {
+		t.Fatal("CI=true must be detected")
+	}
+}
+
+func TestWindowsStateRootMatchesJSPrecedence(t *testing.T) {
+	if got := windowsStateRoot(`C:\Users\u\AppData\Local`, `C:\Users\u`); got != filepath.Join(`C:\Users\u\AppData\Local`, "gitcode-cli") {
+		t.Fatalf("LOCALAPPDATA wins: %q", got)
+	}
+	// An empty LOCALAPPDATA must fall back to <home>\AppData\Local instead
+	// of splitting the Go and JS halves onto different state files.
+	if got := windowsStateRoot("", `C:\Users\u`); got != filepath.Join(`C:\Users\u`, "AppData", "Local", "gitcode-cli") {
+		t.Fatalf("home fallback: %q", got)
+	}
+}
+
+func TestReadStatePreservesCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_STATE_DIR", dir)
+	path := StatePath(nil)
+	corrupt := []byte(`{"nextCheck": "not-a-number"`)
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if state := readState(path); state != (updateState{}) {
+		t.Fatalf("corrupt state must reset, got %#v", state)
+	}
+	preserved, err := os.ReadFile(path + ".corrupt")
+	if err != nil || !bytes.Equal(preserved, corrupt) {
+		t.Fatalf("the corrupt bytes must be preserved beside the state file: %v", err)
+	}
+}
+
 func TestStatePathScopesPerPackageAndChannel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GC_STATE_DIR", "")
-	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("XDG_STATE_HOME", dir)
+	if runtime.GOOS == "windows" {
+		// stateRoot derives from LOCALAPPDATA only on Windows (mirroring the
+		// JS stateDir precedence); point it at the temp dir.
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("LOCALAPPDATA", "")
+		t.Setenv("XDG_STATE_HOME", dir)
+	}
 	if got := StatePath(nil); got != filepath.Join(dir, "gitcode-cli", "update-state.json") {
 		t.Fatalf("legacy manifest state path = %q", got)
 	}
@@ -109,8 +212,14 @@ func TestAfterCommandUsesScopedStatePathFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
 	t.Setenv("GC_STATE_DIR", "")
-	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("XDG_STATE_HOME", dir)
+	if runtime.GOOS == "windows" {
+		// See TestStatePathScopesPerPackageAndChannel: the Windows state root
+		// comes from LOCALAPPDATA only.
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("LOCALAPPDATA", "")
+		t.Setenv("XDG_STATE_HOME", dir)
+	}
 	manifest := Manifest{
 		Distribution: "npm-bootstrap",
 		Version:      "1.2.3",

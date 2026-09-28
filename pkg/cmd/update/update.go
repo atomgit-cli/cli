@@ -131,6 +131,8 @@ func managerMessage(distribution string) string {
 	switch distribution {
 	case "pypi":
 		return "This installation is managed by Python; upgrade it explicitly with pipx or pip in its environment."
+	case "uv":
+		return "This installation is managed by uv; run uv tool upgrade gc."
 	case "homebrew":
 		return "This installation is managed by Homebrew; run brew upgrade gc."
 	case "deb", "rpm", "system-package":
@@ -140,6 +142,10 @@ func managerMessage(distribution string) string {
 		// reached with these channels, the wrapper (which owns the npm
 		// updater and its pnpm refusal guidance) is still the right entry.
 		return "Run update through the npm gitcode wrapper so it can safely replace its bundled binary."
+	case "npm-bootstrap":
+		// A damaged manifest (missing targetDir/helper) reaches the Go binary
+		// directly; the bootstrap layout is repaired by rerunning the install.
+		return `This installation was bootstrapped by npm; repair it by rerunning "npx --yes --package=<coordinate>@latest gitcode install".`
 	default:
 		return "Download and verify a newer release archive, or rebuild from the desired source tag."
 	}

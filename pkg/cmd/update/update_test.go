@@ -47,9 +47,11 @@ func TestManagerMessageCoversDetectedChannels(t *testing.T) {
 		"deb":               "package manager",
 		"rpm":               "package manager",
 		"pypi":              "pipx or pip",
+		"uv":                "uv tool upgrade gc",
 		"npm":               "npm",
 		"pnpm":              "npm gitcode wrapper",
 		"npm-local":         "npm gitcode wrapper",
+		"npm-bootstrap":     "gitcode install",
 		"archive-or-source": "release archive",
 	}
 	for distribution, want := range cases {

@@ -42,7 +42,12 @@ func DetectDistribution(env map[string]string, binary string) string {
 		strings.Contains(normalized, "/node_modules/@atomgit-cli/cli/"),
 		strings.Contains(normalized, "/node_modules/atomgit-cli/"):
 		return "npm"
-	case strings.Contains(normalized, "/gc_cli/bin/"):
+	case strings.Contains(normalized, "/uv/tools/"):
+		// Must precede the pypi marker: a uv tool's venv binary lives under
+		// .../uv/tools/<name>/lib/pythonX/site-packages/gc_cli/bin/ and would
+		// otherwise be reported as plain pypi.
+		return "uv"
+	case strings.Contains(normalized, "/site-packages/gc_cli/bin/"):
 		return "pypi"
 	case strings.Contains(normalized, "/cellar/gc/"),
 		strings.Contains(normalized, "/opt/homebrew/"),
@@ -55,6 +60,10 @@ func DetectDistribution(env map[string]string, binary string) string {
 	}
 }
 
+// detectSystemPackage attributes /usr/bin binaries to dpkg or rpm. When
+// neither manager claims ownership the binary is a manual root copy, and
+// "system-package" guidance (use apt/dnf) would point at repositories that
+// do not carry it — fall back to archive-or-source instead.
 func detectSystemPackage(binary string) string {
 	checks := []struct {
 		command      string
@@ -76,7 +85,7 @@ func detectSystemPackage(binary string) string {
 			return check.distribution
 		}
 	}
-	return "system-package"
+	return "archive-or-source"
 }
 
 func adjacentManifestDistribution(binary string) string {

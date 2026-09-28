@@ -89,11 +89,21 @@ function bundledBinaryPath() {
  * per-user dir under the home directory. Pure (no FS side effects beyond the
  * write probe on the candidate dir).
  */
-function chooseGlobalBinDir(home, isWin, posixCandidates) {
+function chooseGlobalBinDir(home, isWin, posixCandidates, brewCellarPath = "/usr/local/Cellar") {
   if (isWin) {
     return path.join(home, "AppData", "Local", "gitcode-cli", "bin");
   }
-  const candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  let candidates = posixCandidates || ["/usr/local/bin", path.join(home, ".local", "bin")];
+  // On Intel Macs /usr/local is Homebrew's domain: writing there upsets
+  // brew doctor and blocks a future "brew install gc". Skip the candidate
+  // when the Homebrew layout is present.
+  try {
+    fs.statSync(brewCellarPath);
+    const filtered = candidates.filter((dir) => dir !== "/usr/local/bin");
+    if (filtered.length) candidates = filtered;
+  } catch {
+    // No Homebrew layout; the candidates stand.
+  }
   for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -186,6 +196,11 @@ function isAllowedAliasSymlink(dst, allowedTarget) {
 // npm coordinates owned by this project. A bin symlink resolving into one of
 // these package trees is a leftover of a classic `npm install -g` channel and
 // is safe to migrate to the bootstrap layout.
+// Org-transfer note: if the bare name "gitcode-cli" is ever added here, the
+// path-level check below cannot distinguish a pre-existing third-party
+// install from a new official one and would silently adopt the third-party
+// entry. At transfer time, adoption must additionally read the resolved
+// target's package.json "name" and verify it.
 const OWN_NPM_PACKAGES = ["@atomgit-cli/cli", "@gitcode-cli/cli", "atomgit-cli"];
 const THIRD_PARTY_NPM_PACKAGE = "gitcode-cli";
 
@@ -444,6 +459,42 @@ function runGc(bin, args) {
   return spawnSync(bin, args, { encoding: "utf8" });
 }
 
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
+}
+
+// Replace a completion file atomically and never write through a symlink:
+// an existing `_gc` symlink could point anywhere in the user's tree, and a
+// plain overwrite would clobber the target outside our directory.
+function writeCompletionFile(target, content) {
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink()) {
+      return { skipped: true };
+    }
+  } catch {
+    // Target does not exist yet.
+  }
+  const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+  fs.writeFileSync(temp, content, { mode: 0o644, flag: "wx" });
+  try {
+    renameReplace(temp, target);
+  } catch (error) {
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
+  }
+  return { skipped: false };
+}
+
 function installCompletions(bin, home) {
   const installed = [];
   for (const shell of ["bash", "zsh", "fish"]) {
@@ -453,7 +504,11 @@ function installCompletions(bin, home) {
     if (!target) continue;
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, res.stdout, { mode: 0o644 });
+      const written = writeCompletionFile(target, res.stdout);
+      if (written.skipped) {
+        process.stdout.write(`Skipped ${shell} completion: ${target} is a symlink\n`);
+        continue;
+      }
       installed.push(`${shell}: ${target}`);
     } catch {
       /* skip unwritable */
@@ -497,6 +552,11 @@ function validateWindowsPathDirectory(dir) {
   }
 }
 
+// Test-only model of the PowerShell PATH update: the production logic is the
+// WINDOWS_UPDATE_USER_PATH script above (run via persistWindowsUserPath).
+// No production caller — it exists so tests can lock the PowerShell behavior
+// without spawning powershell.exe. When that script changes, update this
+// model or the tests silently drift.
 function prependWindowsUserPath(dir, current = "", env = process.env) {
   validateWindowsPathDirectory(dir);
   const wanted = normalizePath(dir, true);
@@ -621,19 +681,34 @@ function persistWindowsUserPath(dir, options = {}) {
 function parseInstallArgs(args) {
   const options = { targetDir: "", modifyPath: true };
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--target-dir") {
-      if (!args[index + 1] || args[index + 1].startsWith("-")) {
-        throw new Error("--target-dir requires a directory value");
-      }
-      options.targetDir = path.resolve(args[index + 1]);
+    const arg = args[index];
+    if (arg === "--target-dir") {
+      const value = args[index + 1];
       index += 1;
+      // In the space-separated form a value starting with "--" is almost
+      // certainly a missed flag (known or not); single-dash directory names
+      // are still expressible as ./-name or --target-dir=-name.
+      if (!value || value.startsWith("--")) {
+        throw new Error(
+          "--target-dir requires a directory value (use ./-name or --target-dir=-name for dash-prefixed names)"
+        );
+      }
+      options.targetDir = path.resolve(value);
       continue;
     }
-    if (args[index] === "--no-modify-path") {
+    if (arg.startsWith("--target-dir=")) {
+      const value = arg.slice("--target-dir=".length);
+      if (!value) {
+        throw new Error("--target-dir requires a directory value");
+      }
+      options.targetDir = path.resolve(value);
+      continue;
+    }
+    if (arg === "--no-modify-path") {
       options.modifyPath = false;
       continue;
     }
-    throw new Error(`unknown install argument: ${args[index]}`);
+    throw new Error(`unknown install argument: ${arg}`);
   }
   return options;
 }
@@ -643,14 +718,17 @@ function quotePowerShell(value) {
 }
 
 function installHelp() {
+  // Both bin names route to this wrapper; show the one the platform's
+  // users actually type (PowerShell reserves "gc" as Get-Content).
+  const invoked = process.platform === "win32" ? "gitcode" : "gc";
   return [
     "Install bundled gc and gitcode binaries outside the npm package directory.",
     "",
     "Usage:",
-    "  gitcode install [--target-dir <directory>] [--no-modify-path]",
+    `  ${invoked} install [--target-dir <directory>] [--no-modify-path]`,
     "",
     "Flags:",
-    "  --target-dir <directory>  Install into an explicit directory",
+    "  --target-dir <directory>  Install into an explicit directory (also --target-dir=<directory>)",
     "  --no-modify-path           Do not update the Windows user PATH",
     "  -h, --help                Show this help",
     "",
@@ -717,12 +795,14 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
 
 // Detect a foreign-channel regular file occupying an install target (e.g. a
 // pip console script). Returns "" when nothing recognizable is found.
-function foreignChannelHint(file) {
+function foreignChannelHint(file, isWin = process.platform === "win32") {
   let content = "";
   try {
     const fd = fs.openSync(file, "r");
     try {
-      const buf = Buffer.alloc(256);
+      // 1 MiB covers distlib's launcher stubs (~100 KB+); the embedded
+      // shebang sits far past any 4 KB window.
+      const buf = Buffer.alloc(1 << 20);
       const bytes = fs.readSync(fd, buf, 0, buf.length, 0);
       content = buf.toString("utf8", 0, bytes);
     } finally {
@@ -732,8 +812,18 @@ function foreignChannelHint(file) {
     return "";
   }
   const firstLine = content.split("\n", 1)[0];
-  if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
+  // Python shebangs may carry interpreter options (python3 -E, env -S
+  // python3); only options are accepted after the interpreter, never a
+  // script path (the file itself is the script).
+  if (/^#!\s*(?:(?:\S*\/)?env(?:\s+-\S+)*\s+python|\S*python)([0-9.]*)?(?:\s+-\S+)*\s*$/.test(firstLine)) {
     return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
+  }
+  // Windows pip console shims are PE binaries with no shebang line at the
+  // top: distlib appends "#!<python.exe path>\r\n" well into the stub, in
+  // front of the zip payload. Anchor on the embedded shebang so ordinary
+  // PE binaries never match.
+  if (isWin && content.startsWith("MZ") && /#![^\r\n]{0,400}pythonw?\.exe/i.test(content)) {
+    return 'pip console executable (PE shim); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
   return "";
 }
@@ -777,6 +867,63 @@ function ensureUsableInstallDir(dir) {
       `install directory is not usable: ${dir} (${error.message})\n` +
         `check the path and permissions, or choose another directory with --target-dir <dir>`
     );
+  }
+}
+
+// Cross-process install lock for the bin directory. Without it two
+// concurrent installs with different transaction IDs can interleave: A
+// renames the target to its backup, B sees a missing target and installs
+// fresh, then A's late rollback restores the old version over B's winner.
+// The lock name intentionally matches no leftover prefix — a crashed
+// install leaves it behind and stale reclaim (not the sweep) is the
+// recovery path.
+const INSTALL_LOCK_STALE_MS = 10 * 60 * 1000;
+
+function acquireInstallLock(dir, now = Date.now()) {
+  const lock = path.join(dir, ".gc-install-lock");
+  const claim = () => {
+    fs.writeFileSync(lock, `${process.pid} ${new Date(now).toISOString()}\n`, { flag: "wx", mode: 0o644 });
+    return lock;
+  };
+  try {
+    return claim();
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(lock).mtimeMs;
+    } catch {
+      return claim(); // the holder released between our failure and stat
+    }
+    if (now - mtimeMs < INSTALL_LOCK_STALE_MS) {
+      throw new Error(
+        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+          `retry in a moment or remove the lock if you are certain none is running`
+      );
+    }
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      // Raced with another reclaimer; the claim below settles it.
+    }
+    try {
+      return claim();
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      // Both reclaimers raced: the other one won the recreated lock.
+      throw new Error(
+        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+          `retry in a moment or remove the lock if you are certain none is running`
+      );
+    }
+  }
+}
+
+function releaseInstallLock(lock) {
+  try {
+    fs.unlinkSync(lock);
+  } catch {
+    // Best effort: a stranded lock self-heals after INSTALL_LOCK_STALE_MS.
   }
 }
 
@@ -862,11 +1009,9 @@ async function runInstall(args = []) {
 
   const dir = options.targetDir || chooseGlobalBinDir(home, isWin);
   ensureUsableInstallDir(dir);
-  const swept = sweepTransactionLeftovers(dir);
-  if (swept > 0) {
-    process.stdout.write(`Swept ${swept} leftover file(s) from a previously interrupted install in ${dir}\n`);
-  }
-
+  // Hold the bin-directory lock across the sweep, the transaction, and any
+  // rollback so concurrent installs cannot interleave (see acquireInstallLock).
+  const installLock = acquireInstallLock(dir);
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
   const helper = path.join(dir, "gitcode-update-helper.js");
@@ -875,6 +1020,10 @@ async function runInstall(args = []) {
   const transaction = [];
   let versionLine;
   try {
+    const swept = sweepTransactionLeftovers(dir);
+    if (swept > 0) {
+      process.stdout.write(`Swept ${swept} leftover file(s) from a previously interrupted install in ${dir}\n`);
+    }
     transaction.push(replacePath(src, dst, transactionID));
     transaction.push(replacePath(src, alias, transactionID, aliasOptions));
     // The bootstrap update helper runs from the bin directory, outside the
@@ -889,7 +1038,7 @@ async function runInstall(args = []) {
 
     const v = runGc(dst, ["version"]);
     if (v.status !== 0) {
-      throw new Error(`installed binary health check failed: ${(v.stderr || "unknown error").trim()}`);
+      throw new Error(`installed binary health check failed: ${commandFailureDetail(v, "no error output")}`);
     }
     versionLine = (v.stdout || "").split("\n")[0] || "(gc version failed)";
     writeInstallMetadata(dir, {
@@ -917,6 +1066,8 @@ async function runInstall(args = []) {
       );
     }
     throw error;
+  } finally {
+    releaseInstallLock(installLock);
   }
 
   // Completions (posix only; Windows shell completion differs).
@@ -965,7 +1116,8 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile,
+  firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
   sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,

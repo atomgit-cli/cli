@@ -11,6 +11,7 @@ const {
   acquireLock,
   checkLatest,
   compareVersions,
+  currentVsLatest,
   disabledForInvocation,
   errorFingerprint,
   exactInstallArgs,
@@ -57,6 +58,9 @@ test("exact updates and rollbacks stay inside the recorded npm prefix", () => {
     "--prefix", "/isolated/prefix",
   ]);
   assert.ok(args.includes("--ignore-scripts"));
+  // A 60s fetch timeout keeps npm's own fetch-retries inside the overall
+  // install budget.
+  assert.ok(args.includes("--fetch-timeout=60000"));
   assert.ok(args.includes(`${pkgName}@1.2.3`), `exact install must target the installed coordinate ${pkgName}`);
 });
 
@@ -192,6 +196,63 @@ test("registry checks fail after exhausting the retry budget", { timeout: 30000 
   assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 3);
 });
 
+test("deterministic registry errors fail fast without retrying", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-npm-e404-"));
+  const attemptsFile = path.join(dir, "attempts");
+  const stub = path.join(dir, "e404-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const fs = require('fs');",
+    `const n = fs.existsSync(${JSON.stringify(attemptsFile)}) ? Number(fs.readFileSync(${JSON.stringify(attemptsFile)}, "utf8")) : 0;`,
+    `fs.writeFileSync(${JSON.stringify(attemptsFile)}, String(n + 1));`,
+    'process.stderr.write("npm error code E404\\n");',
+    "process.exit(1);",
+    "",
+  ].join("\n"));
+  assert.throws(() => checkLatest({ npm: stub }), /E404/);
+  assert.strictEqual(Number(fs.readFileSync(attemptsFile, "utf8")), 1, "E404 must not be retried");
+});
+
+test("a prerelease current version is an upgrade path, garbage is not", () => {
+  assert.deepStrictEqual(currentVsLatest("0.14.1", "0.15.0"), { comparison: -1, prerelease: false });
+  assert.deepStrictEqual(currentVsLatest("0.15.0", "0.15.0"), { comparison: 0, prerelease: false });
+  // A manual @next install with a stable latest: available, not an error.
+  assert.deepStrictEqual(currentVsLatest("0.14.1-rc.1", "0.15.0"), { comparison: -1, prerelease: true });
+  assert.deepStrictEqual(currentVsLatest("v0.14.1-rc.1", "0.15.0"), { comparison: -1, prerelease: true });
+  // Garbage versions and prerelease latests still fail loudly.
+  assert.deepStrictEqual(currentVsLatest("banana", "0.15.0"), { comparison: null, prerelease: false });
+  assert.deepStrictEqual(currentVsLatest("0.14.1", "0.15.0-rc.1"), { comparison: null, prerelease: false });
+});
+
+test("a failed rollback tells the user how to recover manually", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-rollback-fail-"));
+  const stateDir = path.join(dir, "state");
+  const stub = path.join(dir, "install-fail-npm-cli.js");
+  fs.writeFileSync(stub, [
+    "const args = process.argv.slice(2);",
+    'if (args.includes("view")) { process.stdout.write(\'"9.9.9"\\n\'); process.exit(0); }',
+    'process.stderr.write("npm install EACCES from stub\\n"); process.exit(1);',
+    "",
+  ].join("\n"));
+  const stateFile = path.join(stateDir, "update-state.json");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    assert.throws(
+      () => runUpdate({
+        stateFile,
+        mode: "auto",
+        metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+      }),
+      (error) => /rollback failed/.test(error.message) && /npm install -g/.test(error.message)
+    );
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.match(state.summary.message, /npm install -g/, "the failure summary must carry the manual recovery hint");
+});
+
 test("runUpdate failure summaries carry the real error for the next launch", { timeout: 30000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-fail-"));
   const stateDir = path.join(dir, "state");
@@ -217,7 +278,7 @@ test("runUpdate failure summaries carry the real error for the next launch", { t
   assert.ok(!state.summary.message.includes("run gitcode update for details"), "dead-end notice must be gone");
   assert.strictEqual(state.summary.shown, true);
   const log = fs.readFileSync(path.join(stateDir, "update.log"), "utf8");
-  assert.match(log, /status=error detail=.*ECONNRESET/);
+  assert.match(log, /package=\S+ channel=npm status=error detail=.*ECONNRESET/);
 });
 
 test("summarizeError collapses and bounds error text", () => {
@@ -226,6 +287,12 @@ test("summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
   assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
   assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
+  // The cut must not leave an orphaned high surrogate (broken UTF-16).
+  const bounded = summarizeError(new Error(`x${"😀".repeat(150)}`));
+  assert.ok(bounded.endsWith("..."));
+  const body = bounded.slice(0, -3);
+  const last = body.charCodeAt(body.length - 1);
+  assert.ok(!(last >= 0xd800 && last <= 0xdbff), "cut must not end on a lone high surrogate");
 });
 
 test("failureBackoffMs grows exponentially and caps at the daily TTL", () => {
@@ -267,33 +334,37 @@ test("failed checks back off progressively and deduplicate summaries by fingerpr
     assert.ok(state.lastErrorFingerprint, "fingerprint must be recorded");
 
     // The same failure again: streak grows, the seen summary is untouched.
-    assert.throws(() => runUpdate({ stateFile, background: true, metadata }), /ECONNRESET/);
+    // (Foreground runs: the background path is now TTL-gated under the lock,
+    // and the backoff window from run 1 is still open.)
+    assert.throws(() => runUpdate({ stateFile, metadata }), /ECONNRESET/);
     state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.strictEqual(state.failureStreak, 2);
     assert.ok(state.nextCheck > Date.now() + 100 * 60 * 1000, "second backoff ~2h");
     state.summary.shown = true;
     writeJSON(stateFile, state);
-    assert.throws(() => runUpdate({ stateFile, background: true, metadata }), /ECONNRESET/);
+    assert.throws(() => runUpdate({ stateFile, metadata }), /ECONNRESET/);
     state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.strictEqual(state.failureStreak, 3);
     assert.strictEqual(state.summary.shown, true, "an identical fingerprint must not requeue the summary");
 
-    // A different failure requeues with the new message.
+    // A different failure requeues with the new message. Foreground
+    // failures mark the summary shown immediately (it was just printed).
     const angry = path.join(dir, "angry-npm-cli.js");
     fs.writeFileSync(angry, "process.stderr.write('registry BOOM from angry stub\\n'); process.exit(1);");
     assert.throws(
-      () => runUpdate({ stateFile, background: true, metadata: { ...metadata, npm: angry } }),
+      () => runUpdate({ stateFile, metadata: { ...metadata, npm: angry } }),
       /BOOM/
     );
     state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-    assert.strictEqual(state.summary.shown, false);
+    assert.strictEqual(state.summary.shown, true);
     assert.match(state.summary.message, /BOOM/);
 
-    // A successful check clears the failure bookkeeping.
+    // A successful check clears the failure bookkeeping (checkOnly keeps
+    // the notify-mode path without installing anything).
     const healthyDir = path.join(dir, "healthy");
     fs.mkdirSync(healthyDir, { recursive: true });
     const { stub: healthy } = flakyNpmStub(healthyDir, 0, "0.0.1");
-    runUpdate({ stateFile, background: true, metadata: { ...metadata, npm: healthy } });
+    runUpdate({ stateFile, checkOnly: true, metadata: { ...metadata, npm: healthy } });
     state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.strictEqual(state.failureStreak, 0);
     assert.strictEqual(state.lastErrorFingerprint, undefined);
@@ -394,6 +465,16 @@ test("disables updates for explicit opt-out, CI, non-interactive, and off mode",
   assert.strictEqual(disabledForInvocation(["--no-update-check"], {}), true);
   assert.strictEqual(disabledForInvocation([], { GC_UPDATE_MODE: "off" }), true);
   assert.strictEqual(disabledForInvocation([], { GC_UPDATE_MODE: "notify" }), false);
+  // cobra accepts --flag=value; only a truthy value counts as set.
+  assert.strictEqual(disabledForInvocation(["--no-interactive=true"], {}), true);
+  assert.strictEqual(disabledForInvocation(["--no-update-check=1"], {}), true);
+  assert.strictEqual(disabledForInvocation(["--no-interactive=false"], {}), false);
+  // CI vendors that never set CI=true.
+  assert.strictEqual(disabledForInvocation([], { BUILD_NUMBER: "42" }), true);
+  assert.strictEqual(disabledForInvocation([], { TEAMCITY_VERSION: "2023.05" }), true);
+  assert.strictEqual(disabledForInvocation([], { CI_NAME: "codeship" }), true);
+  assert.strictEqual(disabledForInvocation([], { GITHUB_ACTIONS: "true" }), true);
+  assert.strictEqual(disabledForInvocation([], { BUILD_NUMBER: "" }), false);
 });
 
 test("mode defaults to notify and honors the environment", () => {
@@ -407,6 +488,40 @@ test("TTL prevents a background check until it expires", () => {
   writeJSON(updateStatePath(env), { nextCheck: 200 });
   assert.strictEqual(shouldSchedule([], env, 100), false);
   assert.strictEqual(shouldSchedule([], env, 201), true);
+  // A garbage nextCheck counts as due: the next write heals the state.
+  writeJSON(updateStatePath(env), { nextCheck: "garbage" });
+  assert.strictEqual(shouldSchedule([], env, 1e15), true);
+});
+
+test("a background update re-checks the TTL under the lock and stays cached", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-cached-"));
+  const stateDir = path.join(dir, "state");
+  const stateFile = path.join(stateDir, "update-state.json");
+  const { stub, attemptsFile } = flakyNpmStub(dir, 0, "9.9.9");
+  // Not due: a second wrapper spawned milliseconds after the first must not
+  // repeat the check.
+  writeJSON(stateFile, { nextCheck: Date.now() + 60 * 60 * 1000 });
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      background: true,
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(result.status, "cached");
+    assert.strictEqual(fs.existsSync(attemptsFile), false, "the npm stub must not be invoked");
+    // Explicit updates are never TTL-gated.
+    const explicit = runUpdate({
+      stateFile,
+      checkOnly: true,
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(explicit.status, "available");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
 });
 
 test("cross-process lock permits only one owner", () => {

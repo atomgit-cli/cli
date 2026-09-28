@@ -3,6 +3,7 @@ package installupdate
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -38,11 +39,45 @@ func TestDetectDistributionByBinaryPath(t *testing.T) {
 		// Intel Mac bin symlink, unresolved (missing on disk): the
 		// fallback path keeps the table-test behavior.
 		{"/usr/local/bin/gc", "archive-or-source"},
+		// The pypi marker is anchored to the pip site-packages layout; a
+		// user directory named gc_cli is not a pip install.
+		{"/home/u/gc_cli/bin/gc", "archive-or-source"},
+		{"/home/u/.local/pipx/venvs/gitcode-cli/lib/python3.11/site-packages/gc_cli/bin/gc-linux-amd64", "pypi"},
+		{"/home/u/venv/lib/python3.12/site-packages/gc_cli/bin/gc-linux-arm64", "pypi"},
+		// uv-managed tools.
+		{"/home/u/.local/share/uv/tools/gc/bin/gc", "uv"},
+		{"/home/u/AppData/Roaming/uv/tools/gc/bin/gc.exe", "uv"},
+		// A uv tool's venv binary also contains the pip site-packages layout;
+		// uv must win.
+		{"/home/u/.local/share/uv/tools/gc/lib/python3.12/site-packages/gc_cli/bin/gc-linux-amd64", "uv"},
 	}
 	for _, tc := range cases {
 		if got := DetectDistribution(map[string]string{}, tc.binary); got != tc.want {
 			t.Fatalf("DetectDistribution(%q) = %q, want %q", tc.binary, got, tc.want)
 		}
+	}
+}
+
+// Unowned /usr/bin binaries are manual root copies: neither dpkg nor rpm
+// claims them, so the guidance must fall back to archive-or-source.
+func TestDetectSystemPackageFallsBackWhenUnowned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX PATH-injected fake package tools only")
+	}
+	dir := t.TempDir()
+	fakeDpkg := filepath.Join(dir, "dpkg-query")
+	t.Setenv("PATH", dir)
+	if err := os.WriteFile(fakeDpkg, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := DetectDistribution(map[string]string{}, "/usr/bin/gc"); got != "archive-or-source" {
+		t.Fatalf("unowned /usr/bin/gc = %q, want archive-or-source", got)
+	}
+	if err := os.WriteFile(fakeDpkg, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := DetectDistribution(map[string]string{}, "/usr/bin/gc"); got != "deb" {
+		t.Fatalf("dpkg-owned /usr/bin/gc = %q, want deb", got)
 	}
 }
 

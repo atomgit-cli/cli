@@ -16,7 +16,7 @@ test("update parseArgs accepts help and CLI-consistency flags", () => {
   for (const flag of ["--help", "-h"]) {
     assert.strictEqual(parseArgs([flag]).help, true, flag);
   }
-  for (const flag of ["--no-update-check", "--no-interactive"]) {
+  for (const flag of ["--no-update-check", "--no-interactive", "--no-update-check=true", "--no-interactive=false"]) {
     const options = parseArgs([flag]);
     assert.strictEqual(options.background, false, flag);
     assert.strictEqual(options.checkOnly, false, flag);
@@ -39,7 +39,8 @@ test("gc update --help prints the wrapper help and exits zero", () => {
     process.stdout.write = original;
   }
   const output = chunks.join("");
-  assert.ok(output.includes("Usage: gc update"), output);
+  const command = process.platform === "win32" ? "gitcode" : "gc";
+  assert.ok(output.includes(`Usage: ${command} update`), output);
   assert.ok(output.includes("--check"), output);
   assert.ok(output.includes("--no-interactive"), output);
   assert.strictEqual(output, UPDATE_HELP);

@@ -91,14 +91,14 @@ function finishUpdateLifecycle(args) {
   if (!metadata || !metadata.global || metadata.distribution !== "npm") return;
   try {
     showPendingSummary();
-    showFirstRunNotice();
+    showFirstRunNotice(args);
     if (!shouldSchedule(args)) return;
     const helper = path.join(packageRoot, "lib", "update-helper.js");
     const child = spawn(process.execPath, [helper, "--background"], {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: { ...updaterEnvironment(), GC_UPDATE_BACKGROUND: "1" },
+      env: updaterEnvironment(),
     });
     child.unref();
   } catch (error) {

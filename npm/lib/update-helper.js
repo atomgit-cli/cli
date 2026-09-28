@@ -4,9 +4,12 @@
 
 const { runUpdate } = require("./update");
 
+// PowerShell reserves "gc" as Get-Content; show the name Windows users run.
+const COMMAND = process.platform === "win32" ? "gitcode" : "gc";
+
 const UPDATE_HELP = `Check for or apply an npm-channel update.
 
-Usage: gc update [flags]
+Usage: ${COMMAND} update [flags]
 
 Flags:
   --check            Check for an update without installing it
@@ -18,7 +21,7 @@ Flags:
 
 This wrapper command manages global npm installs (atomgit-cli,
 @atomgit-cli/cli, @gitcode-cli/cli). npm-bootstrap installations are
-handled by the gc binary itself. Other channels (pip, Homebrew, deb, rpm)
+handled by the ${COMMAND} binary itself. Other channels (pip, Homebrew, deb, rpm)
 stay user-controlled and are never invoked implicitly.
 `;
 
@@ -29,8 +32,10 @@ function parseArgs(args) {
     else if (arg === "--check") options.checkOnly = true;
     else if (arg === "--json") options.json = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
-    else if (arg === "--no-update-check" || arg === "--no-interactive") {
-      // Global flags: accepted for CLI consistency, no effect here.
+    else if (arg === "--no-update-check" || arg === "--no-interactive" ||
+        arg.startsWith("--no-update-check=") || arg.startsWith("--no-interactive=")) {
+      // Global flags: accepted for CLI consistency (including the
+      // --flag=value forms cobra/pflag allows), no effect here.
     } else throw new Error(`unknown update argument: ${arg}`);
   }
   return options;

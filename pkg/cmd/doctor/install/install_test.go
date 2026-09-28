@@ -82,6 +82,33 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 	}
 }
 
+func TestInspectScansBinaryDirectoryForLeftovers(t *testing.T) {
+	root := t.TempDir()
+	installDir := filepath.Join(root, "gitcode-cli", "bin")
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "gc.backup-123-abc"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The install directory is not on PATH: only the binary env points there,
+	// so its leftovers are invisible to the candidate scan alone.
+	environ := []string{
+		"PATH=" + t.TempDir(),
+		binaryEnv + "=" + filepath.Join(installDir, "gc"),
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, leftover := range report.Leftovers {
+		if strings.HasSuffix(leftover, "gc.backup-123-abc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("leftover in the non-PATH install dir must be reported, got %#v", report.Leftovers)
+	}
+}
+
 func TestInspectNpmLocalSkipsGlobalPrefixConflict(t *testing.T) {
 	dir := t.TempDir()
 	packageRoot := t.TempDir()
@@ -196,6 +223,7 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 		"gitcode.tmp-456-def",
 		"gitcode-update-helper.js.backup-123-abc",
 		".gc-install-probe-789",
+		".gc-write-probe",
 		"gc.exe.backup-123-abc",
 		"gitcode.exe.tmp-456-def",
 		".gitcode-install.json.tmp-789-xyz",
@@ -204,6 +232,11 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, leftover), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A suffixed ".gc-write-probe-x" is not an installer artifact (JS matches
+	// the exact name only) and must not be reported.
+	if err := os.WriteFile(filepath.Join(dir, ".gc-write-probe-x9"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "unrelated.backup-x"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
