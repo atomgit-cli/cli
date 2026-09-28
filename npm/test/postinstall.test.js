@@ -139,15 +139,19 @@ test("postinstall records pnpm global installs as pnpm, never as npm", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-postinstall-pnpm-"));
   const packageRoot = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
   fs.mkdirSync(packageRoot, { recursive: true });
+  const chunks = [];
   runPostinstall(
     { npm_config_global: "true", npm_config_user_agent: "pnpm/9.15.9 npm/? node/v20", npm_config_prefix: "/prefix" },
-    { write: () => {} },
+    { write: (chunk) => chunks.push(String(chunk)) },
     packageRoot
   );
   const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, ".gitcode-install.json"), "utf8"));
   assert.strictEqual(metadata.distribution, "pnpm");
   assert.strictEqual(metadata.global, true);
   assert.strictEqual(metadata.prefix, "");
+  // The PATH-shadowing report speaks the npm-channel language; for a pnpm
+  // install its paths and attribution are wrong, so nothing is printed.
+  assert.strictEqual(chunks.join(""), "", "no npm-flavored report for the pnpm channel");
 });
 
 test("postinstall keeps recording npm global installs as npm", () => {

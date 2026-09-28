@@ -459,6 +459,9 @@ function sha256(file) {
 function runGc(bin, args) {
   return spawnSync(bin, args, {
     encoding: "utf8",
+    // A blocked child (AV scanning the fresh binary, hung shell) must not
+    // hang the whole install indefinitely.
+    timeout: 30000,
     env: {
       ...process.env,
       // The installer's own probes must not run the update lifecycle: the
@@ -513,24 +516,31 @@ function writeCompletionFile(target, content) {
 
 function installCompletions(bin, home) {
   const installed = [];
+  const skipped = [];
   for (const shell of ["bash", "zsh", "fish"]) {
     const res = runGc(bin, ["completion", shell]);
-    if (res.status !== 0 || !res.stdout) continue;
+    if (res.status !== 0 || !res.stdout) {
+      skipped.push(`${shell}: completion command failed`);
+      continue;
+    }
     const target = completionTarget(shell, home);
-    if (!target) continue;
+    if (!target) {
+      skipped.push(`${shell}: no completion target`);
+      continue;
+    }
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       const written = writeCompletionFile(target, res.stdout);
       if (written.skipped) {
-        process.stdout.write(`Skipped ${shell} completion: ${target} is a symlink\n`);
+        skipped.push(`${shell}: ${target} is a symlink`);
         continue;
       }
       installed.push(`${shell}: ${target}`);
     } catch {
-      /* skip unwritable */
+      skipped.push(`${shell}: ${target} not writable`);
     }
   }
-  return installed;
+  return { installed, skipped };
 }
 
 // Whether the per-user fallback dir is on PATH (pure).
@@ -671,6 +681,9 @@ function persistWindowsUserPath(dir, options = {}) {
   const result = runner(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_UPDATE_USER_PATH], {
     encoding: "utf8",
     windowsHide: true,
+    // The script itself waits up to 30s on the global PATH mutex; 90s
+    // bounds a hung PowerShell without cutting a legitimate slow wait.
+    timeout: 90000,
     env: windowsPowerShellEnv(env, { GITCODE_CLI_TARGET_DIR: dir }),
   });
   if (result.error || result.status !== 0) {
@@ -1027,7 +1040,7 @@ function formatErrorChain(error) {
 }
 
 async function runInstall(args = []) {
-  if (args.length === 1 && ["-h", "--help"].includes(args[0])) {
+  if (args.includes("-h") || args.includes("--help")) {
     process.stdout.write(installHelp());
     return;
   }
@@ -1118,20 +1131,25 @@ async function runInstall(args = []) {
   }
 
   // Completions (posix only; Windows shell completion differs).
-  const completions = isWin ? [] : installCompletions(dst, home);
+  const completions = isWin ? { installed: [], skipped: [] } : installCompletions(dst, home);
   const windowsPathResult = isWin && options.modifyPath
     ? persistWindowsUserPath(dir)
     : { ok: true, changed: false };
 
   process.stdout.write(`Installed gc and gitcode to ${dir}\n`);
   process.stdout.write(`  ${versionLine}\n`);
-  if (completions.length) {
+  if (completions.installed.length) {
     process.stdout.write(`Shell completions installed:\n`);
-    for (const c of completions) process.stdout.write(`  ${c}\n`);
+    for (const c of completions.installed) process.stdout.write(`  ${c}\n`);
   } else if (isWin) {
     process.stdout.write(`Shell completions: skipped on Windows. Run "gc completion bash|powershell" manually if needed.\n`);
   } else {
-    process.stdout.write(`Shell completions: skipped (none writable). Run "gc completion bash|zsh|fish" manually.\n`);
+    process.stdout.write(`Shell completions: none installed. Run "gc completion bash|zsh|fish" manually.\n`);
+  }
+  // Attribution for the skips: a failed completion command is a different
+  // problem than an unwritable target.
+  for (const s of completions.skipped) {
+    process.stdout.write(`  skipped: ${s}\n`);
   }
 
   // PATH registration and guidance.

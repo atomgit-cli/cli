@@ -29,15 +29,19 @@ function runPostinstall(env = process.env, stderr = process.stderr, packageRoot 
       prefix: "",
       npm: "",
     });
-  } else {
-    writeInstallMetadata(packageRoot, {
-      distribution: "npm",
-      global: true,
-      version: pkg.version,
-      prefix: env.npm_config_prefix || "",
-      npm: env.npm_execpath || "",
-    });
+    // The PATH-shadowing report below speaks the npm-channel language
+    // (npm bin: <prefix>/bin, run "<npm bin>/gitcode.cmd" doctor install);
+    // for a pnpm install its paths and attribution are wrong and its
+    // suggested commands cannot work. Say nothing rather than misdirect.
+    return;
   }
+  writeInstallMetadata(packageRoot, {
+    distribution: "npm",
+    global: true,
+    version: pkg.version,
+    prefix: env.npm_config_prefix || "",
+    npm: env.npm_execpath || "",
+  });
 
   const report = globalInstallReport(env);
   if (!report) return;
