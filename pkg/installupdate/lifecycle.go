@@ -147,6 +147,10 @@ func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	return true
 }
 
+// retireLockFile renames a stale lock out of the way; a package-level seam
+// so the losing-reclaimer race can be tested deterministically.
+var retireLockFile = os.Rename
+
 func acquireStateLock(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -159,10 +163,21 @@ func acquireStateLock(path string) (*os.File, error) {
 	if statErr != nil || time.Since(info.ModTime()) <= updateLockStale {
 		return nil, err
 	}
-	if removeErr := os.Remove(path); removeErr != nil {
-		return nil, removeErr
+	// Atomic reclaim: renaming the stale lock to a private name lets exactly
+	// one of two racing reclaimers win. The loser's rename fails (the winner
+	// already retired the lock) and its claim then hits the winner's fresh
+	// lock — removing the shared path instead would delete each other's
+	// fresh locks and let both believe they hold it.
+	retired := fmt.Sprintf("%s.retired-%d", path, os.Getpid())
+	if renameErr := retireLockFile(path, retired); renameErr != nil {
+		return nil, err
 	}
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	_ = os.Remove(retired)
+	lock, claimErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if claimErr != nil {
+		return nil, claimErr
+	}
+	return lock, nil
 }
 
 // StatePath returns the npm-bootstrap update state file, scoped per package

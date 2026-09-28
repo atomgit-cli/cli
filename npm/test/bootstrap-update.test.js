@@ -8,7 +8,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const pkgName = require("../package.json").name;
 const {
-  CHECK_ATTEMPTS, compareVersions, latestVersion, npmCommand, parseArgs, stableVersion, summarizeError,
+  CHECK_ATTEMPTS, acquireLock, compareVersions, latestVersion, npmCommand, parseArgs, stableVersion, summarizeError,
   updateMode, updaterEnvironment, withNpmIsolation,
 } = require("../lib/bootstrap-update-helper");
 
@@ -240,6 +240,32 @@ test("a permanent failure stops scheduled helper runs even when due", { timeout:
   assert.strictEqual(result.status, 0, result.stderr);
   assert.strictEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")).nextCheck, 1, "state must be untouched");
   assert.strictEqual(fs.existsSync(path.join(root, "attempts")), false, "the flaky npm stub must not be invoked");
+});
+
+test("bootstrap stale-lock reclamation stays single-owner under a reclaim race", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-lock-race-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const lockFile = path.join(stateDir, "update-state.json.lock");
+  const stale = new Date(Date.now() - 16 * 60 * 1000);
+  fs.writeFileSync(lockFile, "");
+  fs.utimesSync(lockFile, stale, stale);
+  const originalRenameSync = fs.renameSync;
+  try {
+    // The losing reclaimer: the winner retired the stale lock first.
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.strictEqual(acquireLock(lockFile), null, "the loser must not hold the lock");
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  const reclaimed = acquireLock(lockFile);
+  assert.notStrictEqual(reclaimed, null);
+  fs.closeSync(reclaimed);
+  fs.unlinkSync(lockFile);
 });
 
 test("bootstrap failure state writes respect the cross-process lock", () => {

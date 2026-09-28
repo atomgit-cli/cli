@@ -536,6 +536,31 @@ test("cross-process lock permits only one owner", () => {
   releaseLock(lock, second);
 });
 
+test("the losing reclaimer of a stale lock does not double-hold", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-update-lock-race-"));
+  const lock = path.join(dir, "update.lock");
+  const stale = new Date(Date.now() - 16 * 60 * 1000);
+  fs.writeFileSync(lock, "");
+  fs.utimesSync(lock, stale, stale);
+  const originalRenameSync = fs.renameSync;
+  try {
+    // Simulate the losing reclaimer: the winner retired the stale lock
+    // between our stat and our rename.
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.strictEqual(acquireLock(lock), null, "the loser must not hold the lock");
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // With the race gone the stale lock is still reclaimable.
+  const reclaimed = acquireLock(lock);
+  assert.notStrictEqual(reclaimed, null);
+  releaseLock(lock, reclaimed);
+});
+
 test("writeJSON cleans up its temp file when the rename fails", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-writejson-fail-"));
   const target = path.join(root, "update-state.json");

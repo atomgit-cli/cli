@@ -1026,6 +1026,21 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   const reclaimed = acquireInstallLock(root);
   assert.strictEqual(fs.readFileSync(reclaimed, "utf8").trim().split(" ")[0], String(process.pid));
   releaseInstallLock(reclaimed);
+
+  // The losing reclaimer of a stale-lock race is refused, not double-holding.
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "");
+  fs.utimesSync(path.join(root, ".gc-install-lock"), old, old);
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
 });
 
 test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {

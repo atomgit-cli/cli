@@ -351,7 +351,17 @@ function acquireLock(file) {
     if (error.code === "EEXIST") {
       try {
         if (Date.now() - fs.statSync(file).mtimeMs > LOCK_STALE_MS) {
-          fs.unlinkSync(file);
+          // Atomic reclaim: renaming the stale lock to a private name lets
+          // exactly one of two racing reclaimers win (the loser's rename
+          // hits ENOENT and its claim then hits the winner's fresh lock).
+          // Mirrors lib/update.js.
+          const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+          fs.renameSync(file, retired);
+          try {
+            fs.unlinkSync(retired);
+          } catch {
+            // Best effort; a stranded .retired-* file is inert debris.
+          }
           return fs.openSync(file, "wx", 0o600);
         }
       } catch {
@@ -493,6 +503,6 @@ function recordBackgroundFailure(error) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  CHECK_ATTEMPTS, compareVersions, latestVersion, main, npmCommand, parseArgs, stableVersion, summarizeError,
+  CHECK_ATTEMPTS, acquireLock, compareVersions, latestVersion, main, npmCommand, parseArgs, stableVersion, summarizeError,
   updateMode, updaterEnvironment, withNpmIsolation,
 };

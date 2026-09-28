@@ -79,6 +79,36 @@ func TestAfterCommandDoesNotOverwriteStateOwnedByUpdater(t *testing.T) {
 	}
 }
 
+func TestAcquireStateLockLosingReclaimerDoesNotDoubleHold(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "update-state.json.lock")
+	if err := os.WriteFile(lockPath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-16 * time.Minute)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	original := retireLockFile
+	defer func() { retireLockFile = original }()
+
+	// The losing reclaimer: the winner retired the stale lock first, so the
+	// rename fails and the loser must treat the lock as busy.
+	retireLockFile = func(string, string) error { return os.ErrNotExist }
+	if lock, err := acquireStateLock(lockPath); err == nil {
+		lock.Close()
+		t.Fatal("the losing reclaimer must not acquire the lock")
+	}
+
+	// With the race gone the stale lock is still reclaimable.
+	retireLockFile = original
+	lock, err := acquireStateLock(lockPath)
+	if err != nil {
+		t.Fatalf("stale lock must still be reclaimable: %v", err)
+	}
+	lock.Close()
+}
+
 func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	now := time.Unix(100, 0)
 	if got := DueAt(now); got != now.Add(24*time.Hour).UnixMilli() {

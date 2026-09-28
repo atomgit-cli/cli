@@ -901,10 +901,22 @@ function acquireInstallLock(dir, now = Date.now()) {
           `retry in a moment or remove the lock if you are certain none is running`
       );
     }
+    // Atomic reclaim: renaming the stale lock to a private name lets exactly
+    // one of two racing reclaimers win — the loser's rename fails with
+    // ENOENT (the winner already retired it) and its claim then hits the
+    // winner's fresh lock. Unlinking the shared path instead would delete
+    // each other's fresh locks and let both believe they hold it.
     try {
-      fs.unlinkSync(lock);
+      const retired = `${lock}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+      fs.renameSync(lock, retired);
+      try {
+        fs.unlinkSync(retired);
+      } catch {
+        // Best effort; a stranded .retired-* file is inert debris.
+      }
     } catch {
-      // Raced with another reclaimer; the claim below settles it.
+      // Raced with another reclaimer and lost; fall through to the claim,
+      // which fails with EEXIST on their fresh lock below.
     }
     try {
       return claim();
