@@ -347,6 +347,18 @@ function acquireLock(file, now = Date.now()) {
         // let both believe they hold it.
         const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
         fs.renameSync(file, retired);
+        // Re-verify staleness on the retired file: a fresh claim may have
+        // landed between the check above and this rename, and renaming a
+        // live lock away would silently break its holder. Restore and
+        // yield in that case.
+        if (now - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
+          try {
+            fs.renameSync(retired, file);
+          } catch {
+            // Someone claimed the path while we held their lock aside.
+          }
+          return null;
+        }
         try {
           fs.unlinkSync(retired);
         } catch {

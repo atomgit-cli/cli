@@ -354,9 +354,20 @@ function acquireLock(file) {
           // Atomic reclaim: renaming the stale lock to a private name lets
           // exactly one of two racing reclaimers win (the loser's rename
           // hits ENOENT and its claim then hits the winner's fresh lock).
-          // Mirrors lib/update.js.
+          // The retired file is re-verified as stale: a fresh claim may
+          // have landed between the check and the rename, and renaming a
+          // live lock away would silently break its holder. Mirrors
+          // lib/update.js.
           const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
           fs.renameSync(file, retired);
+          if (Date.now() - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
+            try {
+              fs.renameSync(retired, file);
+            } catch {
+              // Someone claimed the path while we held their lock aside.
+            }
+            return null;
+          }
           try {
             fs.unlinkSync(retired);
           } catch {

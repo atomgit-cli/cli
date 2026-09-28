@@ -922,17 +922,36 @@ function acquireInstallLock(dir, now = Date.now()) {
     // ENOENT (the winner already retired it) and its claim then hits the
     // winner's fresh lock. Unlinking the shared path instead would delete
     // each other's fresh locks and let both believe they hold it.
+    let stoleFreshLock = false;
     try {
       const retired = `${lock}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
       fs.renameSync(lock, retired);
-      try {
-        fs.unlinkSync(retired);
-      } catch {
-        // Best effort; a stranded .retired-* file is inert debris.
+      // Re-verify staleness on the retired file: a fresh install's claim
+      // may have landed between the check above and this rename, and
+      // renaming a live lock away would silently break its holder.
+      if (now - fs.statSync(retired).mtimeMs <= INSTALL_LOCK_STALE_MS) {
+        try {
+          fs.renameSync(retired, lock);
+        } catch {
+          // Someone claimed the path while we held their lock aside.
+        }
+        stoleFreshLock = true;
+      } else {
+        try {
+          fs.unlinkSync(retired);
+        } catch {
+          // Best effort; a stranded .retired-* file is inert debris.
+        }
       }
     } catch {
       // Raced with another reclaimer and lost; fall through to the claim,
       // which fails with EEXIST on their fresh lock below.
+    }
+    if (stoleFreshLock) {
+      throw new Error(
+        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+          `retry in a moment or remove the lock if you are certain none is running`
+      );
     }
     try {
       return claim();

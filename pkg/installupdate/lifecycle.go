@@ -172,6 +172,14 @@ func acquireStateLock(path string) (*os.File, error) {
 	if renameErr := retireLockFile(path, retired); renameErr != nil {
 		return nil, err
 	}
+	// Re-verify staleness on the retired file: a fresh claim may have
+	// landed between the check above and the rename, and renaming a live
+	// lock away would silently break its holder. Restore and yield then.
+	if retiredInfo, statErr := os.Stat(retired); statErr == nil &&
+		time.Since(retiredInfo.ModTime()) <= updateLockStale {
+		_ = os.Rename(retired, path)
+		return nil, err
+	}
 	_ = os.Remove(retired)
 	lock, claimErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if claimErr != nil {
