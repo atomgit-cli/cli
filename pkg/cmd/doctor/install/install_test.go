@@ -150,6 +150,51 @@ func TestInspectNpmLocalSkipsGlobalPrefixConflict(t *testing.T) {
 	}
 }
 
+func TestInspectReportsBootstrapInstallNotOnPath(t *testing.T) {
+	installDir := t.TempDir()
+	otherDir := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(installDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{"distribution":"npm-bootstrap","targetDir":"` + strings.ReplaceAll(installDir, `\`, `\\`) + `"}`
+	if err := os.WriteFile(filepath.Join(installDir, ".gitcode-install.json"), []byte(manifestJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + otherDir,
+		binaryEnv + "=" + filepath.Join(installDir, name),
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an off-PATH bootstrap install must be reported, got %#v", report.Conflicts)
+	}
+
+	// With the install directory on PATH the shadowing is covered by the
+	// multiple-provider check instead; no "not on PATH" conflict.
+	onPath := Inspect([]string{
+		"PATH=" + otherDir + string(os.PathListSeparator) + installDir,
+		binaryEnv + "=" + filepath.Join(installDir, name),
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range onPath.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			t.Fatalf("an on-PATH bootstrap install must not report off-PATH: %q", conflict)
+		}
+	}
+}
+
 func TestInspectPnpmProjectDependencyIsNotAChannelConflict(t *testing.T) {
 	projBin := t.TempDir()
 	home := t.TempDir()

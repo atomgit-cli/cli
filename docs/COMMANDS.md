@@ -3368,7 +3368,7 @@ npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directo
 - 目标目录含分号、空字符或不是绝对 Windows 路径时，不得生成任何 PATH 修改命令，只能提示更换目录或直接运行已安装程序。
 
 - Linux/macOS 安装时，如果历史版本留下的 `gitcode` 符号链接解析后精确指向同目录常规 `gc` 文件，bootstrap 会在同一安装事务中自动迁移该别名，无需用户先删除。
-- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引；Windows 不迁移符号链接。
+- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖，**但解析进自家 npm 坐标包树（classic 全局安装或项目级最外层 `node_modules`）的软链会被采纳迁移**；pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）拒绝并给出 `pnpm remove -g <坐标>` 指引；Windows 不迁移非自家软链。
 - 别名迁移保留事务唯一备份；后续二进制校验、健康检查或 metadata 写入失败时，旧 `gc` 与原始链接会按逆序原样回滚。
 
 <a id="gitcode-update"></a>

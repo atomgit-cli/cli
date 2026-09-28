@@ -270,12 +270,47 @@ function pnpmChannelSymlinkError(dst) {
   );
 }
 
+// yarn v1 global bin links resolve into ~/.config/yarn/global/node_modules/
+// <own coordinate>/... — the same shape as a classic npm install, so the
+// adoption check below would silently migrate (and destroy) the yarn
+// channel entry. Refuse first, mirroring the pnpm defense.
+function yarnChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the yarn marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  if (!surface.includes("/yarn/global/")) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a yarn global installation; run "yarn global remove ${coordinate}" first, ` +
+      `or keep yarn and skip the npm bootstrap install`
+  );
+}
+
 // Channel-specific guidance for foreign symlinks, matched against both the
 // raw link text and the resolved path.
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
   { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/uv/tools/", guidance: 'this symlink belongs to a uv-managed tool; run "uv tool uninstall gitcode-cli" first, or keep uv and skip the npm bootstrap install' },
+  { marker: "/yarn/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
   { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
 ];
 
@@ -323,6 +358,8 @@ function replacePath(src, dst, transactionID, options = {}) {
     if (stat.isSymbolicLink()) {
       const pnpmError = pnpmChannelSymlinkError(dst);
       if (pnpmError) throw pnpmError;
+      const yarnError = yarnChannelSymlinkError(dst);
+      if (yarnError) throw yarnError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -363,6 +400,8 @@ function replacePath(src, dst, transactionID, options = {}) {
         backupReady = true;
         const pnpmError = pnpmChannelSymlinkError(backup);
         if (pnpmError) throw pnpmError;
+        const yarnError = yarnChannelSymlinkError(backup);
+        if (yarnError) throw yarnError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -1186,4 +1225,5 @@ module.exports = {
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
   sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,
+  yarnChannelSymlinkError,
 };

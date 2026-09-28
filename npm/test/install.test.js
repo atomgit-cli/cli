@@ -1272,6 +1272,29 @@ test("install gives uv-specific guidance for a uv tool symlink", (t) => {
   assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
 });
 
+test("install gives yarn-specific guidance for a yarn global symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-yarn-link-"));
+  const yarnBin = path.join(root, ".config", "yarn", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(yarnBin), { recursive: true });
+  fs.writeFileSync(yarnBin, "yarn-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, yarnBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "yarn-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /yarn global remove @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-provider-path-"));
   const early = path.join(root, "early");

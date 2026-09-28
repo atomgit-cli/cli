@@ -78,7 +78,10 @@ func detectSystemPackage(binary string) string {
 		if err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// 3s: dpkg-query -S scans every .list file, which can exceed 1s on
+		// large cold-cache systems — timing out would misclassify a deb
+		// install as an unmanaged copy.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err = exec.CommandContext(ctx, commandPath, check.args...).Run()
 		cancel()
 		if err == nil {
