@@ -144,6 +144,61 @@ test("bootstrap state lands under the package/npm-bootstrap directory", { timeou
   assert.ok(state.nextCheck > Date.now());
 });
 
+test("an invalid manifest is recorded as a permanent failure", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-permanent-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({ distribution: "bogus" }));
+  const helper = path.join(__dirname, "..", "lib", "bootstrap-update-helper.js");
+  const first = spawnSync(process.execPath, [helper, "--background", "--force", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(first.status, 1);
+  const stateFile = path.join(stateDir, "update-state.json");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.strictEqual(state.permanentError, true);
+  assert.strictEqual(state.failureStreak, 1);
+  assert.ok(state.nextCheck > Date.now(), "backoff still applies to manual retries");
+  assert.match(state.summary.message, /invalid npm-bootstrap install manifest/);
+  assert.match(state.summary.message, /Background checks are paused/);
+});
+
+test("a permanent failure stops scheduled helper runs even when due", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-perm-gate-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const { stub } = flakyNpmStub(root, 99, "9.9.9");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  const stateFile = path.join(stateDir, "update-state.json");
+  // Due for a check (nextCheck in the past) but flagged permanent: the
+  // scheduled run must short-circuit before touching npm or the state.
+  fs.writeFileSync(stateFile, JSON.stringify({
+    permanentError: true,
+    failureStreak: 3,
+    nextCheck: 1,
+    summary: { message: "Automatic update failed: earlier.", shown: true },
+  }));
+  const helper = path.join(__dirname, "..", "lib", "bootstrap-update-helper.js");
+  const result = spawnSync(process.execPath, [helper, "--background", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")).nextCheck, 1, "state must be untouched");
+  assert.strictEqual(fs.existsSync(path.join(root, "attempts")), false, "the flaky npm stub must not be invoked");
+});
+
 test("bootstrap failure state writes respect the cross-process lock", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-lock-fail-"));
   const stateDir = path.join(root, "state");

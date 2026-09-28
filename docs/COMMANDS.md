@@ -3387,7 +3387,7 @@ gc update --json
 - 显式 `gc update`（npm bootstrap）先在前台完成版本检查：已是最新 stable 时直接返回 `current`，不调度任何替换；存在新版本才调度原子替换；检查失败立即透出底层错误（如 registry 连接重置）并以非零退出码结束。若显式更新时恰有并发更新持锁（如刚触发的后台检查），返回 `busy` 状态且退出码为 0，稍后重试即可。
 - stable 版本不会自动进入 prerelease，也不会降级。
 - 版本检查有有界重试（3 次尝试，应对 registry 网络抖动）；安装超时放宽至 300 秒以容纳 npm 自身的网络重试；后台失败摘要携带真实错误原因（超长截断），不再输出无效指引。
-- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码，摘要在下次启动写入 stderr 一次。
+- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码。失败后按 1 小时起步的指数退避重试（2h、4h……上限 24 小时），同一错误指纹的失败摘要只展示一次；manifest 损坏、npm 运行时缺失等重试无法自愈的永久错误会暂停后台检查，并在摘要中给出修复动作（重跑 bootstrap 安装或重装 Node.js 后运行 `gitcode update` 恢复）。
 - updater 子进程使用最小环境白名单，不继承 GitCode/npm/GitHub/云平台凭证或用户 npm registry 配置；仅保留 PATH、系统目录、状态/配置目录、代理和 CA 等运行所需变量。
 - `--check` 只查询 stable `latest`，不安装。
 - 非 npm 渠道只返回对应包管理器的手工升级说明，不会调用 pip、Homebrew、apt、dnf 或 rpm。

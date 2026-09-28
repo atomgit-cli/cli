@@ -43,6 +43,14 @@ type updateState struct {
 	NextCheck   int64         `json:"nextCheck,omitempty"`
 	NoticeShown bool          `json:"noticeShown,omitempty"`
 	Summary     *stateSummary `json:"summary,omitempty"`
+	// Failure bookkeeping written by the JS updaters (backoff streak,
+	// summary deduplication, permanent-failure stop). Every field must be
+	// declared here: mutateStateLocked rewrites the whole file from this
+	// struct, so an undeclared field would be silently dropped.
+	LastChecked          string `json:"lastChecked,omitempty"`
+	FailureStreak        int64  `json:"failureStreak,omitempty"`
+	LastErrorFingerprint string `json:"lastErrorFingerprint,omitempty"`
+	PermanentError       bool   `json:"permanentError,omitempty"`
 }
 
 type stateSummary struct {
@@ -106,6 +114,12 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 		return
 	}
 	if updatesDisabled {
+		return
+	}
+	// A permanent failure (broken manifest, missing npm runtime) stops
+	// background scheduling until the user repairs the install; the pending
+	// summary above is still shown first.
+	if state.PermanentError {
 		return
 	}
 	if state.NextCheck > time.Now().UnixMilli() {

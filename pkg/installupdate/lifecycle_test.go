@@ -134,6 +134,46 @@ func TestAfterCommandUsesScopedStatePathFromManifest(t *testing.T) {
 	}
 }
 
+// Regression gate: mutateStateLocked rewrites the whole state file from the
+// updateState struct, so any field the JS updaters write must be declared
+// here or it is silently dropped.
+func TestAfterCommandPreservesUpdaterFailureFields(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
+	t.Setenv("GC_STATE_DIR", stateDir)
+	manifest := Manifest{Distribution: "npm-bootstrap", Version: "1.2.3", TargetDir: dir, Helper: filepath.Join(dir, "missing.js")}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"lastChecked":"2026-09-28T00:00:00.000Z","nextCheck":99999999999999,` +
+		`"failureStreak":3,"lastErrorFingerprint":"abc123","permanentError":true,` +
+		`"summary":{"message":"Automatic update failed: x.","shown":false}}`
+	if err := os.WriteFile(StatePath(nil), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	AfterCommand(nil, out, false, false)
+	state := readState(StatePath(nil))
+	if state.LastChecked != "2026-09-28T00:00:00.000Z" || state.FailureStreak != 3 ||
+		state.LastErrorFingerprint != "abc123" || !state.PermanentError {
+		t.Fatalf("updater failure fields were dropped: %#v", state)
+	}
+	if !state.Summary.Shown || !strings.HasPrefix(out.String(), "Automatic update failed: x.\n") {
+		t.Fatalf("pending summary must still be shown first: %q", out.String())
+	}
+	// The permanent gate must stop before scheduling: no detached-spawn
+	// attempt (which would print an "update check skipped" line here,
+	// since the manifest helper does not exist).
+	if strings.Contains(out.String(), "update check skipped") {
+		t.Fatalf("permanent failure must not schedule a background check: %q", out.String())
+	}
+}
+
 func TestResolveNodeFallsBackWhenRecordedRuntimeIsMissing(t *testing.T) {
 	recorded := filepath.Join(t.TempDir(), "missing-node")
 	if got := resolveNode(recorded); got == recorded {

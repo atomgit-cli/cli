@@ -135,6 +135,31 @@ function summarizeError(error) {
   return text.length > 200 ? `${text.slice(0, 200)}...` : text;
 }
 
+// Permanent update failures: retrying cannot fix them (the on-disk install
+// manifest or the npm runtime is broken), so background checks stop and the
+// summary carries the repair action. Registry oddities (an unstable
+// dist-tag) stay retryable. Mirrors lib/update.js; keep both in sync.
+const PERMANENT_ERROR_PATTERNS = [
+  /invalid npm-bootstrap install manifest/,
+  /npm CLI JavaScript runtime not found/,
+];
+
+function permanentUpdateError(error) {
+  const text = summarizeError(error);
+  return PERMANENT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+// Failure backoff: 1h, 2h, 4h, ... capped at the daily TTL. Mirrors
+// lib/update.js; keep both in sync.
+function failureBackoffMs(streak) {
+  const step = Number(streak) > 0 ? Number(streak) : 1;
+  return Math.min(TTL_MS, 60 * 60 * 1000 * 2 ** (step - 1));
+}
+
+function errorFingerprint(error) {
+  return crypto.createHash("sha256").update(summarizeError(error)).digest("hex").slice(0, 16);
+}
+
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -294,7 +319,10 @@ function run(options) {
   }
   const stateFile = statePath();
   const state = readJSON(stateFile);
-  if (!options.force && !options.check && state.nextCheck && Number(state.nextCheck) > Date.now()) {
+  // A permanent failure stops scheduled checks until the install is
+  // repaired (the Go side refuses to spawn the helper as well); --force
+  // and --check still proceed for manual recovery.
+  if (!options.force && !options.check && (state.permanentError || (state.nextCheck && Number(state.nextCheck) > Date.now()))) {
     return { status: "cached", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Update check is not due yet." };
   }
   const lock = `${stateFile}.lock`;
@@ -323,6 +351,11 @@ function run(options) {
     const fresh = readJSON(stateFile);
     fresh.lastChecked = new Date(now).toISOString();
     fresh.nextCheck = now + TTL_MS;
+    // A recovered environment clears the failure bookkeeping so the next
+    // failure starts the backoff from scratch.
+    fresh.failureStreak = 0;
+    delete fresh.lastErrorFingerprint;
+    fresh.permanentError = false;
     // "current" carries no action for the user; queueing it would print the
     // notice once a day. Stale "available" summaries are cleared instead.
     if (result.status === "current") delete fresh.summary;
@@ -373,9 +406,26 @@ function recordBackgroundFailure(error) {
   }
   try {
     const state = readJSON(file);
-    state.lastChecked = new Date().toISOString();
-    state.nextCheck = Date.now() + TTL_MS;
-    state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: false };
+    const now = Date.now();
+    state.lastChecked = new Date(now).toISOString();
+    const streak = (Number(state.failureStreak) || 0) + 1;
+    state.failureStreak = streak;
+    state.nextCheck = now + failureBackoffMs(streak);
+    const fingerprint = errorFingerprint(error);
+    const permanent = permanentUpdateError(error);
+    state.permanentError = permanent;
+    // Deduplicate by fingerprint: the same failure on the next backoff
+    // attempt must not requeue (and reprint) the seen summary.
+    if (state.lastErrorFingerprint !== fingerprint) {
+      let message = `Automatic update failed: ${summarizeError(error)}.`;
+      if (permanent) {
+        message += /npm-bootstrap install manifest/.test(summarizeError(error))
+          ? " Background checks are paused: rerun the npm bootstrap install (npx --yes --package=<coordinate>@latest gitcode install) to repair the install manifest."
+          : ' Background checks are paused: reinstall Node.js, then run "gitcode update" to resume background checks.';
+      }
+      state.summary = { message, shown: false };
+      state.lastErrorFingerprint = fingerprint;
+    }
     writeJSON(file, state);
   } finally {
     fs.closeSync(descriptor);

@@ -293,7 +293,7 @@ npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/
 
 正式 npm tarball 不再独立编译二进制：release workflow 的 `artifacts` job 调用 `scripts/prepare-npm-package.sh`，从同一批 GoReleaser 归档/裸二进制组装 npm 包，并将 `.tgz` 纳入 Release SHA-256 清单。`npm` job 只下载已验证的 Release artifact 并执行 OIDC Trusted Publishing；目标版本已存在时，必须下载 registry tarball 与 Release tarball 比对 SHA-256，内容一致才允许幂等跳过。
 
-npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享 24 小时 TTL，应用更新时使用跨进程锁、健康检查和回滚。npm-global 与 npm-bootstrap 渠道（及并行 npm 坐标）各自维护独立的状态文件（`<state>/gitcode-cli/<坐标>/<渠道>/update-state.json`），检查节奏与摘要互不干扰；显式设置 `GC_STATE_DIR` 时保留旧的共享单文件布局。安装/升级验证必须覆盖：
+npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享同一调度节奏（成功后 24 小时 TTL；失败后 1 小时起步指数退避、上限 24 小时，同一错误指纹的摘要只展示一次，manifest/npm 运行时类永久错误暂停后台检查并附修复动作），应用更新时使用跨进程锁、健康检查和回滚。npm-global 与 npm-bootstrap 渠道（及并行 npm 坐标）各自维护独立的状态文件（`<state>/gitcode-cli/<坐标>/<渠道>/update-state.json`），检查节奏与摘要互不干扰；显式设置 `GC_STATE_DIR` 时保留旧的共享单文件布局。安装/升级验证必须覆盖：
 
 npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerelease 发布到 `next`。发布重跑必须同时校验既有 tarball 内容与对应 dist-tag，不得让 prerelease 污染 stable 更新通道。
 
