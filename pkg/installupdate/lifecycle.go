@@ -3,6 +3,7 @@ package installupdate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 const (
 	updateTTL       = 24 * time.Hour
 	updateLockStale = 15 * time.Minute
+	checkDeadline   = 120 * time.Second
 )
 
 // Manifest describes an npm-bootstrap installation.
@@ -187,7 +189,9 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	if jsonOutput {
 		args = append(args, "--json")
 	}
-	cmd := exec.Command(node, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
 	cmd.Stdout = out
 	cmd.Stderr = errOut
@@ -211,7 +215,9 @@ func CheckNow(manifest *Manifest) (*CheckResult, error) {
 	node := resolveNode(manifest.Node)
 	args := []string{manifest.Helper, "--check", "--json", "--manifest", manifest.ManifestPath()}
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(node, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -234,11 +240,22 @@ func CheckNow(manifest *Manifest) (*CheckResult, error) {
 			detail = runErr.Error()
 		case parseErr != nil:
 			detail = parseErr.Error()
-		default:
-			detail = "unknown update check failure"
 		}
 	}
-	return nil, fmt.Errorf("update check failed: %s", detail)
+	return nil, fmt.Errorf("update check failed: %s", truncateDetail(detail))
+}
+
+// truncateDetail bounds helper error details to one collapsed line so failure
+// summaries and JSON output stay readable regardless of npm stderr volume.
+func truncateDetail(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 200 {
+		text = text[:200] + "..."
+	}
+	if text == "" {
+		text = "unknown update check failure"
+	}
+	return text
 }
 
 func resolveNode(recorded string) string {

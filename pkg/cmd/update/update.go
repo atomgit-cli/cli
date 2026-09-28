@@ -67,13 +67,12 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 func runBootstrapUpdate(cmd *cobra.Command, manifest *installupdate.Manifest, jsonOutput bool) error {
 	check, err := checkNow(manifest)
 	if err != nil {
-		if jsonOutput {
-			_ = writeResult(cmd, true, result{Status: "error", Distribution: "npm-bootstrap", Current: manifest.Version, Message: err.Error()})
-		}
+		writeFailure(cmd, manifest, err, jsonOutput)
 		return err
 	}
 	if check.Status == "available" {
 		if err := startDetached(manifest, true); err != nil {
+			writeFailure(cmd, manifest, err, jsonOutput)
 			return err
 		}
 		return writeResult(cmd, jsonOutput, result{
@@ -90,6 +89,20 @@ func runBootstrapUpdate(cmd *cobra.Command, manifest *installupdate.Manifest, js
 		Current:      manifest.Version,
 		Latest:       check.Latest,
 		Message:      check.Message,
+	})
+}
+
+// writeFailure emits the JSON error object for --json consumers; text mode
+// relies on the returned error so the exit code stays non-zero.
+func writeFailure(cmd *cobra.Command, manifest *installupdate.Manifest, failure error, jsonOutput bool) {
+	if !jsonOutput {
+		return
+	}
+	_ = writeResult(cmd, true, result{
+		Status:       "error",
+		Distribution: "npm-bootstrap",
+		Current:      manifest.Version,
+		Message:      failure.Error(),
 	})
 }
 

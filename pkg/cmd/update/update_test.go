@@ -130,7 +130,7 @@ func TestUpdateBootstrapAvailableSchedules(t *testing.T) {
 
 func TestUpdateBootstrapCheckFailureSurfacesError(t *testing.T) {
 	bootstrapManifestDir(t)
-	scheduled := restoreUpdateSeams(t, nil, errors.New("update check failed: npm registry check failed: network ECONNRESET"))
+	scheduled := restoreUpdateSeams(t, nil, errors.New("update check failed: network ECONNRESET"))
 	cmd := NewCmdUpdate(cmdutil.TestFactory())
 	cmd.SilenceUsage = true
 	out := &bytes.Buffer{}
@@ -149,6 +149,59 @@ func TestUpdateBootstrapCheckFailureSurfacesError(t *testing.T) {
 	}
 	if *scheduled != 0 {
 		t.Fatalf("startDetached must not run after a failed check, ran %d times", *scheduled)
+	}
+}
+
+func TestUpdateBootstrapBusyPassthroughDoesNotSchedule(t *testing.T) {
+	bootstrapManifestDir(t)
+	scheduled := restoreUpdateSeams(t, &installupdate.CheckResult{
+		Status: "busy", Distribution: "npm-bootstrap", Current: "1.2.3", Latest: "",
+		Message: "Another update is running.",
+	}, nil)
+	cmd := NewCmdUpdate(cmdutil.TestFactory())
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "busy" || !strings.Contains(got.Message, "Another update") {
+		t.Fatalf("expected busy passthrough, got %#v", got)
+	}
+	if *scheduled != 0 {
+		t.Fatalf("startDetached must not run while another update holds the lock, ran %d times", *scheduled)
+	}
+}
+
+func TestUpdateBootstrapScheduleFailureKeepsJSONContract(t *testing.T) {
+	bootstrapManifestDir(t)
+	scheduled := restoreUpdateSeams(t, &installupdate.CheckResult{
+		Status: "available", Distribution: "npm-bootstrap", Current: "1.2.3", Latest: "1.3.0",
+		Message: "GitCode CLI 1.3.0 is available.",
+	}, nil)
+	startDetached = func(*installupdate.Manifest, bool) error {
+		*scheduled += 1
+		return errors.New("exec: node: executable file not found")
+	}
+	cmd := NewCmdUpdate(cmdutil.TestFactory())
+	cmd.SilenceUsage = true
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("a failed schedule must exit non-zero")
+	}
+	var got result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "error" || !strings.Contains(got.Message, "executable file not found") {
+		t.Fatalf("schedule failure must still emit a JSON error object, got %#v", got)
 	}
 }
 

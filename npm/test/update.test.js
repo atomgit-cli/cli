@@ -219,6 +219,8 @@ test("runUpdate failure summaries carry the real error for the next launch", { t
 test("summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error("boom")), "boom");
   assert.strictEqual(summarizeError(null), "unknown error");
+  assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
+  assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
   assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
 });
 

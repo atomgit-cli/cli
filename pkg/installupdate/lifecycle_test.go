@@ -91,7 +91,10 @@ func TestResolveNodeFallsBackWhenRecordedRuntimeIsMissing(t *testing.T) {
 }
 
 func TestCheckNowParsesHelperResult(t *testing.T) {
-	node, helper := stubCheckHelper(t, `process.stdout.write(JSON.stringify({status:"current",distribution:"npm-bootstrap",current:"1.2.3",latest:"1.2.3",message:"GitCode CLI 1.2.3 is current."}))`)
+	script := `const r={status:"current",distribution:"npm-bootstrap",current:"1.2.3",` +
+		`latest:"1.2.3",message:"GitCode CLI 1.2.3 is current."};` +
+		`process.stdout.write(JSON.stringify(r))`
+	node, helper := stubCheckHelper(t, script)
 	result, err := CheckNow(stubCheckManifest(t, node, helper))
 	if err != nil {
 		t.Fatal(err)
@@ -102,13 +105,28 @@ func TestCheckNowParsesHelperResult(t *testing.T) {
 }
 
 func TestCheckNowReturnsHelperErrorDetail(t *testing.T) {
-	node, helper := stubCheckHelper(t, `process.stdout.write(JSON.stringify({status:"error",message:"npm registry check failed: network ECONNRESET"})); process.exit(1);`)
+	script := `process.stdout.write(JSON.stringify({status:"error",` +
+		`message:"npm registry check failed: network ECONNRESET"})); process.exit(1);`
+	node, helper := stubCheckHelper(t, script)
 	_, err := CheckNow(stubCheckManifest(t, node, helper))
 	if err == nil {
 		t.Fatal("expected the helper's error to propagate")
 	}
 	if !strings.Contains(err.Error(), "ECONNRESET") {
 		t.Fatalf("error must carry the real cause, got %q", err.Error())
+	}
+}
+
+func TestCheckNowBoundsRunawayHelperDetail(t *testing.T) {
+	script := `process.stdout.write(JSON.stringify({status:"error",` +
+		`message:"boom ` + strings.Repeat("x", 400) + `"})); process.exit(1);`
+	node, helper := stubCheckHelper(t, script)
+	_, err := CheckNow(stubCheckManifest(t, node, helper))
+	if err == nil {
+		t.Fatal("expected the helper's error to propagate")
+	}
+	if len(err.Error()) > 240 {
+		t.Fatalf("detail must be truncated, got %d chars", len(err.Error()))
 	}
 }
 
@@ -139,8 +157,14 @@ func stubCheckHelper(t *testing.T, script string) (string, string) {
 func stubCheckManifest(t *testing.T, node, helper string) *Manifest {
 	t.Helper()
 	dir := t.TempDir()
-	manifest := &Manifest{Distribution: "npm-bootstrap", Version: "1.2.3", TargetDir: dir, Node: node, Helper: helper, path: filepath.Join(dir, ".gitcode-install.json")}
-	return manifest
+	return &Manifest{
+		Distribution: "npm-bootstrap",
+		Version:      "1.2.3",
+		TargetDir:    dir,
+		Node:         node,
+		Helper:       helper,
+		path:         filepath.Join(dir, ".gitcode-install.json"),
+	}
 }
 
 func TestUpdaterEnvironmentStripsCredentials(t *testing.T) {

@@ -76,7 +76,8 @@ function appendLog(message, env = process.env) {
 // on the next launch while still carrying the real cause (registry resets,
 // timeouts, spawn failures) instead of a generic dead-end notice.
 function summarizeError(error) {
-  const text = String((error && error.message) || error || "unknown error").replace(/\s+/g, " ").trim();
+  const raw = (error && (error.message || error.code)) || error;
+  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
   return text.length > 200 ? `${text.slice(0, 200)}...` : text;
 }
 

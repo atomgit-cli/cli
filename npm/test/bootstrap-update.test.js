@@ -99,10 +99,14 @@ test("bootstrap failure summaries carry the real error instead of a dead-end not
     npm: stub,
     helper: path.join(root, "helper.js"),
   }));
+  const childEnv = { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir };
+  for (const key of ["TEMP", "TMP", "SYSTEMROOT"]) {
+    if (process.env[key]) childEnv[key] = process.env[key];
+  }
   const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--manifest", manifestFile], {
     encoding: "utf8",
     timeout: 20000,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+    env: childEnv,
   });
   assert.strictEqual(result.status, 1, result.stderr);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
@@ -117,6 +121,8 @@ test("bootstrap failure summaries carry the real error instead of a dead-end not
 test("bootstrap summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error("boom")), "boom");
   assert.strictEqual(summarizeError(null), "unknown error");
+  assert.strictEqual(summarizeError(new Error(" \n\t ")), "unknown error");
+  assert.strictEqual(summarizeError({ code: "ECONNRESET" }), "ECONNRESET");
   const long = new Error(`x${"a".repeat(400)}`);
   assert.strictEqual(summarizeError(long).length, 203);
   assert.ok(summarizeError(new Error("line1\nline2")).includes("line1 line2"));
