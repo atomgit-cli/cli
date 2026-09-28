@@ -456,7 +456,22 @@ function sha256(file) {
 }
 
 function runGc(bin, args) {
-  return spawnSync(bin, args, { encoding: "utf8" });
+  return spawnSync(bin, args, {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      // The installer's own probes must not run the update lifecycle: the
+      // spawned binary reads the adjacent bootstrap manifest and would
+      // consume any pending summary into discarded stderr, mark the
+      // first-run notice shown, and spawn background updaters mid-install
+      // (up to four per install). The binary pointer targets the bundled
+      // platforms copy — no manifest sits next to it, so the lifecycle
+      // exits early even before the env guard applies (AfterCommand shows
+      // the summary before checking the disabled flags).
+      GC_NO_UPDATE_CHECK: "1",
+      GITCODE_CLI_BINARY: bundledBinaryPath(),
+    },
+  });
 }
 
 // A failing command sometimes reports on stdout with an empty stderr; fall
