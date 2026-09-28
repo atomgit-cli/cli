@@ -196,6 +196,11 @@ function isAllowedAliasSymlink(dst, allowedTarget) {
 // npm coordinates owned by this project. A bin symlink resolving into one of
 // these package trees is a leftover of a classic `npm install -g` channel and
 // is safe to migrate to the bootstrap layout.
+// Org-transfer note: if the bare name "gitcode-cli" is ever added here, the
+// path-level check below cannot distinguish a pre-existing third-party
+// install from a new official one and would silently adopt the third-party
+// entry. At transfer time, adoption must additionally read the resolved
+// target's package.json "name" and verify it.
 const OWN_NPM_PACKAGES = ["@atomgit-cli/cli", "@gitcode-cli/cli", "atomgit-cli"];
 const THIRD_PARTY_NPM_PACKAGE = "gitcode-cli";
 
@@ -547,6 +552,11 @@ function validateWindowsPathDirectory(dir) {
   }
 }
 
+// Test-only model of the PowerShell PATH update: the production logic is the
+// WINDOWS_UPDATE_USER_PATH script above (run via persistWindowsUserPath).
+// No production caller — it exists so tests can lock the PowerShell behavior
+// without spawning powershell.exe. When that script changes, update this
+// model or the tests silently drift.
 function prependWindowsUserPath(dir, current = "", env = process.env) {
   validateWindowsPathDirectory(dir);
   const wanted = normalizePath(dir, true);
