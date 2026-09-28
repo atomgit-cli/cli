@@ -185,8 +185,14 @@ func TestReadStatePreservesCorruptFile(t *testing.T) {
 func TestStatePathScopesPerPackageAndChannel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GC_STATE_DIR", "")
-	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("XDG_STATE_HOME", dir)
+	if runtime.GOOS == "windows" {
+		// stateRoot derives from LOCALAPPDATA only on Windows (mirroring the
+		// JS stateDir precedence); point it at the temp dir.
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("LOCALAPPDATA", "")
+		t.Setenv("XDG_STATE_HOME", dir)
+	}
 	if got := StatePath(nil); got != filepath.Join(dir, "gitcode-cli", "update-state.json") {
 		t.Fatalf("legacy manifest state path = %q", got)
 	}
@@ -206,8 +212,14 @@ func TestAfterCommandUsesScopedStatePathFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
 	t.Setenv("GC_STATE_DIR", "")
-	t.Setenv("LOCALAPPDATA", "")
-	t.Setenv("XDG_STATE_HOME", dir)
+	if runtime.GOOS == "windows" {
+		// See TestStatePathScopesPerPackageAndChannel: the Windows state root
+		// comes from LOCALAPPDATA only.
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("LOCALAPPDATA", "")
+		t.Setenv("XDG_STATE_HOME", dir)
+	}
 	manifest := Manifest{
 		Distribution: "npm-bootstrap",
 		Version:      "1.2.3",
