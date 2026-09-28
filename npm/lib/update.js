@@ -169,18 +169,33 @@ function updateMode(env = process.env) {
   return ["auto", "notify", "off"].includes(configured) ? configured : "notify";
 }
 
+function truthy(value) {
+  return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
+}
+
+// cobra/pflag accepts --flag and --flag=value for boolean flags while the
+// wrapper sees raw argv; --flag=false must not count as set.
+function flagSet(args, name) {
+  return args.some((arg) => arg === name ||
+    (arg.startsWith(`${name}=`) && truthy(arg.slice(name.length + 1))));
+}
+
+// CI detection covers the vendors that do not set CI=true (Jenkins,
+// TeamCity, CodeShip): the variants carry version or build strings, so
+// their mere presence is the signal. Mirrors the Go ciEnvironment.
+function ciEnvironment(env = process.env) {
+  if (truthy(env.CI)) return true;
+  return Boolean(env.GITHUB_ACTIONS || env.BUILD_NUMBER || env.CI_NAME || env.TEAMCITY_VERSION);
+}
+
 function disabledForInvocation(args = [], env = process.env) {
   return (
     truthy(env.GC_NO_UPDATE_CHECK) ||
-    truthy(env.CI) ||
-    args.includes("--no-update-check") ||
-    args.includes("--no-interactive") ||
+    ciEnvironment(env) ||
+    flagSet(args, "--no-update-check") ||
+    flagSet(args, "--no-interactive") ||
     updateMode(env) === "off"
   );
-}
-
-function truthy(value) {
-  return ["1", "true", "yes"].includes(String(value || "").trim().toLowerCase());
 }
 
 function stableVersion(value) {
@@ -436,6 +451,15 @@ function runUpdate(options = {}) {
   const descriptor = acquireLock(lockFile);
   if (descriptor == null) return resultObject("busy", "", "Another GitCode CLI update is already running.");
   try {
+    // Re-check under the lock: two wrappers spawned milliseconds apart both
+    // pass shouldSchedule, and the loser must not repeat the check the
+    // winner just finished. Explicit updates are never TTL-gated.
+    if (options.background) {
+      const pending = readJSON(stateFile);
+      if (pending.permanentError || (pending.nextCheck && Number(pending.nextCheck) > Date.now())) {
+        return resultObject("cached", "", "Update check is not due yet.");
+      }
+    }
     const mode = options.mode || updateMode();
     const result = performUpdate({ ...options, mode });
     const now = Date.now();
@@ -489,7 +513,9 @@ function shouldSchedule(args = [], env = process.env, now = Date.now()) {
   // A permanent failure stops background scheduling until the user repairs
   // the install; explicit "gitcode update" still works.
   if (state.permanentError) return false;
-  return !state.nextCheck || Number(state.nextCheck) <= now;
+  // A garbage nextCheck (NaN) counts as due: the next write heals it.
+  const next = Number(state.nextCheck);
+  return !state.nextCheck || !Number.isFinite(next) || next <= now;
 }
 
 function showPendingSummary(stderr = process.stderr, env = process.env) {
@@ -508,8 +534,8 @@ function showPendingSummary(stderr = process.stderr, env = process.env) {
   }
 }
 
-function showFirstRunNotice(stderr = process.stderr, env = process.env) {
-  if (disabledForInvocation([], env)) return;
+function showFirstRunNotice(args = [], stderr = process.stderr, env = process.env) {
+  if (disabledForInvocation(args, env)) return;
   const file = updateStatePath(env);
   const lockFile = `${file}.lock`;
   const descriptor = acquireLock(lockFile);

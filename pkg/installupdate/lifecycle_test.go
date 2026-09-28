@@ -118,6 +118,70 @@ func TestTruncateDetailIsRuneSafe(t *testing.T) {
 	}
 }
 
+func TestResolveUpdateModeFallsBackToConfigOnInvalidEnv(t *testing.T) {
+	cases := []struct {
+		envValue, cfgValue, want string
+	}{
+		{"off", "auto", "off"},     // valid env wins
+		{"", "off", "off"},         // empty env falls back to config
+		{"banana", "off", "off"},   // invalid env falls back to config (was: kept checking)
+		{"banana", "", "notify"},   // nothing valid anywhere
+		{" NOTIFY ", "", "notify"}, // trimmed and case-folded
+		{"", "garbage", "notify"},  // invalid config falls back to the default
+	}
+	for _, tc := range cases {
+		if got := resolveUpdateMode(tc.envValue, tc.cfgValue); got != tc.want {
+			t.Fatalf("resolveUpdateMode(%q, %q) = %q, want %q", tc.envValue, tc.cfgValue, got, tc.want)
+		}
+	}
+}
+
+func TestCIEnvironmentCoversVendorsWithoutCIFlag(t *testing.T) {
+	for _, name := range []string{"GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION"} {
+		t.Setenv(name, "1")
+		if !ciEnvironment() {
+			t.Fatalf("%s must be detected as CI", name)
+		}
+		t.Setenv(name, "")
+	}
+	t.Setenv("CI", "")
+	if ciEnvironment() {
+		t.Fatal("no CI variables set must not be detected as CI")
+	}
+	t.Setenv("CI", "true")
+	if !ciEnvironment() {
+		t.Fatal("CI=true must be detected")
+	}
+}
+
+func TestWindowsStateRootMatchesJSPrecedence(t *testing.T) {
+	if got := windowsStateRoot(`C:\Users\u\AppData\Local`, `C:\Users\u`); got != filepath.Join(`C:\Users\u\AppData\Local`, "gitcode-cli") {
+		t.Fatalf("LOCALAPPDATA wins: %q", got)
+	}
+	// An empty LOCALAPPDATA must fall back to <home>\AppData\Local instead
+	// of splitting the Go and JS halves onto different state files.
+	if got := windowsStateRoot("", `C:\Users\u`); got != filepath.Join(`C:\Users\u`, "AppData", "Local", "gitcode-cli") {
+		t.Fatalf("home fallback: %q", got)
+	}
+}
+
+func TestReadStatePreservesCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_STATE_DIR", dir)
+	path := StatePath(nil)
+	corrupt := []byte(`{"nextCheck": "not-a-number"`)
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if state := readState(path); state != (updateState{}) {
+		t.Fatalf("corrupt state must reset, got %#v", state)
+	}
+	preserved, err := os.ReadFile(path + ".corrupt")
+	if err != nil || !bytes.Equal(preserved, corrupt) {
+		t.Fatalf("the corrupt bytes must be preserved beside the state file: %v", err)
+	}
+}
+
 func TestStatePathScopesPerPackageAndChannel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GC_STATE_DIR", "")

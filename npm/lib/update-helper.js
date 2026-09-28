@@ -32,8 +32,10 @@ function parseArgs(args) {
     else if (arg === "--check") options.checkOnly = true;
     else if (arg === "--json") options.json = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
-    else if (arg === "--no-update-check" || arg === "--no-interactive") {
-      // Global flags: accepted for CLI consistency, no effect here.
+    else if (arg === "--no-update-check" || arg === "--no-interactive" ||
+        arg.startsWith("--no-update-check=") || arg.startsWith("--no-interactive=")) {
+      // Global flags: accepted for CLI consistency (including the
+      // --flag=value forms cobra/pflag allows), no effect here.
     } else throw new Error(`unknown update argument: ${arg}`);
   }
   return options;

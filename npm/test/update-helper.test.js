@@ -16,7 +16,7 @@ test("update parseArgs accepts help and CLI-consistency flags", () => {
   for (const flag of ["--help", "-h"]) {
     assert.strictEqual(parseArgs([flag]).help, true, flag);
   }
-  for (const flag of ["--no-update-check", "--no-interactive"]) {
+  for (const flag of ["--no-update-check", "--no-interactive", "--no-update-check=true", "--no-interactive=false"]) {
     const options = parseArgs([flag]);
     assert.strictEqual(options.background, false, flag);
     assert.strictEqual(options.checkOnly, false, flag);
