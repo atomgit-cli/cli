@@ -41,15 +41,17 @@ function runPostinstall(env = process.env, stderr = process.stderr, packageRoot 
 
   const report = globalInstallReport(env);
   if (!report) return;
-  if (report.shadowed) {
+  for (const [name, result] of Object.entries(report.names)) {
+    if (!result.shadowed) continue;
     stderr.write(
       `\nGitCode CLI ${pkg.version} was installed by npm, but another command is first on PATH:\n` +
-        `  selected: ${report.selected}\n` +
+        `  command:  ${name}\n` +
+        `  selected: ${result.selected}\n` +
         `  npm bin:  ${report.expectedDir}\n` +
         `Run the npm entry directly, then inspect all installations:\n` +
         (process.platform === "win32"
-          ? `  & "${path.join(report.expectedDir, "gitcode.cmd")}" doctor install\n`
-          : `  "${path.join(report.expectedDir, "gitcode")}" doctor install\n`) +
+          ? `  & "${path.join(report.expectedDir, `${name}.cmd`)}" doctor install\n`
+          : `  "${path.join(report.expectedDir, name)}" doctor install\n`) +
         `No package was removed and PATH was not changed.\n\n`
     );
   }

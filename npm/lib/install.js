@@ -13,7 +13,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 const { resolveBinaryName, isSupported } = require("./platform");
-const { normalizePath, writeInstallMetadata } = require("./install-metadata");
+const { commandCandidates, normalizePath, writeInstallMetadata } = require("./install-metadata");
 const pkg = require("../package.json");
 
 const PLATFORMS_DIR = path.join(__dirname, "..", "bin", "platforms");
@@ -77,7 +77,7 @@ const WINDOWS_UPDATE_USER_PATH = [
   "    } catch { $broadcasted = $false }",
   "  }",
   "} finally { if ($mutexHeld) { $mutex.ReleaseMutex() }; $mutex.Dispose() }",
-  "@{ changed = [bool]$changed; kind = $kind.ToString(); broadcasted = [bool]$broadcasted } | ConvertTo-Json -Compress",
+  "@{ changed = [bool]$changed; kind = $kind.ToString(); broadcasted = [bool]$broadcasted; previous = [string]$current } | ConvertTo-Json -Compress",
 ].join("; ");
 
 function bundledBinaryPath() {
@@ -220,6 +220,41 @@ function resolvesIntoOwnNpmPackage(linkPath) {
   });
 }
 
+// pnpm's global layout nests our own npm package under .../pnpm/.../node_modules/,
+// which resolvesIntoOwnNpmPackage would treat as a classic npm-global leftover
+// and silently migrate. Check the raw link text and the resolved path for a
+// pnpm marker before any adoption decision and refuse instead, keeping the
+// pnpm channel intact (mirrors the Homebrew/pipx symlink refusals).
+function pnpmChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the pnpm marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  if (!surface.includes("/pnpm/")) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a pnpm global installation; run "pnpm remove -g ${coordinate}" first, ` +
+      `or keep pnpm and skip the npm bootstrap install`
+  );
+}
+
 // Channel-specific guidance for foreign symlinks, matched against both the
 // raw link text and the resolved path.
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
@@ -270,6 +305,8 @@ function replacePath(src, dst, transactionID, options = {}) {
   try {
     const stat = fs.lstatSync(dst);
     if (stat.isSymbolicLink()) {
+      const pnpmError = pnpmChannelSymlinkError(dst);
+      if (pnpmError) throw pnpmError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -280,6 +317,11 @@ function replacePath(src, dst, transactionID, options = {}) {
         `refusing non-regular install target: ${dst} is ${kind}; ` +
           `remove it or choose another directory with --target-dir <dir>`
       );
+    } else {
+      // Refuse foreign-channel regular files (e.g. pip console scripts):
+      // replacing would destroy the other channel's entry point on commit.
+      const hint = foreignChannelHint(dst);
+      if (hint) throw foreignChannelTargetError(dst, hint);
     }
     hadOriginal = true;
   } catch (error) {
@@ -303,6 +345,8 @@ function replacePath(src, dst, transactionID, options = {}) {
       if (moveOriginal) {
         fs.renameSync(dst, backup);
         backupReady = true;
+        const pnpmError = pnpmChannelSymlinkError(backup);
+        if (pnpmError) throw pnpmError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -468,6 +512,40 @@ function prependWindowsUserPath(dir, current = "", env = process.env) {
   return `${dir};${entries.join(";")}`;
 }
 
+// Shadowing report for a fresh Windows install at `dir`: which command names
+// resolve to an earlier provider on the merged PATH. New Windows processes
+// concatenate System PATH before User PATH, and the installer only prepends
+// `dir` to the User PATH — so a provider inside the old User PATH
+// (`userPathValue`) is overtaken in new windows, while a provider anywhere
+// else (System PATH, shell profile injection) keeps winning regardless.
+// `userPathValue === null` means the old User PATH is unknown.
+function windowsPathShadowing(dir, env, userPathValue) {
+  const shadows = [];
+  const wanted = normalizePath(dir, true);
+  const userEntries = new Set();
+  if (typeof userPathValue === "string") {
+    for (const entry of userPathValue.split(";")) {
+      const unquoted = entry.trim().replace(/^"|"$/g, "");
+      if (!unquoted) continue;
+      userEntries.add(normalizePath(expandWindowsEnvironment(unquoted, env), true));
+    }
+  }
+  for (const name of ["gitcode", "gc"]) {
+    const provider = commandCandidates(name, env, true)[0] || "";
+    if (!provider) continue;
+    const providerDir = normalizePath(path.win32.dirname(provider), true);
+    if (providerDir === wanted) continue;
+    shadows.push({
+      name,
+      provider,
+      scope: typeof userPathValue === "string"
+        ? (userEntries.has(providerDir) ? "user" : "system")
+        : "unknown",
+    });
+  }
+  return shadows;
+}
+
 function windowsPowerShellExecutable(env) {
   const systemRoot = environmentValue(env, "SystemRoot") || environmentValue(env, "WINDIR");
   if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
@@ -533,6 +611,7 @@ function persistWindowsUserPath(dir, options = {}) {
       changed: parsed.changed,
       registryKind: parsed.kind,
       broadcasted: parsed.broadcasted,
+      previousUserPath: typeof parsed.previous === "string" ? parsed.previous : null,
     };
   } catch (error) {
     return { ok: false, error: `解析 Windows PATH 更新结果失败：${error.message}` };
@@ -615,6 +694,23 @@ function windowsPathGuidance(dir, options, result, env = process.env) {
   } else {
     lines.push("  请运行 gitcode version 验证当前版本。");
   }
+  // Deeper shadowing analysis on the merged PATH: an earlier provider keeps
+  // winning in new windows unless it lives inside the old User PATH.
+  const userPathValue = result.ok && options.modifyPath && typeof result.previousUserPath === "string"
+    ? result.previousUserPath
+    : null;
+  for (const shadow of windowsPathShadowing(dir, env, userPathValue)) {
+    if (shadow.scope === "user") {
+      lines.push(`  注意：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
+      lines.push("  该提供者位于用户 PATH，重新打开 PowerShell/Windows Terminal 窗口后本安装将优先生效。");
+    } else if (shadow.scope === "system") {
+      lines.push(`  警告：PATH 中 "${shadow.name}" 解析到 ${shadow.provider}，重开窗口也无法解决（该提供者位于系统 PATH 或 shell 配置，合并顺序在用户 PATH 之前）。`);
+      lines.push("  请卸载旧提供者，或由管理员将本安装目录加入系统 PATH 并置于其前；运行 gitcode doctor install 查看全部来源。");
+    } else {
+      lines.push(`  警告：${shadow.provider} 先于本安装目录提供 "${shadow.name}"。`);
+      lines.push("  若该提供者来自系统 PATH，重开窗口无法解决：请运行 gitcode doctor install 确认来源，再卸载旧提供者或调整 PATH 顺序。");
+    }
+  }
   lines.push("  其他 pip/npm 安装入口不会被自动删除；如需清理，请先运行 gitcode doctor install 确认来源。");
   return `${lines.join("\n")}\n`;
 }
@@ -637,9 +733,20 @@ function foreignChannelHint(file) {
   }
   const firstLine = content.split("\n", 1)[0];
   if (/^#!\s*(\S*\/)?(env\s+)?python([0-9.]*)?\s*$/.test(firstLine)) {
-    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" instead to keep the pip channel';
+    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
   }
   return "";
+}
+
+// Refusal error for a foreign-channel regular file occupying an install
+// target (e.g. a pip console script). The replacement would be transactional,
+// but the backup is deleted on commit, so replacing would permanently destroy
+// the other channel's entry point.
+function foreignChannelTargetError(dst, hint) {
+  return new Error(
+    `refusing to replace foreign install target: ${dst} appears to be a ${hint}\n` +
+      `install to another directory with --target-dir <dir> to keep both channels`
+  );
 }
 
 // First directory on PATH providing the given command name (resolved through
@@ -677,7 +784,7 @@ function ensureUsableInstallDir(dir) {
 // the bin dir. Only regular files are swept, and only by mtime age: a symlink
 // backup keeps its original mtime through rename, so age is unreliable there
 // and active concurrent transactions must never be disturbed.
-const LEFTOVER_PREFIXES = ["gc", "gc.exe", "gitcode", "gitcode.exe", "gitcode-update-helper.js"];
+const LEFTOVER_PREFIXES = ["gc", "gc.exe", "gitcode", "gitcode.exe", "gitcode-update-helper.js", ".gitcode-install.json"];
 const LEFTOVER_AGE_MS = 24 * 60 * 60 * 1000;
 
 function isTransactionLeftoverName(name) {
@@ -763,20 +870,6 @@ async function runInstall(args = []) {
   const dst = path.join(dir, isWin ? "gc.exe" : "gc");
   const alias = path.join(dir, isWin ? "gitcode.exe" : "gitcode");
   const helper = path.join(dir, "gitcode-update-helper.js");
-  // Warn before replacing foreign-channel regular files (e.g. pip console
-  // scripts in the same bin dir): the replacement is transactional, but the
-  // backup is removed on commit and the other channel loses its entry.
-  for (const target of [dst, alias, helper]) {
-    let hint = "";
-    try {
-      if (fs.lstatSync(target).isFile()) hint = foreignChannelHint(target);
-    } catch {
-      // target does not exist yet
-    }
-    if (hint) {
-      process.stdout.write(`Warning: replacing ${target}, which appears to be a ${hint}\n`);
-    }
-  }
   const aliasOptions = isWin ? {} : { allowedSymlinkTarget: dst };
   const transactionID = `${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   const transaction = [];
@@ -802,6 +895,10 @@ async function runInstall(args = []) {
     writeInstallMetadata(dir, {
       distribution: "npm-bootstrap",
       version: pkg.version,
+      // Same coordinate injected into the helper copy: the Go side and the
+      // helper both derive <state>/gitcode-cli/<package>/npm-bootstrap/
+      // from it, so they must agree.
+      package: pkg.name,
       targetDir: dir,
       node: process.execPath,
       npm: process.env.npm_execpath || "",
@@ -868,8 +965,8 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, formatErrorChain, helperPackageNameTransform,
-  installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
-  quotePowerShell, replacePath, rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory,
-  windowsPathGuidance,
+  ensureUsableInstallDir, firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
+  helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
+  prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,
+  sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance, windowsPathShadowing,
 };

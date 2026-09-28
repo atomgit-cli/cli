@@ -35,7 +35,7 @@ function binPath() {
   return path.join(PLATFORMS_DIR, name);
 }
 
-function runBinary(args) {
+function runBinary(args, metadata) {
   const p = binPath();
   // Ensure the exec bit survives tarball extraction on posix.
   if (process.platform !== "win32") {
@@ -49,7 +49,10 @@ function runBinary(args) {
     stdio: "inherit",
     env: {
       ...process.env,
-      GITCODE_CLI_DISTRIBUTION: "npm",
+      // Pass the real discovered channel through (npm, pnpm, npm-local)
+      // so doctor/update report the actual install instead of a hardcoded
+      // npm; fall back to npm when discovery found nothing.
+      GITCODE_CLI_DISTRIBUTION: (metadata && metadata.distribution) || "npm",
       GITCODE_CLI_ENTRYPOINT: process.argv[1],
       GITCODE_CLI_BINARY: p,
       GITCODE_CLI_PACKAGE_ROOT: path.resolve(__dirname, ".."),
@@ -105,7 +108,7 @@ function finishUpdateLifecycle(args) {
 
 function main() {
   const args = process.argv.slice(2);
-  ensureInstallMetadata(path.resolve(__dirname, ".."), pkg.version);
+  const metadata = ensureInstallMetadata(path.resolve(__dirname, ".."), pkg.version);
 
   // Intercept the install subcommand (lark-cli-style bootstrap). If the Go
   // CLI grows a real "gc install" later, prefer forwarding "--help"/unknown
@@ -125,7 +128,7 @@ function main() {
     return;
   }
 
-  runBinary(args);
+  runBinary(args, metadata);
 }
 
 main();

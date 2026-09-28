@@ -28,11 +28,60 @@ func TestDetectDistributionByBinaryPath(t *testing.T) {
 		{"/opt/homebrew/Cellar/gc/0.14.0/bin/gc", "homebrew"},
 		{"/usr/local/Cellar/gc/0.14.0/bin/gc", "homebrew"},
 		{"/home/u/.local/bin/gc", "archive-or-source"},
+		// Linuxbrew bin directory: matched by the /.linuxbrew/ marker.
+		{"/home/linuxbrew/.linuxbrew/bin/gc", "homebrew"},
+		// Apple Silicon bin directory: matched by /opt/homebrew/ directly.
+		{"/opt/homebrew/bin/gc", "homebrew"},
+		// The old "/homebrew/" substring was too broad: user tool
+		// directories must not be misdetected as Homebrew.
+		{"/home/u/tools/homebrew/gc", "archive-or-source"},
+		// Intel Mac bin symlink, unresolved (missing on disk): the
+		// fallback path keeps the table-test behavior.
+		{"/usr/local/bin/gc", "archive-or-source"},
 	}
 	for _, tc := range cases {
 		if got := DetectDistribution(map[string]string{}, tc.binary); got != tc.want {
 			t.Fatalf("DetectDistribution(%q) = %q, want %q", tc.binary, got, tc.want)
 		}
+	}
+}
+
+func TestDetectDistributionResolvesHomebrewBinSymlinks(t *testing.T) {
+	root := t.TempDir()
+	cellarBin := filepath.Join(root, "usr", "local", "Cellar", "gc", "0.14.0", "bin", "gc")
+	if err := os.MkdirAll(filepath.Dir(cellarBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(cellarBin, "binary"); err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(root, "usr", "local", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "gc")
+	if err := os.Symlink(cellarBin, link); err != nil {
+		t.Skipf("creating symlinks requires privileges: %v", err)
+	}
+	if got := DetectDistribution(map[string]string{}, link); got != "homebrew" {
+		t.Fatalf("symlinked Homebrew bin must resolve to homebrew, got %q", got)
+	}
+
+	// A symlink resolving outside any known layout stays archive-or-source.
+	plainDir := filepath.Join(root, "tools")
+	if err := os.MkdirAll(plainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(plainDir, "gc")
+	if err := writeFile(plain, "binary"); err != nil {
+		t.Fatal(err)
+	}
+	plainLink := filepath.Join(binDir, "gitcode")
+	if err := os.Symlink(plain, plainLink); err != nil {
+		t.Skipf("creating symlinks requires privileges: %v", err)
+	}
+	if got := DetectDistribution(map[string]string{}, plainLink); got != "archive-or-source" {
+		t.Fatalf("unrecognized resolved path must stay archive-or-source, got %q", got)
 	}
 }
 

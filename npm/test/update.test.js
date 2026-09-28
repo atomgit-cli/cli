@@ -12,15 +12,19 @@ const {
   checkLatest,
   compareVersions,
   disabledForInvocation,
+  errorFingerprint,
   exactInstallArgs,
+  failureBackoffMs,
   globalWrapper,
   npmCommand,
+  permanentUpdateError,
   releaseLock,
   runUpdate,
   shouldSchedule,
   shouldOnlyNotify,
   stableVersion,
   summarizeError,
+  TTL_MS,
   updateMode,
   updaterEnvironment,
   updateStatePath,
@@ -224,6 +228,83 @@ test("summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(new Error(`x${"a".repeat(400)}`)).length, 203);
 });
 
+test("failureBackoffMs grows exponentially and caps at the daily TTL", () => {
+  const hour = 60 * 60 * 1000;
+  assert.strictEqual(failureBackoffMs(1), hour);
+  assert.strictEqual(failureBackoffMs(2), 2 * hour);
+  assert.strictEqual(failureBackoffMs(5), 16 * hour);
+  assert.strictEqual(failureBackoffMs(6), TTL_MS);
+  assert.strictEqual(failureBackoffMs(100), TTL_MS);
+  assert.strictEqual(failureBackoffMs(0), hour);
+});
+
+test("permanentUpdateError classifies only retry-unrepairable failures", () => {
+  assert.strictEqual(permanentUpdateError(new Error("invalid npm-bootstrap install manifest")), true);
+  assert.strictEqual(permanentUpdateError(new Error("npm CLI JavaScript runtime not found; reinstall Node.js or run npm install -g explicitly")), true);
+  // A bad dist-tag is maintainer-fixable: retrying must auto-recover.
+  assert.strictEqual(permanentUpdateError(new Error("registry latest is not a stable semantic version: 9.9.9-rc.1")), false);
+  assert.strictEqual(permanentUpdateError(new Error("network ECONNRESET")), false);
+  assert.strictEqual(errorFingerprint(new Error("boom")), errorFingerprint(new Error("boom")));
+  assert.notStrictEqual(errorFingerprint(new Error("boom")), errorFingerprint(new Error("other")));
+});
+
+test("failed checks back off progressively and deduplicate summaries by fingerprint", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-backoff-"));
+  const stateDir = path.join(dir, "state");
+  const stateFile = path.join(stateDir, "update-state.json");
+  const { stub } = flakyNpmStub(dir, 99, "0.0.2");
+  const metadata = { global: true, distribution: "npm", prefix: dir, npm: stub };
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const before = Date.now();
+    assert.throws(() => runUpdate({ stateFile, background: true, metadata }), /ECONNRESET/);
+    let state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.failureStreak, 1);
+    const firstDelay = state.nextCheck - before;
+    assert.ok(firstDelay >= 55 * 60 * 1000 && firstDelay <= 65 * 60 * 1000, `first backoff ~1h, got ${firstDelay}`);
+    assert.strictEqual(state.summary.shown, false);
+    assert.ok(state.lastErrorFingerprint, "fingerprint must be recorded");
+
+    // The same failure again: streak grows, the seen summary is untouched.
+    assert.throws(() => runUpdate({ stateFile, background: true, metadata }), /ECONNRESET/);
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.failureStreak, 2);
+    assert.ok(state.nextCheck > Date.now() + 100 * 60 * 1000, "second backoff ~2h");
+    state.summary.shown = true;
+    writeJSON(stateFile, state);
+    assert.throws(() => runUpdate({ stateFile, background: true, metadata }), /ECONNRESET/);
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.failureStreak, 3);
+    assert.strictEqual(state.summary.shown, true, "an identical fingerprint must not requeue the summary");
+
+    // A different failure requeues with the new message.
+    const angry = path.join(dir, "angry-npm-cli.js");
+    fs.writeFileSync(angry, "process.stderr.write('registry BOOM from angry stub\\n'); process.exit(1);");
+    assert.throws(
+      () => runUpdate({ stateFile, background: true, metadata: { ...metadata, npm: angry } }),
+      /BOOM/
+    );
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.summary.shown, false);
+    assert.match(state.summary.message, /BOOM/);
+
+    // A successful check clears the failure bookkeeping.
+    const healthyDir = path.join(dir, "healthy");
+    fs.mkdirSync(healthyDir, { recursive: true });
+    const { stub: healthy } = flakyNpmStub(healthyDir, 0, "0.0.1");
+    runUpdate({ stateFile, background: true, metadata: { ...metadata, npm: healthy } });
+    state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.strictEqual(state.failureStreak, 0);
+    assert.strictEqual(state.lastErrorFingerprint, undefined);
+    assert.strictEqual(state.permanentError, false);
+    assert.ok(state.nextCheck > Date.now() + 23 * 60 * 60 * 1000, "success restores the daily TTL");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+});
+
 test("a current check queues no next-launch summary and clears stale notices", { timeout: 30000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-current-"));
   const stateDir = path.join(dir, "state");
@@ -338,6 +419,41 @@ test("cross-process lock permits only one owner", () => {
   const second = acquireLock(lock);
   assert.notStrictEqual(second, null);
   releaseLock(lock, second);
+});
+
+test("writeJSON cleans up its temp file when the rename fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-writejson-fail-"));
+  const target = path.join(root, "update-state.json");
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("EBUSY: resource busy or locked");
+      error.code = "EBUSY";
+      throw error;
+    };
+    assert.throws(() => writeJSON(target, { nextCheck: 1 }), /EBUSY/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // Neither the target nor a stranded update-state.json.tmp-* remains.
+  assert.deepStrictEqual(fs.readdirSync(root), []);
+});
+
+test("update state paths are scoped per package and channel unless overridden", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-state-path-"));
+  const env = { XDG_STATE_HOME: root, LOCALAPPDATA: path.join(root, "la") };
+  const base = process.platform === "win32"
+    ? path.join(root, "la", "gitcode-cli")
+    : path.join(root, "gitcode-cli");
+  assert.strictEqual(
+    updateStatePath(env),
+    path.join(base, pkgName, "npm", "update-state.json")
+  );
+  // An explicit GC_STATE_DIR keeps the legacy flat shared file.
+  assert.strictEqual(
+    updateStatePath({ GC_STATE_DIR: root }),
+    path.join(root, "update-state.json")
+  );
 });
 
 test("update helper parser accepts check/json/background only", () => {

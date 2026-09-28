@@ -248,7 +248,7 @@ brew upgrade gc
 ```
 
 shell 补全（bash/zsh/fish）随安装自动配置，无需额外操作。
-Homebrew 同时提供 `gc` 与 `gitcode`；升级后可运行 `gitcode doctor install` 检查是否仍被 pip/npm 旧入口遮蔽。
+Homebrew 同时提供 `gc` 与 `gitcode`；升级后可运行 `gitcode doctor install` 检查是否仍被 pip/npm 旧入口遮蔽。渠道检测会先解析 `gc`/`gitcode` 的软链再匹配 Homebrew 布局（Apple Silicon `/opt/homebrew`、Intel Mac `/usr/local`、Linuxbrew `/home/linuxbrew/.linuxbrew`），bin 目录软链与 Cellar 实路径均可识别。
 
 ### npm 更新与 PATH 诊断
 

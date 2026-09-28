@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict } = require("../lib/install-metadata");
+const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict, writeInstallMetadata } = require("../lib/install-metadata");
 const { isGlobalInstall, runPostinstall } = require("../lib/postinstall");
 
 test("normalizes Windows paths case-insensitively and trims separators", () => {
@@ -23,12 +23,31 @@ test("finds a command shadowing the npm global bin", () => {
   const env = { PATH: `${oldBin};${npmBin}` };
 
   const report = pathConflict(npmBin, env, true);
+  assert.strictEqual(report.names.gitcode.shadowed, true);
+  assert.strictEqual(report.names.gitcode.selected, path.join(oldBin, "gitcode.exe"));
+  assert.strictEqual(report.names.gc.shadowed, false);
   assert.strictEqual(report.shadowed, true);
-  assert.strictEqual(report.selected, path.join(oldBin, "gitcode.exe"));
   assert.deepStrictEqual(commandCandidates("gitcode", env, true), [
     path.join(oldBin, "gitcode.exe"),
     path.join(npmBin, "gitcode.cmd"),
   ]);
+});
+
+test("reports a gc-only provider shadowing the npm global bin", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-path-gc-"));
+  const oldBin = path.join(root, "brew");
+  const npmBin = path.join(root, "npm");
+  fs.mkdirSync(oldBin);
+  fs.mkdirSync(npmBin);
+  fs.writeFileSync(path.join(oldBin, "gc.exe"), "");
+  fs.writeFileSync(path.join(npmBin, "gitcode.cmd"), "");
+  const env = { PATH: `${oldBin};${npmBin}` };
+
+  const report = pathConflict(npmBin, env, true);
+  assert.strictEqual(report.names.gitcode.shadowed, false);
+  assert.strictEqual(report.names.gc.shadowed, true);
+  assert.strictEqual(report.names.gc.selected, path.join(oldBin, "gc.exe"));
+  assert.strictEqual(report.shadowed, true);
 });
 
 test("recognizes only explicit global npm lifecycle installs", () => {
@@ -145,6 +164,36 @@ test("postinstall keeps recording npm global installs as npm", () => {
   assert.strictEqual(metadata.prefix, "/prefix");
 });
 
+test("postinstall warns per command name when a foreign provider shadows the npm bin", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-postinstall-shadow-"));
+  const isWin = process.platform === "win32";
+  const oldBin = path.join(root, "brew");
+  const npmPrefix = path.join(root, "npm");
+  const npmBinDir = isWin ? npmPrefix : path.join(npmPrefix, "bin");
+  fs.mkdirSync(oldBin);
+  fs.mkdirSync(npmBinDir, { recursive: true });
+  fs.writeFileSync(path.join(oldBin, isWin ? "gc.exe" : "gc"), "");
+  fs.writeFileSync(path.join(npmBinDir, isWin ? "gitcode.cmd" : "gitcode"), "");
+  const packageRoot = path.join(root, "pkg");
+  fs.mkdirSync(packageRoot);
+  const chunks = [];
+  runPostinstall(
+    {
+      npm_config_global: "true",
+      npm_config_user_agent: "npm/10.0.0 node/v20",
+      npm_config_prefix: npmPrefix,
+      npm_execpath: "/usr/bin/npm",
+      PATH: `${oldBin}${path.delimiter}${npmBinDir}`,
+    },
+    { write: (chunk) => chunks.push(String(chunk)) },
+    packageRoot
+  );
+  const output = chunks.join("");
+  assert.ok(output.includes("command:  gc\n"), "the shadowed gc name must be reported");
+  assert.ok(!output.includes("command:  gitcode"), "the unshadowed gitcode name must stay silent");
+  assert.ok(output.includes(path.join(npmBinDir, isWin ? "gc.cmd" : "gc")), "the direct npm entry for gc must be suggested");
+});
+
 test("pnpm layout detection also matches Windows global paths", () => {
   const runner = () => {
     throw new Error("npm must not be invoked for a pnpm install");
@@ -171,4 +220,21 @@ test("a project-level pnpm dependency is pnpm but not global", () => {
   });
   assert.strictEqual(metadata.distribution, "pnpm");
   assert.strictEqual(metadata.global, false);
+});
+
+test("writeInstallMetadata cleans up its temp file when the rename fails", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-metadata-fail-"));
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("EACCES: permission denied");
+      error.code = "EACCES";
+      throw error;
+    };
+    assert.throws(() => writeInstallMetadata(root, { distribution: "npm" }), /EACCES/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  // Neither the metadata file nor a stranded .gitcode-install.json.tmp-*.
+  assert.deepStrictEqual(fs.readdirSync(root), []);
 });

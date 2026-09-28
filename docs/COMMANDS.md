@@ -3351,23 +3351,24 @@ gc doctor install --json
 
 - 完全离线，无需认证；不读取或打印 Token。
 - 输出当前 `version` / `commit` / `built`、`distribution`、wrapper `entrypoint`、实际 `binary`，以及 `gc` / `gitcode` 在 PATH 中的全部 `candidates` 与 `selected`。
-- `distribution` 可为 `npm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`。
+- `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断）。
 - Windows 会报告 PowerShell 内置 `gc`/`Get-Content` alias 风险，并建议使用 `gitcode`，不会建议全局删除系统 alias。
 - 只给出 `conflicts` 和 `recommendations`；不会修改 PATH、shell profile、认证配置，也不会调用其他包管理器卸载软件。
-- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留，含 Windows 的 `.exe` 变体）并建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除。
+- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。
 - `--json` 只向 stdout 写一个稳定 JSON 对象，适合安装器、CI 与 AI 代理消费。
 
 npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。
 
 - Windows 在用户显式执行 `install` 后，默认将安装目录置于持久 User PATH 前面并删除同目录重复项；只修改当前用户，不修改 Machine PATH、不提权、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。
-- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
+- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；识别为外来渠道入口的目标（如带 python shebang 的 pip console script）会被拒绝替换并给出对应包管理器的卸载指引；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
 - `--no-modify-path` 显式跳过 Windows 持久 PATH 修改，并输出中文 Windows 用户环境变量设置步骤；Linux/macOS 接受该参数但原有 PATH/profile 行为不变。
 - `npx` 子进程无法修改已经运行的父 PowerShell 环境。当前窗口尚未优先包含目标目录时，安装完成输出必须用中文显性给出 `$env:Path` 刷新命令、关闭全部 PowerShell/Windows Terminal 后重开的替代方式，以及 `gitcode version` 验证步骤。
+- 安装完成输出会检测合并 PATH（System PATH 在前、User PATH 在后）中先于安装目录的其他 `gc`/`gitcode` 提供者，并区分两种情形：提供者位于用户 PATH 时提示"重新打开窗口后本安装优先生效"；提供者位于系统 PATH 或 shell 配置时明确提示"重开窗口也无法解决"，并给出卸载旧提供者或由管理员调整系统 PATH 顺序的指引（含 `gitcode doctor install` 排查入口）。
 - Windows 持久化失败不会伪装为 PATH 配置成功；安装器保留已通过校验的二进制，输出中文失败原因、Windows 用户环境变量设置步骤和当前窗口刷新命令。持久写入后的系统广播失败必须单独警告并提示注销后重新登录。
 - 目标目录含分号、空字符或不是绝对 Windows 路径时，不得生成任何 PATH 修改命令，只能提示更换目录或直接运行已安装程序。
 
 - Linux/macOS 安装时，如果历史版本留下的 `gitcode` 符号链接解析后精确指向同目录常规 `gc` 文件，bootstrap 会在同一安装事务中自动迁移该别名，无需用户先删除。
-- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；Windows 不迁移符号链接。
+- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引；Windows 不迁移符号链接。
 - 别名迁移保留事务唯一备份；后续二进制校验、健康检查或 metadata 写入失败时，旧 `gc` 与原始链接会按逆序原样回滚。
 
 <a id="gitcode-update"></a>
@@ -3386,7 +3387,7 @@ gc update --json
 - 显式 `gc update`（npm bootstrap）先在前台完成版本检查：已是最新 stable 时直接返回 `current`，不调度任何替换；存在新版本才调度原子替换；检查失败立即透出底层错误（如 registry 连接重置）并以非零退出码结束。若显式更新时恰有并发更新持锁（如刚触发的后台检查），返回 `busy` 状态且退出码为 0，稍后重试即可。
 - stable 版本不会自动进入 prerelease，也不会降级。
 - 版本检查有有界重试（3 次尝试，应对 registry 网络抖动）；安装超时放宽至 300 秒以容纳 npm 自身的网络重试；后台失败摘要携带真实错误原因（超长截断），不再输出无效指引。
-- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码，摘要在下次启动写入 stderr 一次。
+- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码。失败后按 1 小时起步的指数退避重试（2h、4h……上限 24 小时），同一错误指纹的失败摘要只展示一次；manifest 损坏、npm 运行时缺失等重试无法自愈的永久错误会暂停后台检查，并在摘要中给出修复动作（重跑 bootstrap 安装或重装 Node.js 后运行 `gitcode update` 恢复）。
 - updater 子进程使用最小环境白名单，不继承 GitCode/npm/GitHub/云平台凭证或用户 npm registry 配置；仅保留 PATH、系统目录、状态/配置目录、代理和 CA 等运行所需变量。
 - `--check` 只查询 stable `latest`，不安装。
 - 非 npm 渠道只返回对应包管理器的手工升级说明，不会调用 pip、Homebrew、apt、dnf 或 rpm。

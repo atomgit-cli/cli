@@ -271,7 +271,7 @@ ARM64：
 
     brew upgrade gc
 
-shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。
+shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。渠道检测先解析软链再匹配 Homebrew 布局（Apple Silicon `/opt/homebrew`、Intel Mac `/usr/local`、Linuxbrew `/home/linuxbrew/.linuxbrew`），bin 目录软链与 Cellar 实路径均可识别。
 
 ### npm (跨平台)
 
@@ -289,11 +289,11 @@ CI、审计、不可信项目目录或自定义 npm registry 环境使用完整�
 
 `npm i` / `npm install` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
 
-npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件，因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖。
+npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件（识别为外来渠道入口的目标——如 pip console script——会被拒绝替换并给出卸载指引），因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤；若合并 PATH（System 在前）中存在先于安装目录的其他 `gc`/`gitcode` 提供者，会进一步区分"重开窗口可解决（提供者在用户 PATH）"与"重开窗口无法解决（提供者在系统 PATH 或 shell 配置，需卸载旧提供者或调整系统 PATH 顺序）"两种情形。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖，pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引。
 
 正式 npm tarball 不再独立编译二进制：release workflow 的 `artifacts` job 调用 `scripts/prepare-npm-package.sh`，从同一批 GoReleaser 归档/裸二进制组装 npm 包，并将 `.tgz` 纳入 Release SHA-256 清单。`npm` job 只下载已验证的 Release artifact 并执行 OIDC Trusted Publishing；目标版本已存在时，必须下载 registry tarball 与 Release tarball 比对 SHA-256，内容一致才允许幂等跳过。
 
-npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享 24 小时 TTL，应用更新时使用跨进程锁、健康检查和回滚。安装/升级验证必须覆盖：
+npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享同一调度节奏（成功后 24 小时 TTL；失败后 1 小时起步指数退避、上限 24 小时，同一错误指纹的摘要只展示一次，manifest/npm 运行时类永久错误暂停后台检查并附修复动作），应用更新时使用跨进程锁、健康检查和回滚。npm-global 与 npm-bootstrap 渠道（及并行 npm 坐标）各自维护独立的状态文件（`<state>/gitcode-cli/<坐标>/<渠道>/update-state.json`），检查节奏与摘要互不干扰；显式设置 `GC_STATE_DIR` 时保留旧的共享单文件布局。安装/升级验证必须覆盖：
 
 npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerelease 发布到 `next`。发布重跑必须同时校验既有 tarball 内容与对应 dist-tag，不得让 prerelease 污染 stable 更新通道。
 
@@ -378,7 +378,7 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 
 ### 多渠道 PATH 冲突
 
-pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
+pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。对被中断安装的残留文件，常规文件建议重跑 bootstrap 清扫（24 小时以上）或手动删除，符号链接残留明确提示只能手动删除（安装器出于并发安全永不自动清除符号链接）。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
 
 ```bash
 gitcode doctor install

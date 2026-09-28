@@ -135,7 +135,10 @@ func managerMessage(distribution string) string {
 		return "This installation is managed by Homebrew; run brew upgrade gc."
 	case "deb", "rpm", "system-package":
 		return "This installation is managed by the operating-system package manager; use apt, dnf, or rpm explicitly."
-	case "npm":
+	case "npm", "pnpm", "npm-local":
+		// The npm wrapper intercepts "update" itself; if the Go binary is
+		// reached with these channels, the wrapper (which owns the npm
+		// updater and its pnpm refusal guidance) is still the right entry.
 		return "Run update through the npm gitcode wrapper so it can safely replace its bundled binary."
 	default:
 		return "Download and verify a newer release archive, or rebuild from the desired source tag."

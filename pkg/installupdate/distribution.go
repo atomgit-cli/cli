@@ -24,6 +24,15 @@ func DetectDistribution(env map[string]string, binary string) string {
 	if value := strings.TrimSpace(env[DistributionEnv]); value != "" {
 		return value
 	}
+	// Resolve symlinks before matching path markers: Homebrew's bin
+	// directory is a symlink farm into the Cellar (/usr/local/bin/gc on
+	// Intel Macs, /home/linuxbrew/.linuxbrew/bin/gc on Linux), and
+	// os.Executable does not guarantee resolution on every platform. Fall
+	// back to the unresolved path when resolution fails (missing paths,
+	// odd environments) so the heuristics still apply.
+	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
+		binary = resolved
+	}
 	if manifestDistribution := adjacentManifestDistribution(binary); manifestDistribution != "" {
 		return manifestDistribution
 	}
@@ -35,7 +44,9 @@ func DetectDistribution(env map[string]string, binary string) string {
 		return "npm"
 	case strings.Contains(normalized, "/gc_cli/bin/"):
 		return "pypi"
-	case strings.Contains(normalized, "/cellar/gc/") || strings.Contains(normalized, "/homebrew/"):
+	case strings.Contains(normalized, "/cellar/gc/"),
+		strings.Contains(normalized, "/opt/homebrew/"),
+		strings.Contains(normalized, "/.linuxbrew/"):
 		return "homebrew"
 	case normalized == "/usr/bin/gc" || normalized == "/usr/bin/gitcode":
 		return detectSystemPackage(binary)

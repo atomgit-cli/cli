@@ -15,6 +15,7 @@ const {
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
   persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
   rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
+  windowsPathShadowing,
 } = require("../lib/install");
 
 test("copied update helper gets the npm coordinate injected and loads standalone", () => {
@@ -218,7 +219,11 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const calls = [];
   const runner = (executable, args, options) => {
     calls.push({ executable, args, options });
-    return { status: 0, stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true}', stderr: "" };
+    return {
+      status: 0,
+      stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true,"previous":"C:\\\\Python311\\\\Scripts"}',
+      stderr: "",
+    };
   };
   const env = {
     SystemRoot: "C:\\Windows",
@@ -230,6 +235,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const result = persistWindowsUserPath(dir, { env, runner, fileExists: () => true });
   assert.deepStrictEqual(result, {
     ok: true, changed: true, registryKind: "ExpandString", broadcasted: true,
+    previousUserPath: "C:\\Python311\\Scripts",
   });
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].executable, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
@@ -238,6 +244,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   assert.match(script, /DoNotExpandEnvironmentNames/);
   assert.match(script, /GetValueKind\('Path'\)/);
   assert.match(script, /SetValue\('Path', \$next, \$kind\)/);
+  assert.match(script, /previous = \[string\]\$current/);
   assert.match(script, /Mutex.*Global\\GitCodeCli\.UserPath/);
   assert.match(script, /path-mutex-id/);
   assert.match(script, /File\]::Move\(\$candidatePath, \$mutexIdPath\)/);
@@ -277,7 +284,7 @@ test("persistWindowsUserPath reports idempotence from the same registry transact
     },
   });
   assert.deepStrictEqual(result, {
-    ok: true, changed: false, registryKind: "String", broadcasted: true,
+    ok: true, changed: false, registryKind: "String", broadcasted: true, previousUserPath: null,
   });
   assert.strictEqual(calls, 1);
 });
@@ -347,6 +354,70 @@ test("Windows PATH guidance never emits PATH commands for an unsafe directory", 
   assert.doesNotMatch(guidance, /SetEnvironmentVariable/);
   assert.doesNotMatch(guidance, /\$env:Path/);
   assert.match(guidance, /gitcode\.exe' version/);
+});
+
+test("windowsPathShadowing classifies providers by old User PATH membership", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-fn-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const system = windowsPathShadowing(install, env, install);
+  assert.strictEqual(system.length, 1);
+  assert.strictEqual(system[0].name, "gitcode");
+  assert.strictEqual(system[0].provider, path.join(early, "gitcode.exe"));
+  assert.strictEqual(system[0].scope, "system");
+
+  const user = windowsPathShadowing(install, env, early);
+  assert.strictEqual(user[0].scope, "user");
+
+  const expanded = windowsPathShadowing(install, { PATH: `${early};${install}`, EARLY: early }, "%EARLY%");
+  assert.strictEqual(expanded[0].scope, "user");
+
+  const unknown = windowsPathShadowing(install, env, null);
+  assert.strictEqual(unknown[0].scope, "unknown");
+
+  // The freshly installed dir providing its own names is not a shadow.
+  const clean = windowsPathShadowing(install, { PATH: `${install}` }, null);
+  assert.deepStrictEqual(clean, []);
+});
+
+test("Windows PATH guidance distinguishes reopen-fixable from persistent shadowing", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-guide-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const systemScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, env
+  );
+  assert.match(systemScope, /重开窗口也无法解决/);
+  assert.match(systemScope, /系统 PATH/);
+  assert.match(systemScope, /gitcode doctor install/);
+
+  const userScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: early }, env
+  );
+  assert.match(userScope, /重新打开 PowerShell\/Windows Terminal 窗口后本安装将优先生效/);
+
+  const unknownScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true }, env
+  );
+  assert.match(unknownScope, /若该提供者来自系统 PATH/);
+
+  // No earlier provider: no shadowing lines at all.
+  const clean = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, { PATH: `${install}` }
+  );
+  assert.doesNotMatch(clean, /先于本安装目录/);
 });
 
 test("install rollback restores only files touched by the current transaction", () => {
@@ -825,9 +896,12 @@ test("sweepTransactionLeftovers removes stale regular leftovers only", (t) => {
     "gitcode.tmp-111-abc": { content: "stale", mtime: stale, removed: true },
     "gitcode-update-helper.js.backup-old": { content: "stale", mtime: stale, removed: true },
     ".gc-install-probe-999": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-old-1-abc": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-fresh": { content: "fresh", mtime: new Date(now), removed: false },
     "gc.tmp-222-fresh": { content: "fresh", mtime: new Date(now), removed: false },
     "gc": { content: "binary", mtime: stale, removed: false },
     "gitcode": { content: "binary", mtime: stale, removed: false },
+    ".gitcode-install.json": { content: "{}", mtime: stale, removed: false },
     "unrelated.backup-not-ours": { content: "x", mtime: stale, removed: false },
   };
   for (const [name, spec] of Object.entries(files)) {
@@ -856,11 +930,12 @@ test("isTransactionLeftoverName matches only installer transaction artifacts", (
     "gitcode.backup-1-abc", "gitcode.tmp-1-abc",
     "gitcode.exe.backup-1-abc", "gitcode.exe.tmp-1-abc",
     "gitcode-update-helper.js.backup-1-abc", "gitcode-update-helper.js.tmp-1-abc",
+    ".gitcode-install.json.tmp-1-abc", ".gitcode-install.json.backup-1-abc",
     ".gc-install-probe-123", ".gc-write-probe",
   ]) {
     assert.strictEqual(isTransactionLeftoverName(name), true, name);
   }
-  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", "other.backup-x", "gcbackup-1"]) {
+  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", ".gitcode-install.json", "other.backup-x", "gcbackup-1"]) {
     assert.strictEqual(isTransactionLeftoverName(name), false, name);
   }
 });
@@ -948,6 +1023,91 @@ test("install keeps the generic guidance for a non-pipx directory named pipx", (
         !/pipx uninstall/.test(message);
     }
   );
+});
+
+test("install refuses a pnpm-global symlink instead of adopting it", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-link-"));
+  const pnpmBin = path.join(root, ".local", "share", "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, pnpmBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "pnpm-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(pnpmBin, "utf8"), "pnpm-wrapper");
+});
+
+test("install refuses a pnpm symlink with an absolute target or a broken link", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-abs-"));
+  const pnpmBin = path.join(root, "pnpm", "global", "5", "node_modules", "atomgit-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const absolute = path.join(binDir, "gc");
+  if (!createFileSymlinkOrSkip(t, pnpmBin, absolute)) return;
+  assert.throws(
+    () => replacePath(source, absolute, "pnpm-abs-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g atomgit-cli/.test(message);
+    }
+  );
+  // A broken link whose text still points into a pnpm tree is refused the
+  // same way (the raw link text carries the marker).
+  const broken = path.join(binDir, "gitcode");
+  if (!createFileSymlinkOrSkip(t, path.join(root, "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gone.js"), broken)) return;
+  assert.throws(
+    () => replacePath(source, broken, "pnpm-broken-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(broken).isSymbolicLink(), true);
+});
+
+test("install refuses to replace a pip console script instead of warn-and-destroy", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pip-script-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(target, "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  assert.throws(
+    () => replacePath(source, target, "pip-reject"),
+    (error) => /refusing to replace foreign install target/.test(error.message) &&
+      /pip uninstall gitcode-cli/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  // The refusal happens before any file change: the script is untouched.
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  // A plain regular file (no recognizable foreign-channel shebang) is still
+  // replaced normally.
+  const plain = path.join(binDir, "gitcode");
+  fs.writeFileSync(plain, "old-binary");
+  const record = replacePath(source, plain, "pip-plain");
+  assert.strictEqual(fs.readFileSync(plain, "utf8"), "new");
+  fs.unlinkSync(record.backup);
 });
 
 test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {

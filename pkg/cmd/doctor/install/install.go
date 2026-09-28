@@ -147,33 +147,44 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 
 // transactionLeftoverPrefixes matches the temp/backup file names an
 // interrupted bootstrap install can leave behind (see npm/lib/install.js).
+// Keep in sync with LEFTOVER_PREFIXES there: a prefix known to only one
+// side creates a report-without-cleanup loop.
 var transactionLeftoverPrefixes = []string{
 	"gc.backup-", "gc.tmp-", "gc.exe.backup-", "gc.exe.tmp-",
 	"gitcode.backup-", "gitcode.tmp-", "gitcode.exe.backup-", "gitcode.exe.tmp-",
 	"gitcode-update-helper.js.backup-", "gitcode-update-helper.js.tmp-",
+	".gitcode-install.json.backup-", ".gitcode-install.json.tmp-",
 	".gc-install-probe-", ".gc-write-probe",
 }
 
-// transactionLeftovers lists interrupted-install leftover files in dir.
-func transactionLeftovers(dir string) []string {
+// transactionLeftovers lists interrupted-install leftovers in dir, split
+// into regular files (sweepable by age after 24h) and symlinks (never
+// swept: a renamed symlink keeps its original mtime, so age cannot prove
+// it is not owned by an active transaction).
+func transactionLeftovers(dir string) (files, symlinks []string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	var found []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		for _, prefix := range transactionLeftoverPrefixes {
 			if strings.HasPrefix(entry.Name(), prefix) {
-				found = append(found, filepath.Join(dir, entry.Name()))
+				target := filepath.Join(dir, entry.Name())
+				if entry.Type()&os.ModeSymlink != 0 {
+					symlinks = append(symlinks, target)
+				} else {
+					files = append(files, target)
+				}
 				break
 			}
 		}
 	}
-	sort.Strings(found)
-	return found
+	sort.Strings(files)
+	sort.Strings(symlinks)
+	return files, symlinks
 }
 
 func addDiagnostics(report *Report, env map[string]string, goos string) {
@@ -183,15 +194,28 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 			directories[normalizedPath(filepath.Dir(candidate), goos)] = struct{}{}
 		}
 	}
+	var leftoverFiles, leftoverSymlinks []string
 	for dir := range directories {
-		report.Leftovers = append(report.Leftovers, transactionLeftovers(dir)...)
+		files, symlinks := transactionLeftovers(dir)
+		leftoverFiles = append(leftoverFiles, files...)
+		leftoverSymlinks = append(leftoverSymlinks, symlinks...)
 	}
+	report.Leftovers = append(report.Leftovers, leftoverFiles...)
+	report.Leftovers = append(report.Leftovers, leftoverSymlinks...)
 	sort.Strings(report.Leftovers)
 	if len(report.Leftovers) > 0 {
 		report.Conflicts = append(report.Conflicts,
 			fmt.Sprintf("interrupted-install leftovers detected (%d file(s))", len(report.Leftovers)))
+	}
+	if len(leftoverFiles) > 0 {
 		report.Recommendations = append(report.Recommendations,
 			"rerun the npm bootstrap install to sweep stale leftovers (regular files older than 24h), or delete the listed files manually")
+	}
+	if len(leftoverSymlinks) > 0 {
+		// Recommending the sweep here would be a no-op loop: the installer
+		// deliberately never removes symlinks, so point at manual deletion.
+		report.Recommendations = append(report.Recommendations,
+			"delete the listed symlink leftovers manually: the installer never removes symlinks automatically (concurrency safety), so rerunning the install will not clear them")
 	}
 	if report.PowerShellGCAlias {
 		report.Conflicts = append(report.Conflicts, `Windows PowerShell may resolve "gc" as the Get-Content alias`)
@@ -209,7 +233,8 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 				fmt.Sprintf("keep the intended %s provider first on PATH and explicitly upgrade or remove the others", command))
 		}
 	}
-	if report.Distribution == "npm" {
+	switch report.Distribution {
+	case "npm":
 		metadataPrefix := npmPrefix(env[packageRootEnv])
 		selected := report.Commands["gitcode"].Selected
 		if metadataPrefix != "" && selected != "" {
@@ -222,6 +247,23 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 				report.Recommendations = append(report.Recommendations, fmt.Sprintf("move %s before %s on PATH, or uninstall the older global channel explicitly", expected, filepath.Dir(selected)))
 			}
 		}
+	case "pnpm":
+		// pnpm records no npm prefix; compare against PNPM_HOME when it is
+		// set so a shadowed pnpm global install is reported instead of
+		// silently skipped. Without PNPM_HOME there is no expected
+		// directory to compare against, so stay quiet rather than guess.
+		if home := env["PNPM_HOME"]; home != "" {
+			if selected := report.Commands["gitcode"].Selected; selected != "" &&
+				normalizedPath(filepath.Dir(selected), goos) != normalizedPath(home, goos) {
+				report.Conflicts = append(report.Conflicts, "another gitcode command appears before the pnpm global bin directory (PNPM_HOME)")
+				report.Recommendations = append(report.Recommendations, fmt.Sprintf("move %s before %s on PATH, or uninstall the older channel explicitly", home, filepath.Dir(selected)))
+			}
+		}
+	case "npm-local":
+		// A project-local dependency is not a global install: the npm
+		// prefix comparison does not apply and would only produce noise.
+		report.Recommendations = append(report.Recommendations,
+			"this is a project-local npm dependency, not a global install; run \"npm install -g <package>\" to switch to the global channel, or manage updates in the owning project")
 	}
 	if len(report.Conflicts) == 0 {
 		report.Recommendations = append(report.Recommendations, "no command conflict detected")

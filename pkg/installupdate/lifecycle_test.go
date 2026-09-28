@@ -40,13 +40,13 @@ func TestAfterCommandShowsSummaryButDoesNotScheduleWhenDisabled(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeState(StatePath(), updateState{Summary: &stateSummary{Message: "updated", Shown: false}})
+	writeState(StatePath(nil), updateState{Summary: &stateSummary{Message: "updated", Shown: false}})
 	out := &bytes.Buffer{}
 	AfterCommand(nil, out, true, false)
 	if out.String() != "updated\n" {
 		t.Fatalf("output = %q", out.String())
 	}
-	if !readState(StatePath()).Summary.Shown {
+	if !readState(StatePath(nil)).Summary.Shown {
 		t.Fatal("summary should be marked shown")
 	}
 }
@@ -61,8 +61,8 @@ func TestAfterCommandDoesNotOverwriteStateOwnedByUpdater(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := updateState{NextCheck: 123, Summary: &stateSummary{Message: "pending", Shown: false}}
-	writeState(StatePath(), initial)
-	lockPath := StatePath() + ".lock"
+	writeState(StatePath(nil), initial)
+	lockPath := StatePath(nil) + ".lock"
 	if lock, err := acquireStateLock(lockPath); err != nil {
 		t.Fatal(err)
 	} else {
@@ -72,7 +72,7 @@ func TestAfterCommandDoesNotOverwriteStateOwnedByUpdater(t *testing.T) {
 
 	out := &bytes.Buffer{}
 	AfterCommand(nil, out, false, false)
-	state := readState(StatePath())
+	state := readState(StatePath(nil))
 	if out.Len() != 0 || state.NextCheck != initial.NextCheck || state.Summary.Shown {
 		t.Fatalf("state was changed while updater lock was held: %#v, output %q", state, out.String())
 	}
@@ -82,6 +82,95 @@ func TestDueAtUsesTwentyFourHourTTL(t *testing.T) {
 	now := time.Unix(100, 0)
 	if got := DueAt(now); got != now.Add(24*time.Hour).UnixMilli() {
 		t.Fatalf("DueAt() = %d", got)
+	}
+}
+
+func TestStatePathScopesPerPackageAndChannel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_STATE_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("XDG_STATE_HOME", dir)
+	if got := StatePath(nil); got != filepath.Join(dir, "gitcode-cli", "update-state.json") {
+		t.Fatalf("legacy manifest state path = %q", got)
+	}
+	scoped := filepath.Join(dir, "gitcode-cli", "atomgit-cli", "npm-bootstrap", "update-state.json")
+	if got := StatePath(&Manifest{Package: "atomgit-cli"}); got != scoped {
+		t.Fatalf("scoped state path = %q, want %q", got, scoped)
+	}
+	// The explicit override keeps the legacy flat file.
+	override := t.TempDir()
+	t.Setenv("GC_STATE_DIR", override)
+	if got := StatePath(&Manifest{Package: "atomgit-cli"}); got != filepath.Join(override, "update-state.json") {
+		t.Fatalf("override state path = %q", got)
+	}
+}
+
+func TestAfterCommandUsesScopedStatePathFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
+	t.Setenv("GC_STATE_DIR", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("XDG_STATE_HOME", dir)
+	manifest := Manifest{
+		Distribution: "npm-bootstrap",
+		Version:      "1.2.3",
+		TargetDir:    dir,
+		Helper:       filepath.Join(dir, "missing.js"),
+		Package:      "atomgit-cli",
+	}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scoped := filepath.Join(dir, "gitcode-cli", "atomgit-cli", "npm-bootstrap", "update-state.json")
+	writeState(scoped, updateState{Summary: &stateSummary{Message: "updated", Shown: false}})
+	out := &bytes.Buffer{}
+	AfterCommand(nil, out, true, false)
+	if out.String() != "updated\n" {
+		t.Fatalf("output = %q", out.String())
+	}
+	if !readState(scoped).Summary.Shown {
+		t.Fatal("the scoped state file must be the one read and written")
+	}
+}
+
+// Regression gate: mutateStateLocked rewrites the whole state file from the
+// updateState struct, so any field the JS updaters write must be declared
+// here or it is silently dropped.
+func TestAfterCommandPreservesUpdaterFailureFields(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
+	t.Setenv("GC_STATE_DIR", stateDir)
+	manifest := Manifest{Distribution: "npm-bootstrap", Version: "1.2.3", TargetDir: dir, Helper: filepath.Join(dir, "missing.js")}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"lastChecked":"2026-09-28T00:00:00.000Z","nextCheck":99999999999999,` +
+		`"failureStreak":3,"lastErrorFingerprint":"abc123","permanentError":true,` +
+		`"summary":{"message":"Automatic update failed: x.","shown":false}}`
+	if err := os.WriteFile(StatePath(nil), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	AfterCommand(nil, out, false, false)
+	state := readState(StatePath(nil))
+	if state.LastChecked != "2026-09-28T00:00:00.000Z" || state.FailureStreak != 3 ||
+		state.LastErrorFingerprint != "abc123" || !state.PermanentError {
+		t.Fatalf("updater failure fields were dropped: %#v", state)
+	}
+	if !state.Summary.Shown || !strings.HasPrefix(out.String(), "Automatic update failed: x.\n") {
+		t.Fatalf("pending summary must still be shown first: %q", out.String())
+	}
+	// The permanent gate must stop before scheduling: no detached-spawn
+	// attempt (which would print an "update check skipped" line here,
+	// since the manifest helper does not exist).
+	if strings.Contains(out.String(), "update check skipped") {
+		t.Fatalf("permanent failure must not schedule a background check: %q", out.String())
 	}
 }
 

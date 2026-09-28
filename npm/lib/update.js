@@ -31,8 +31,14 @@ const UPDATE_ENV_ALLOWLIST = new Set([
   "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 ]);
 
+// Scoped per package coordinate and channel: npm-global and npm-bootstrap
+// installs (and parallel coordinates) each keep their own nextCheck and
+// summary instead of pushing each other's schedule or cross-showing
+// summaries. An explicit GC_STATE_DIR keeps the legacy flat file as a
+// deliberate user (and test) override.
 function updateStatePath(env = process.env) {
-  return path.join(stateDir(env), "update-state.json");
+  if (env.GC_STATE_DIR) return path.join(env.GC_STATE_DIR, "update-state.json");
+  return path.join(stateDir(env), PACKAGE, "npm", "update-state.json");
 }
 
 function readJSON(file, fallback = {}) {
@@ -48,11 +54,22 @@ function writeJSON(file, value) {
   const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   try {
-    fs.renameSync(temp, file);
+    try {
+      fs.renameSync(temp, file);
+    } catch (error) {
+      if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      fs.unlinkSync(file);
+      fs.renameSync(temp, file);
+    }
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
-    fs.unlinkSync(file);
-    fs.renameSync(temp, file);
+    // Never strand the temp file: an update-state.json.tmp-* residue
+    // matches no sweep prefix and would outlive the failed write.
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
   }
 }
 
@@ -88,6 +105,36 @@ function summarizeError(error) {
   const raw = (error && (error.message || error.code)) || error;
   const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
   return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+}
+
+// Permanent update failures: retrying cannot fix them (the on-disk install
+// manifest or the npm runtime is broken), so background checks stop and the
+// summary carries the repair action. Registry oddities (an unstable
+// dist-tag) stay retryable: the maintainer fixing the tag must auto-recover
+// notifications.
+const PERMANENT_ERROR_PATTERNS = [
+  /invalid npm-bootstrap install manifest/,
+  /npm CLI JavaScript runtime not found/,
+];
+
+function permanentUpdateError(error) {
+  const text = summarizeError(error);
+  return PERMANENT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+// Failure backoff: 1h, 2h, 4h, ... capped at the daily TTL, so a
+// persistently failing environment (offline, blocking proxy) retries
+// progressively instead of sitting blind for 24h after the first failure.
+function failureBackoffMs(streak) {
+  const step = Number(streak) > 0 ? Number(streak) : 1;
+  return Math.min(TTL_MS, 60 * 60 * 1000 * 2 ** (step - 1));
+}
+
+// Stable identity of a failure for summary deduplication: the same error
+// resurfacing on the next backoff attempt must not requeue (and reprint)
+// what the user already saw.
+function errorFingerprint(error) {
+  return crypto.createHash("sha256").update(summarizeError(error)).digest("hex").slice(0, 16);
 }
 
 function sleepSync(ms) {
@@ -336,6 +383,11 @@ function runUpdate(options = {}) {
     const state = readJSON(stateFile);
     state.lastChecked = new Date(now).toISOString();
     state.nextCheck = now + TTL_MS;
+    // A recovered environment clears the failure bookkeeping so the next
+    // failure starts the backoff from scratch.
+    state.failureStreak = 0;
+    delete state.lastErrorFingerprint;
+    state.permanentError = false;
     // A "current" result carries no action for the user: queueing it would
     // print "X is current." once a day in the default notify mode. Stale
     // "available" summaries are cleared so users never see outdated notices.
@@ -348,10 +400,24 @@ function runUpdate(options = {}) {
     const now = Date.now();
     const state = readJSON(stateFile);
     state.lastChecked = new Date(now).toISOString();
-    state.nextCheck = now + TTL_MS;
-    state.summary = { message: `Automatic update failed: ${summarizeError(error)}`, shown: !options.background };
+    const streak = (Number(state.failureStreak) || 0) + 1;
+    state.failureStreak = streak;
+    state.nextCheck = now + failureBackoffMs(streak);
+    const fingerprint = errorFingerprint(error);
+    const permanent = permanentUpdateError(error);
+    state.permanentError = permanent;
+    if (state.lastErrorFingerprint !== fingerprint) {
+      let message = `Automatic update failed: ${summarizeError(error)}.`;
+      if (permanent) {
+        message += /npm-bootstrap install manifest/.test(summarizeError(error))
+          ? " Background checks are paused: rerun the npm bootstrap install (npx --yes --package=<coordinate>@latest gitcode install) to repair the install manifest."
+          : ' Background checks are paused: reinstall Node.js, then run "gitcode update" to resume background checks.';
+      }
+      state.summary = { message, shown: !options.background };
+      state.lastErrorFingerprint = fingerprint;
+    }
     writeJSON(stateFile, state);
-    appendLog(`status=error detail="${summarizeError(error)}"`);
+    appendLog(`status=error detail="${summarizeError(error)}" streak=${streak}${permanent ? " permanent" : ""}`);
     throw error;
   } finally {
     releaseLock(lockFile, descriptor);
@@ -361,6 +427,9 @@ function runUpdate(options = {}) {
 function shouldSchedule(args = [], env = process.env, now = Date.now()) {
   if (disabledForInvocation(args, env)) return false;
   const state = readJSON(updateStatePath(env));
+  // A permanent failure stops background scheduling until the user repairs
+  // the install; explicit "gitcode update" still works.
+  if (state.permanentError) return false;
   return !state.nextCheck || Number(state.nextCheck) <= now;
 }
 
@@ -409,10 +478,13 @@ module.exports = {
   checkLatest,
   compareVersions,
   disabledForInvocation,
+  errorFingerprint,
   exactInstallArgs,
+  failureBackoffMs,
   globalWrapper,
   npmCommand,
   performUpdate,
+  permanentUpdateError,
   readJSON,
   releaseLock,
   runUpdate,
