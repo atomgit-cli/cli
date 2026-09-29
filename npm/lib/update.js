@@ -171,10 +171,10 @@ function commandFailureDetail(result, fallback) {
 }
 
 function updateMode(env = process.env) {
-  const fromEnv = (env.GC_UPDATE_MODE || "").toLowerCase();
+  const fromEnv = String(env.GC_UPDATE_MODE || "").trim().toLowerCase();
   if (["auto", "notify", "off"].includes(fromEnv)) return fromEnv;
   const config = readJSON(path.join(configDir(env), "config.json"));
-  const configured = (((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").toLowerCase();
+  const configured = String(((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").trim().toLowerCase();
   return ["auto", "notify", "off"].includes(configured) ? configured : "notify";
 }
 
@@ -342,8 +342,20 @@ function exactInstallArgs(metadata, version) {
 
 function acquireLock(file, now = Date.now()) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const claim = () => {
+    const descriptor = fs.openSync(file, "wx", 0o600);
+    // Record the holder so release can verify identity by content on
+    // platforms where fstat/stat ino is unavailable (Windows: libuv does
+    // not populate st_ino, so the inode check alone always passes).
+    try {
+      fs.writeSync(descriptor, String(process.pid));
+    } catch {
+      // Best effort: the inode check still guards POSIX releases.
+    }
+    return descriptor;
+  };
   try {
-    return fs.openSync(file, "wx", 0o600);
+    return claim();
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
     try {
@@ -359,12 +371,18 @@ function acquireLock(file, now = Date.now()) {
         // Re-verify staleness on the retired file: a fresh claim may have
         // landed between the check above and this rename, and renaming a
         // live lock away would silently break its holder. Restore and
-        // yield in that case.
+        // yield in that case. The restore uses link+unlink instead of a
+        // plain rename: rename silently overwrites, so a third process
+        // claiming the freed path between our rename and the restore would
+        // have its fresh lock clobbered; link fails with EEXIST when the
+        // path is taken, and we simply give up our hold.
         if (now - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
           try {
-            fs.renameSync(retired, file);
+            fs.linkSync(retired, file);
+            fs.unlinkSync(retired);
           } catch {
-            // Someone claimed the path while we held their lock aside.
+            // The path is taken (or the filesystem refuses links): leave
+            // the retired debris and yield the hold.
           }
           return null;
         }
@@ -373,7 +391,7 @@ function acquireLock(file, now = Date.now()) {
         } catch {
           // Best effort; a stranded .retired-* file is inert debris.
         }
-        return fs.openSync(file, "wx", 0o600);
+        return claim();
       }
     } catch {
       // Another process owns or just released the lock.
@@ -385,12 +403,17 @@ function acquireLock(file, now = Date.now()) {
 function releaseLock(file, descriptor) {
   if (descriptor == null) return;
   try {
-    // Identity check: if this lock was reclaimed as stale while we were
+    // Identity check, doubly guarded: the inode comparison catches a
+    // reclaimed lock on POSIX, and the pid content comparison catches it
+    // on Windows (libuv leaves st_ino at 0 there, so the inode check
+    // always passes). If this lock was reclaimed as stale while we were
     // stalled, the path now holds someone else's fresh lock — removing it
-    // would let a third process double-hold. Only unlink what we opened.
+    // would let a third process double-hold.
     const held = fs.fstatSync(descriptor);
     const current = fs.statSync(file);
     if (held.ino !== current.ino) return;
+    const holder = fs.readFileSync(file, "utf8").trim();
+    if (holder !== String(process.pid)) return;
   } catch {
     // The lock file is already gone; nothing to release.
     return;
@@ -507,6 +530,13 @@ function runUpdate(options = {}) {
       }
     }
     const mode = options.mode || updateMode();
+    // A background spawn that raced a mode flip to off must not install
+    // (mirrors the bootstrap channel's under-lock disabled branch). The
+    // early return writes no state: the winner's nextCheck stays put and
+    // shouldSchedule re-intercepts off on the next spawn.
+    if (options.background && mode === "off") {
+      return resultObject("disabled", "", "Automatic updates are disabled.");
+    }
     const result = performUpdate({ ...options, mode });
     const now = Date.now();
     const state = readJSON(stateFile);

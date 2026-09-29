@@ -467,3 +467,48 @@ test("bootstrap summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(long).length, 203);
   assert.ok(summarizeError(new Error("line1\nline2")).includes("line1 line2"));
 });
+
+test("bootstrap updater parseArgs accepts =value forms for all its flags", () => {
+  const manifestPath = path.resolve(os.tmpdir(), "gc-test-manifest.json");
+  assert.deepStrictEqual(parseArgs(["--check=true", "--json=1", `--manifest=${manifestPath}`, "--parent-pid=42"]), {
+    background: false, check: true, force: false, json: true, manifest: manifestPath, parentPid: 42,
+  });
+  assert.deepStrictEqual(parseArgs(["--force=false", `--manifest=${manifestPath}`]), {
+    background: false, check: false, force: false, json: false, manifest: manifestPath, parentPid: 0,
+  });
+  assert.deepStrictEqual(parseArgs(["--background=1", `--manifest=${manifestPath}`]), {
+    background: true, check: false, force: false, json: false, manifest: manifestPath, parentPid: 0,
+  });
+  assert.throws(() => parseArgs(["--check=banana"]), /unknown updater argument/);
+});
+
+test("a transient bootstrap failure over an existing pause keeps the remain-paused guidance", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-sticky-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  // An earlier permanent failure paused the checks; a new transient error
+  // must not lift the pause and must say the pause remains.
+  fs.writeFileSync(path.join(stateDir, "update-state.json"), JSON.stringify({
+    permanentError: true,
+    lastErrorFingerprint: "old-fingerprint",
+    summary: { message: "Automatic update failed: earlier.", shown: true },
+  }));
+  const { stub } = flakyNpmStub(root, 99, "0.0.2");
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "--background", "--force", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(result.status, 1);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
+  assert.strictEqual(state.permanentError, true, "the pause is sticky");
+  assert.match(state.summary.message, /remain paused from an earlier unrepaired failure/);
+});

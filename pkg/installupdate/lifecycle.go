@@ -132,11 +132,17 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 		// backoff this prints on each invocation forever. Rate-limit the
 		// retry to hourly (a repaired install or a successful update
 		// resets the schedule; the JS helper owns the finer backoff).
-		_ = mutateStateLocked(statePath, func(current *updateState) {
+		if !mutateStateLocked(statePath, func(current *updateState) {
 			if current.NextCheck <= time.Now().UnixMilli() {
 				current.NextCheck = time.Now().Add(time.Hour).UnixMilli()
 			}
-		})
+		}) {
+			// The backoff write itself failed (unwritable state directory):
+			// nothing can be persisted, so say so once with a fixed,
+			// actionable line instead of repeating the spawn detail on
+			// every command.
+			fmt.Fprintf(errOut, "update state is not writable at %s; fix permissions to stop this notice\n", filepath.Dir(statePath))
+		}
 	}
 }
 
@@ -157,13 +163,21 @@ func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	}()
 	state := readState(path)
 	mutate(&state)
-	writeState(path, state)
-	return true
+	return writeState(path, state) == nil
 }
 
 // retireLockFile renames a stale lock out of the way; a package-level seam
 // so the losing-reclaimer race can be tested deterministically.
 var retireLockFile = os.Rename
+
+// restoreLockFile puts a retired lock back without clobbering a fresh
+// claim: link fails with EEXIST when the path is taken. Also a seam.
+var restoreLockFile = func(retired, path string) error {
+	if err := os.Link(retired, path); err != nil {
+		return err
+	}
+	return os.Remove(retired)
+}
 
 func acquireStateLock(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -194,10 +208,12 @@ func acquireStateLock(path string) (*os.File, error) {
 	}
 	// Re-verify staleness on the retired file: a fresh claim may have
 	// landed between the check above and the rename, and renaming a live
-	// lock away would silently break its holder. Restore and yield then.
+	// lock away would silently break its holder. Restore via link+remove —
+	// a plain rename would silently overwrite a third process's fresh
+	// claim on the freed path; link fails with EEXIST and we yield.
 	if retiredInfo, statErr := os.Stat(retired); statErr == nil &&
 		time.Since(retiredInfo.ModTime()) <= updateLockStale {
-		_ = os.Rename(retired, path)
+		_ = restoreLockFile(retired, path)
 		return nil, err
 	}
 	_ = os.Remove(retired)
@@ -284,19 +300,44 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	cmd.Env = updaterEnvironment()
 	// Capture the streams so a failed check can surface the helper's reason
 	// in the returned error (matching CheckNow's wrapping) instead of a bare
-	// "exit status 1"; everything captured is still forwarded to the
-	// caller's writers.
+	// "exit status 1". Captured stdout is always forwarded; the helper's
+	// stderr is forwarded only in text mode — in --json mode the returned
+	// error carries the detail, and forwarding it too would print the same
+	// reason twice.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if out != nil {
 		cmd.Stdout = io.MultiWriter(out, &stdout)
 	}
-	if errOut != nil {
+	if errOut != nil && !jsonOutput {
 		cmd.Stderr = io.MultiWriter(errOut, &stderr)
 	}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("update check failed: %s", truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err)))
+		detail := truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err))
+		if jsonOutput {
+			// The --json contract: stdout always carries exactly one JSON
+			// object. A helper killed by the deadline (or a crash before any
+			// output) leaves stdout empty, so synthesize the error object
+			// here instead of leaving the consumer with empty stdout and a
+			// non-zero exit.
+			var probe struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(stdout.Bytes(), &probe) != nil || probe.Status == "" {
+				synthesized := map[string]string{
+					"status":       "error",
+					"distribution": "npm-bootstrap",
+					"current":      manifest.Version,
+					"latest":       "",
+					"message":      "update check failed: " + detail,
+				}
+				if data, marshalErr := json.Marshal(synthesized); marshalErr == nil && out != nil {
+					fmt.Fprintln(out, string(data))
+				}
+			}
+		}
+		return fmt.Errorf("update check failed: %s", detail)
 	}
 	return nil
 }
@@ -491,36 +532,36 @@ func readState(path string) updateState {
 	return state
 }
 
-func writeState(path string, state updateState) {
+func writeState(path string, state updateState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
+		return err
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".update-state-*")
 	if err != nil {
-		return
+		return err
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	if err := temp.Chmod(0o600); err != nil {
 		temp.Close()
-		return
+		return err
 	}
 	if _, err := temp.Write(append(data, '\n')); err != nil {
 		temp.Close()
-		return
+		return err
 	}
 	if err := temp.Close(); err != nil {
-		return
+		return err
 	}
 	if os.Rename(tempPath, path) == nil {
-		return
+		return nil
 	}
 	_ = os.Remove(path)
-	_ = os.Rename(tempPath, path)
+	return os.Rename(tempPath, path)
 }
 
 // DueAt returns the next automatic-check time used by tests and diagnostics.

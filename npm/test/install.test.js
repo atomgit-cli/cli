@@ -1007,10 +1007,12 @@ test("foreignChannelHint accepts interpreter arguments and Windows PE shims", ()
 test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-lock-"));
   const lock = acquireInstallLock(root);
-  assert.strictEqual(fs.existsSync(lock), true);
+  assert.strictEqual(fs.existsSync(lock.path), true);
+  // The claim holds the descriptor open for identity-checked release.
+  assert.strictEqual(typeof lock.fd, "number");
   // The lock name must never join the leftover families: the sweep would
   // then delete a live lock mid-install.
-  assert.strictEqual(isTransactionLeftoverName(path.basename(lock)), false);
+  assert.strictEqual(isTransactionLeftoverName(path.basename(lock.path)), false);
   // A second install while the lock is fresh is refused.
   assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
   releaseInstallLock(lock);
@@ -1022,9 +1024,10 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   // A lock older than the stale threshold is reclaimed.
   const stale = acquireInstallLock(root);
   const old = new Date(Date.now() - 11 * 60 * 1000);
-  fs.utimesSync(stale, old, old);
+  fs.utimesSync(stale.path, old, old);
+  fs.closeSync(stale.fd);
   const reclaimed = acquireInstallLock(root);
-  assert.strictEqual(fs.readFileSync(reclaimed, "utf8").trim().split(" ")[0], String(process.pid));
+  assert.strictEqual(fs.readFileSync(reclaimed.path, "utf8").trim().split(" ")[0], String(process.pid));
   releaseInstallLock(reclaimed);
 
   // The losing reclaimer of a stale-lock race is refused, not double-holding.
@@ -1323,5 +1326,109 @@ test("firstProviderOnPath resolves the earliest provider and skips broken links"
     const envBroken = { PATH: [broken, late].join(path.delimiter) };
     // The broken link is skipped; the real file in the later dir wins.
     assert.strictEqual(firstProviderOnPath("gitcode", envBroken), path.join(late, "gitcode"));
+  }
+});
+
+test("install refuses a yarn symlink from the Windows default global layout", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-yarn-win-"));
+  const yarnBin = path.join(root, "AppData", "Local", "Yarn", "Data", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(yarnBin), { recursive: true });
+  fs.writeFileSync(yarnBin, "yarn-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, yarnBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "yarn-win-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /yarn global remove @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install refuses a bun global symlink with bun-specific guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-bun-link-"));
+  const bunBin = path.join(root, ".bun", "install", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(bunBin), { recursive: true });
+  fs.writeFileSync(bunBin, "bun-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, bunBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "bun-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /bun remove -g @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("a project-level pnpm .bin symlink gets project-scoped removal guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-proj-"));
+  const storeBin = path.join(root, "proj", "node_modules", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(storeBin), { recursive: true });
+  fs.writeFileSync(storeBin, "pnpm-wrapper");
+  const binDir = path.join(root, "proj", "node_modules", ".bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, storeBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "pnpm-proj-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove @gitcode-cli\/cli in the owning project/.test(message) &&
+        !/pnpm remove -g/.test(message);
+    }
+  );
+});
+
+test("foreignChannelHint routes uv and pipx console scripts to their own guidance", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-hint-channels-"));
+  const uvScript = path.join(root, "gc");
+  fs.writeFileSync(uvScript, "#!/home/u/.local/share/uv/tools/gitcode-cli/bin/python\nimport gc_cli\n");
+  assert.match(foreignChannelHint(uvScript), /uv tool uninstall gitcode-cli/);
+  const pipxScript = path.join(root, "gitcode");
+  fs.writeFileSync(pipxScript, "#!/home/u/.local/pipx/venvs/gitcode-cli/bin/python3.11\nimport gc_cli\n");
+  assert.match(foreignChannelHint(pipxScript), /pipx uninstall gitcode-cli/);
+  const pipScript = path.join(root, "plain");
+  fs.writeFileSync(pipScript, "#!/usr/bin/env python3\nimport gc_cli\n");
+  assert.match(foreignChannelHint(pipScript), /pip uninstall gitcode-cli/);
+});
+
+test("a dangling symlink at the lock path fails with explicit guidance", (t) => {
+  // POSIX only: Windows open(O_CREAT|O_EXCL) on a dangling symlink creates
+  // the target instead of failing, so the claim path differs there.
+  if (process.platform === "win32") {
+    t.skip("POSIX symlink-at-lock semantics only");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-lock-symlink-"));
+  fs.symlinkSync("nowhere", path.join(root, ".gc-install-lock"), "file");
+  assert.throws(() => acquireInstallLock(root), /symbolic link; remove it manually/);
+});
+
+test("completionTarget produces both gc and gitcode names", () => {
+  for (const shell of ["bash", "zsh", "fish"]) {
+    const gc = completionTarget(shell, "/home/u");
+    const gitcode = completionTarget(shell, "/home/u", "gitcode");
+    assert.ok(gc.endsWith("gc") || gc.endsWith("_gc") || gc.endsWith("gc.fish"), shell);
+    assert.ok(gitcode.endsWith("gitcode") || gitcode.endsWith("_gitcode") || gitcode.endsWith("gitcode.fish"), shell);
+    assert.notStrictEqual(gc, gitcode, shell);
   }
 });

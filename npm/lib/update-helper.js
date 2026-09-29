@@ -25,14 +25,30 @@ handled by the ${COMMAND} binary itself. Other channels (pip, uv, Homebrew, deb,
 stay user-controlled and are never invoked implicitly.
 `;
 
+// cobra/pflag accepts --flag and --flag=value for boolean flags; only a
+// truthy value counts as set (mirrors update.js flagSet). A non-boolean
+// value in the =form is rejected.
+function booleanFlag(args, name) {
+  return args.some((arg) => arg === name ||
+    (arg.startsWith(`${name}=`) && ["1", "true", "yes"].includes(arg.slice(name.length + 1).trim().toLowerCase())));
+}
+
+function isBooleanFlagArg(arg, name) {
+  if (arg === name) return true;
+  if (!arg.startsWith(`${name}=`)) return false;
+  return ["1", "true", "yes", "0", "false", "no", ""].includes(arg.slice(name.length + 1).trim().toLowerCase());
+}
+
 function parseArgs(args) {
   const options = { background: false, checkOnly: false, json: false, help: false };
+  options.background = booleanFlag(args, "--background");
+  options.checkOnly = booleanFlag(args, "--check");
+  options.json = booleanFlag(args, "--json");
   for (const arg of args) {
-    if (arg === "--background") options.background = true;
-    else if (arg === "--check") options.checkOnly = true;
-    else if (arg === "--json") options.json = true;
-    else if (arg === "--help" || arg === "-h") options.help = true;
-    else if (arg === "--no-update-check" || arg === "--no-interactive" ||
+    if (arg === "--help" || arg === "-h") options.help = true;
+    else if (["--background", "--check", "--json"].some((name) => isBooleanFlagArg(arg, name))) {
+      // Boolean flags, handled above (including =value forms).
+    } else if (arg === "--no-update-check" || arg === "--no-interactive" ||
         arg.startsWith("--no-update-check=") || arg.startsWith("--no-interactive=")) {
       // Global flags: accepted for CLI consistency (including the
       // --flag=value forms cobra/pflag allows), no effect here.

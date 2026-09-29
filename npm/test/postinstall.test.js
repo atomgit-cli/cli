@@ -271,3 +271,50 @@ test("writeInstallMetadata stays readable by other users in shared directories",
   const mode = fs.statSync(path.join(root, ".gitcode-install.json")).mode & 0o777;
   assert.strictEqual(mode, 0o644, "shared bin directories must keep the manifest world-readable");
 });
+
+test("isPnpmEnvironment recognizes custom PNPM_HOME via the resolved store layout", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-pnpm-custom-"));
+  // A custom-named pnpm global root: no "pnpm" in the path, no user agent —
+  // only the resolved store layout (global/<ver>/.pnpm/<pkg>/...) says pnpm.
+  const storePkg = path.join(root, "jsbins", "global", "5", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(storePkg, { recursive: true });
+  const { isPnpmEnvironment } = require("../lib/install-metadata");
+  assert.strictEqual(isPnpmEnvironment({}, storePkg, false), true, "custom PNPM_HOME store layout must be recognized");
+  // A project-level pnpm dependency is also pnpm-managed.
+  const projectPkg = path.join(root, "proj", "node_modules", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(projectPkg, { recursive: true });
+  assert.strictEqual(isPnpmEnvironment({}, projectPkg, false), true);
+  // An ordinary npm tree is not.
+  const npmPkg = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(npmPkg, { recursive: true });
+  assert.strictEqual(isPnpmEnvironment({}, npmPkg, false), false);
+});
+
+test("discovery caches to the state dir when the package root is read-only", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-discovery-cache-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-discovery-state-"));
+  const packageRoot = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  const { ensureInstallMetadata } = require("../lib/install-metadata");
+  let spawns = 0;
+  const runner = () => {
+    spawns += 1;
+    return { status: 0, stdout: "/prefix\n" };
+  };
+  const options = { runner, env: { GC_STATE_DIR: stateDir } };
+  const first = ensureInstallMetadata(packageRoot, "1.0.0", options);
+  assert.ok(first, "first discovery succeeds");
+  assert.strictEqual(spawns, 2, "two npm invocations (root -g + prefix -g)");
+  // The cache exists under the state dir.
+  assert.ok(fs.existsSync(path.join(stateDir, "discovery-cache.json")));
+  // The second call reads the cache: no further spawns.
+  const second = ensureInstallMetadata(packageRoot, "1.0.0", options);
+  assert.strictEqual(second.distribution, first.distribution);
+  assert.strictEqual(spawns, 2, "the cached discovery skips the subprocesses");
+  // A version change invalidates the cache (the package root metadata
+  // was written on the first call, so delete it to force the cache path).
+  fs.unlinkSync(path.join(packageRoot, ".gitcode-install.json"));
+  const third = ensureInstallMetadata(packageRoot, "2.0.0", options);
+  assert.ok(third);
+  assert.strictEqual(spawns, 4, "a version change re-runs discovery");
+});

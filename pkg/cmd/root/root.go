@@ -43,7 +43,26 @@ const commandNameEnv = "GITCODE_CLI_COMMAND_NAME"
 func Execute(ver, commit, date string) error {
 	f := cmdutil.NewFactory()
 	rootCmd := NewRootCmd(ver, commit, date, f)
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	// cobra skips PersistentPostRun when RunE returns an error, so a failing
+	// command would skip the update lifecycle entirely (pending summaries,
+	// first-run notice, due background check). The npm wrapper runs its
+	// lifecycle on every exit code; run ours here to match. AfterCommand
+	// exits early without an adjacent bootstrap manifest, so this is a
+	// no-op for non-bootstrap channels.
+	if err != nil {
+		runPostCommandLifecycle(rootCmd, f)
+	}
+	return err
+}
+
+// runPostCommandLifecycle mirrors the PersistentPostRun hook for the error
+// path (flag parsing has already happened, so the flag reads are safe).
+func runPostCommandLifecycle(cmd *cobra.Command, f *cmdutil.Factory) {
+	noUpdate, _ := cmd.Flags().GetBool("no-update-check")
+	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
+	cfg, _ := f.Config()
+	installupdate.AfterCommand(cfg, f.IOStreams.ErrOut, noUpdate, noInteractive)
 }
 
 // NewRootCmd creates the root command.

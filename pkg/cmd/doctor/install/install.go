@@ -226,6 +226,17 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 			directories[normalizedPath(filepath.Dir(target), goos)] = struct{}{}
 		}
 	}
+	// An interrupted install leaves its temp/backup files in the target
+	// directory even before any gc/gitcode entry exists there (interrupted
+	// between the probe and the first replacePath), so scan every PATH
+	// directory — the candidate set alone would miss those.
+	for _, dir := range filepath.SplitList(env["PATH"]) {
+		dir = strings.Trim(strings.TrimSpace(dir), `"`)
+		if dir == "" {
+			continue
+		}
+		directories[normalizedPath(dir, goos)] = struct{}{}
+	}
 	var leftoverFiles, leftoverSymlinks []string
 	for dir := range directories {
 		files, symlinks := transactionLeftovers(dir)

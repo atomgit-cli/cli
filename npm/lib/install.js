@@ -129,14 +129,15 @@ function chooseGlobalBinDir(home, isWin, posixCandidates, brewCellarPath = "/usr
 
 // Completion target dirs per shell (user-writable, auto-loaded where possible).
 // Pure: derives the path from the shell + home.
-function completionTarget(shell, home) {
+function completionTarget(shell, home, commandName = "gc") {
+  const name = commandName === "gitcode" ? "gitcode" : "gc";
   switch (shell) {
     case "bash":
-      return path.join(home, ".local", "share", "bash-completion", "completions", "gc");
+      return path.join(home, ".local", "share", "bash-completion", "completions", name);
     case "zsh":
-      return path.join(home, ".zsh", "completions", "_gc");
+      return path.join(home, ".zsh", "completions", `_${name}`);
     case "fish":
-      return path.join(home, ".config", "fish", "completions", "gc.fish");
+      return path.join(home, ".config", "fish", "completions", `${name}.fish`);
     default:
       return null;
   }
@@ -253,12 +254,54 @@ function pnpmChannelSymlinkError(dst) {
   } catch {
     // Broken link: the raw text still carries the pnpm marker.
   }
-  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  // Matching is case-insensitive (Windows layouts carry arbitrary casing);
+  // the error detail keeps the original text.
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
   // Two markers: the default global layout (.../pnpm/global/...) and the
   // store layout (/.pnpm/<name>@<version>/...) — the store marker survives
   // custom PNPM_HOME naming. Keep in sync with isPnpmEnvironment's layout
   // marker in install-metadata.js.
-  if (!surface.includes("/pnpm/global/") && !surface.includes("/.pnpm/")) return null;
+  const globalLayout = surface.includes("/pnpm/global/");
+  const storeLayout = surface.includes("/.pnpm/");
+  if (!globalLayout && !storeLayout) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  // The global layout owns "pnpm remove -g"; a store-only hit (a project's
+  // node_modules/.bin link) is a project-level dependency — no -g.
+  const removeCommand = globalLayout
+    ? `pnpm remove -g ${coordinate}`
+    : `pnpm remove ${coordinate} in the owning project`;
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a pnpm ${globalLayout ? "global" : "project"} installation; run "${removeCommand}" first, ` +
+      `or keep pnpm and skip the npm bootstrap install`
+  );
+}
+
+// bun global installs share the npm package layout
+// (~/.bun/install/global/node_modules/<coordinate>/...), so the adoption
+// check would silently migrate them; refuse first like pnpm/yarn.
+function bunChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the bun marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
+  if (!surface.includes("/.bun/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -269,8 +312,8 @@ function pnpmChannelSymlinkError(dst) {
   const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
   return new Error(
     `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
-      `this symlink belongs to a pnpm global installation; run "pnpm remove -g ${coordinate}" first, ` +
-      `or keep pnpm and skip the npm bootstrap install`
+      `this symlink belongs to a bun global installation; run "bun remove -g ${coordinate}" first, ` +
+      `or keep bun and skip the npm bootstrap install`
   );
 }
 
@@ -291,8 +334,10 @@ function yarnChannelSymlinkError(dst) {
   } catch {
     // Broken link: the raw text still carries the yarn marker.
   }
-  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
-  if (!surface.includes("/yarn/global/")) return null;
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
+  // Case-insensitive: yarn v1's Windows default global dir is
+  // %LOCALAPPDATA%\Yarn\Data\global (capital Y, an extra Data segment).
+  if (!surface.includes("/yarn/global/") && !surface.includes("/yarn/data/global/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -314,7 +359,9 @@ const FOREIGN_SYMLINK_CHANNEL_HINTS = [
   { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/uv/tools/", guidance: 'this symlink belongs to a uv-managed tool; run "uv tool uninstall gitcode-cli" first, or keep uv and skip the npm bootstrap install' },
+  { marker: "/.bun/", guidance: 'this symlink belongs to a bun global installation; run "bun remove -g @gitcode-cli/cli" first, or keep bun and skip the npm bootstrap install' },
   { marker: "/yarn/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
+  { marker: "/yarn/data/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
   { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
 ];
 
@@ -329,8 +376,9 @@ function nonRegularTargetError(dst) {
     }
     let detail = `: ${dst} is a symlink -> ${raw}`;
     if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
-    // Windows readlink/path results use backslashes; normalize for matching.
-    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+    // Windows readlink/path results use backslashes; normalize for matching
+    // (case-insensitive — Windows layouts carry arbitrary casing).
+    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
     let guidance;
     if (surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)) {
       guidance = `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
@@ -364,6 +412,8 @@ function replacePath(src, dst, transactionID, options = {}) {
       if (pnpmError) throw pnpmError;
       const yarnError = yarnChannelSymlinkError(dst);
       if (yarnError) throw yarnError;
+      const bunError = bunChannelSymlinkError(dst);
+      if (bunError) throw bunError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -406,6 +456,8 @@ function replacePath(src, dst, transactionID, options = {}) {
         if (pnpmError) throw pnpmError;
         const yarnError = yarnChannelSymlinkError(backup);
         if (yarnError) throw yarnError;
+        const bunError = bunChannelSymlinkError(backup);
+        if (bunError) throw bunError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -499,7 +551,7 @@ function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function runGc(bin, args) {
+function runGc(bin, args, extraEnv = {}) {
   return spawnSync(bin, args, {
     encoding: "utf8",
     // A blocked child (AV scanning the fresh binary, hung shell) must not
@@ -507,6 +559,7 @@ function runGc(bin, args) {
     timeout: 30000,
     env: {
       ...process.env,
+      ...extraEnv,
       // The installer's own probes must not run the update lifecycle: the
       // spawned binary reads the adjacent bootstrap manifest and would
       // consume any pending summary into discarded stderr, mark the
@@ -560,27 +613,36 @@ function writeCompletionFile(target, content) {
 function installCompletions(bin, home) {
   const installed = [];
   const skipped = [];
-  for (const shell of ["bash", "zsh", "fish"]) {
-    const res = runGc(bin, ["completion", shell]);
+  // Both command names get completions (matching the deb/rpm packages,
+  // which ship gc and gitcode scripts): the second pass sets the command
+  // name env so cobra's generator produces gitcode-named scripts.
+  for (const [shell, commandName] of [
+    ["bash", "gc"], ["bash", "gitcode"],
+    ["zsh", "gc"], ["zsh", "gitcode"],
+    ["fish", "gc"], ["fish", "gitcode"],
+  ]) {
+    const res = commandName === "gc"
+      ? runGc(bin, ["completion", shell])
+      : runGc(bin, ["completion", shell], { GITCODE_CLI_COMMAND_NAME: commandName });
     if (res.status !== 0 || !res.stdout) {
-      skipped.push(`${shell}: completion command failed`);
+      skipped.push(`${shell} (${commandName}): completion command failed`);
       continue;
     }
-    const target = completionTarget(shell, home);
+    const target = completionTarget(shell, home, commandName);
     if (!target) {
-      skipped.push(`${shell}: no completion target`);
+      skipped.push(`${shell} (${commandName}): no completion target`);
       continue;
     }
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       const written = writeCompletionFile(target, res.stdout);
       if (written.skipped) {
-        skipped.push(`${shell}: ${target} is a symlink`);
+        skipped.push(`${shell} (${commandName}): ${target} is a symlink`);
         continue;
       }
-      installed.push(`${shell}: ${target}`);
+      installed.push(`${shell} (${commandName}): ${target}`);
     } catch {
-      skipped.push(`${shell}: ${target} not writable`);
+      skipped.push(`${shell} (${commandName}): ${target} not writable`);
     }
   }
   return { installed, skipped };
@@ -889,16 +951,33 @@ function foreignChannelHint(file, isWin = process.platform === "win32") {
   // python3); only options are accepted after the interpreter, never a
   // script path (the file itself is the script).
   if (/^#!\s*(?:(?:\S*\/)?env(?:\s+-\S+)*\s+python|\S*python)([0-9.]*)?(?:\s+-\S+)*\s*$/.test(firstLine)) {
-    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
+    // The interpreter path itself says which tool owns the script: uv and
+    // pipx console scripts point at their managed venvs (where pip is often
+    // not even available).
+    return consoleScriptChannelHint(firstLine);
   }
   // Windows pip console shims are PE binaries with no shebang line at the
   // top: distlib appends "#!<python.exe path>\r\n" well into the stub, in
   // front of the zip payload. Anchor on the embedded shebang so ordinary
   // PE binaries never match.
-  if (isWin && content.startsWith("MZ") && /#![^\r\n]{0,400}pythonw?\.exe/i.test(content)) {
-    return 'pip console executable (PE shim); run "pip uninstall gitcode-cli" first to keep the pip channel';
+  if (isWin && content.startsWith("MZ")) {
+    const embedded = content.match(/#![^\r\n]{0,400}pythonw?\.exe/i);
+    if (embedded) return consoleScriptChannelHint(embedded[0]);
   }
   return "";
+}
+
+// Channel-specific guidance for a recognized python console script, keyed
+// on the interpreter path inside its shebang.
+function consoleScriptChannelHint(shebangLine) {
+  const lowered = String(shebangLine).toLowerCase();
+  if (lowered.includes("/uv/tools/")) {
+    return 'uv console script; run "uv tool uninstall gitcode-cli" first to keep the uv channel';
+  }
+  if (lowered.includes("/pipx/venvs/")) {
+    return 'pipx console script; run "pipx uninstall gitcode-cli" first to keep the pipx channel';
+  }
+  return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
 }
 
 // Refusal error for a foreign-channel regular file occupying an install
@@ -954,9 +1033,35 @@ const INSTALL_LOCK_STALE_MS = 10 * 60 * 1000;
 
 function acquireInstallLock(dir, now = Date.now()) {
   const lock = path.join(dir, ".gc-install-lock");
+  // The claim holds the file descriptor open: the release path compares
+  // the descriptor's identity against the path (fd-inode on POSIX, pid
+  // content on Windows where st_ino is 0), so a holder stalled past the
+  // stale window cannot delete a reclaimer's fresh lock.
   const claim = () => {
-    fs.writeFileSync(lock, `${process.pid} ${new Date(now).toISOString()}\n`, { flag: "wx", mode: 0o644 });
-    return lock;
+    const fd = fs.openSync(lock, "wx", 0o644);
+    try {
+      fs.writeSync(fd, `${process.pid} ${new Date(now).toISOString()}\n`);
+    } catch {
+      // Best effort: content is diagnostic, the fd identity still guards.
+    }
+    return { path: lock, fd };
+  };
+  const busyError = () => new Error(
+    `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
+      `retry in a moment or remove the lock if you are certain none is running`
+  );
+  // A dangling symlink at the lock path fails claims with EEXIST while the
+  // stat below follows the link to nothing (ENOENT) — surface the symlink
+  // explicitly instead of a raw EEXIST loop. Returns "symlink" for the
+  // symlink case, the stat info otherwise, or null when gone.
+  const lockInfo = () => {
+    try {
+      const info = fs.lstatSync(lock);
+      if (info.isSymbolicLink()) return "symlink";
+      return info;
+    } catch {
+      return null; // gone; safe to claim
+    }
   };
   try {
     return claim();
@@ -964,15 +1069,28 @@ function acquireInstallLock(dir, now = Date.now()) {
     if (error.code !== "EEXIST") throw error;
     let mtimeMs = 0;
     try {
-      mtimeMs = fs.statSync(lock).mtimeMs;
-    } catch {
-      return claim(); // the holder released between our failure and stat
+      const info = lockInfo();
+      if (info === "symlink") {
+        throw new Error(
+          `the install lock ${lock} is a symbolic link; remove it manually and retry ` +
+            `(an installer never creates the lock as a symlink)`
+        );
+      }
+      mtimeMs = info ? info.mtimeMs : 0;
+    } catch (error) {
+      if (String(error.message).includes("symbolic link")) throw error;
+      mtimeMs = 0; // vanished; safe to retry the claim
+    }
+    if (mtimeMs === 0) {
+      try {
+        return claim();
+      } catch (error2) {
+        if (error2.code !== "EEXIST") throw error2;
+        throw busyError();
+      }
     }
     if (now - mtimeMs < INSTALL_LOCK_STALE_MS) {
-      throw new Error(
-        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
-          `retry in a moment or remove the lock if you are certain none is running`
-      );
+      throw busyError();
     }
     // Atomic reclaim: renaming the stale lock to a private name lets exactly
     // one of two racing reclaimers win — the loser's rename fails with
@@ -986,11 +1104,15 @@ function acquireInstallLock(dir, now = Date.now()) {
       // Re-verify staleness on the retired file: a fresh install's claim
       // may have landed between the check above and this rename, and
       // renaming a live lock away would silently break its holder.
+      // Restore via link+unlink (never clobbers a third claim on the
+      // freed path — rename would overwrite it).
       if (now - fs.statSync(retired).mtimeMs <= INSTALL_LOCK_STALE_MS) {
         try {
-          fs.renameSync(retired, lock);
+          fs.linkSync(retired, lock);
+          fs.unlinkSync(retired);
         } catch {
-          // Someone claimed the path while we held their lock aside.
+          // The path is taken (or links are refused): leave the retired
+          // debris and yield the hold.
         }
         stoleFreshLock = true;
       } else {
@@ -1005,34 +1127,40 @@ function acquireInstallLock(dir, now = Date.now()) {
       // which fails with EEXIST on their fresh lock below.
     }
     if (stoleFreshLock) {
-      throw new Error(
-        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
-          `retry in a moment or remove the lock if you are certain none is running`
-      );
+      throw busyError();
     }
     try {
       return claim();
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+    } catch (error2) {
+      if (error2.code !== "EEXIST") throw error2;
       // Both reclaimers raced: the other one won the recreated lock.
-      throw new Error(
-        `another gc install appears to be running in ${dir} (lock: ${lock}); ` +
-          `retry in a moment or remove the lock if you are certain none is running`
-      );
+      throw busyError();
     }
   }
 }
 
-function releaseInstallLock(lock) {
+function releaseInstallLock(handle) {
+  if (!handle || handle.fd == null) return;
+  const lock = handle.path;
   try {
-    // Identity check via the pid token written at claim time: if this lock
-    // was reclaimed as stale while we were stalled, the path now holds
-    // another install's fresh lock and must not be removed.
+    // Identity check, doubly guarded (mirrors the state locks): the fd's
+    // inode vs the path on POSIX, and the pid content on Windows (where
+    // st_ino is 0). A holder stalled past the stale window that resumes
+    // after a reclaim must not delete the reclaimer's fresh lock.
+    const held = fs.fstatSync(handle.fd);
+    const current = fs.statSync(lock);
+    if (held.ino !== current.ino) return;
     const holder = fs.readFileSync(lock, "utf8").trim().split(" ")[0];
     if (holder !== String(process.pid)) return;
   } catch {
     // The lock file is already gone; nothing to release.
     return;
+  } finally {
+    try {
+      fs.closeSync(handle.fd);
+    } catch {
+      // Best effort.
+    }
   }
   try {
     fs.unlinkSync(lock);

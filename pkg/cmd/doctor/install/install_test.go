@@ -379,3 +379,23 @@ func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectScansAllPathDirectoriesForLeftovers(t *testing.T) {
+	// A PATH directory holding only an interrupted install's temp file (no
+	// gc/gitcode entry ever landed) is invisible to the candidate-based
+	// scan; the full-PATH scan must report it.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gc.tmp-123-abc"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	found := false
+	for _, leftover := range report.Leftovers {
+		if strings.HasSuffix(leftover, "gc.tmp-123-abc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a leftover in a gc-less PATH directory must be reported, got %#v", report.Leftovers)
+	}
+}

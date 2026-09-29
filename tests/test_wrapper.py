@@ -91,6 +91,7 @@ class DetectDistributionTests(unittest.TestCase):
         for prefix in (
             "/home/u/.local/share/uv/tools/gitcode-cli",
             "C:\\Users\\u\\AppData\\Roaming\\uv\\tools\\gc",
+            "/home/u/UV/Tools/gitcode-cli",  # custom UV_TOOL_DIR, upper case
         ):
             with mock.patch("sys.prefix", prefix):
                 with mock.patch("pathlib.Path.resolve", return_value=Path(prefix)):

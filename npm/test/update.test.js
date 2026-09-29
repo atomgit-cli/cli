@@ -773,3 +773,48 @@ test("updater child environment strips GitCode and npm credentials", () => {
     assert.strictEqual(env[key], undefined);
   }
 });
+
+test("a background update re-checks mode=off under the lock and stays disabled", { timeout: 30000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-runupdate-off-"));
+  const stateDir = path.join(dir, "state");
+  const { stub, attemptsFile } = flakyNpmStub(dir, 0, "9.9.9");
+  const stateFile = path.join(stateDir, "update-state.json");
+  const previousStateDir = process.env.GC_STATE_DIR;
+  process.env.GC_STATE_DIR = stateDir;
+  try {
+    const result = runUpdate({
+      stateFile,
+      background: true,
+      mode: "off",
+      metadata: { global: true, distribution: "npm", prefix: dir, npm: stub },
+    });
+    assert.strictEqual(result.status, "disabled");
+    assert.strictEqual(fs.existsSync(attemptsFile), false, "the npm stub must not be invoked");
+    assert.strictEqual(fs.existsSync(stateFile), false, "a disabled early return writes no state");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.GC_STATE_DIR;
+    else process.env.GC_STATE_DIR = previousStateDir;
+  }
+});
+
+test("updateMode trims whitespace from env and config values", () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-config-trim-"));
+  fs.writeFileSync(path.join(configDir, "config.json"),
+    JSON.stringify({ hosts: { "gitcode.com": { "update.mode": " off\r" } } }));
+  assert.strictEqual(updateMode({ GC_CONFIG_DIR: configDir }), "off", "CRLF-contaminated config values must trim");
+  assert.strictEqual(updateMode({ GC_UPDATE_MODE: " off\n", GC_CONFIG_DIR: configDir }), "off");
+  assert.strictEqual(updateMode({ GC_UPDATE_MODE: "notify " }), "notify");
+});
+
+test("releaseLock refuses to remove a lock whose content names another pid", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gc-release-pid-"));
+  const lock = path.join(dir, "update-state.json.lock");
+  const first = acquireLock(lock);
+  assert.notStrictEqual(first, null);
+  // A stale reclaim happened while we held the fd: the path now names
+  // another holder (the content check is the Windows-safe identity).
+  fs.unlinkSync(lock);
+  fs.writeFileSync(lock, "999999", { flag: "wx" });
+  releaseLock(lock, first);
+  assert.strictEqual(fs.existsSync(lock), true, "a lock naming another pid must survive");
+});
