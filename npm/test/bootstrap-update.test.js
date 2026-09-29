@@ -359,7 +359,9 @@ test("an explicit --force update after a foreground check still installs (Go upd
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
   if (process.platform === "win32") {
     assert.strictEqual(forced.status, 1, "the health check fails without a runnable gitcode.exe");
-    assert.match(state.summary.message, /health check/, "the install path must have run to the health check");
+    // The failure is the health check's entry spawn itself (result.error is
+    // thrown verbatim), so either message shape proves the install path ran.
+    assert.match(state.summary.message, /gitcode\.exe ENOENT|health check/, "the install path must have run to the health check");
   } else {
     assert.strictEqual(forced.status, 0, forced.stderr);
     assert.match(state.summary.message, /Updated GitCode CLI 0\.0\.1 -> 9\.9\.9/);
