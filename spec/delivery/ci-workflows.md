@@ -99,7 +99,7 @@ GitHub 工作流 `.github/workflows/ci.yml` 保留原有跨平台覆盖：
 |-----|---------|------|
 | `lint` | ubuntu-latest | golangci-lint |
 | `secret-scan` | ubuntu-latest | gitleaks 全历史密钥扫描（`fetch-depth: 0` + `--redact=100` 脱敏输出） |
-| `test` | ubuntu-latest / macos-14 / windows-latest | release / package 版本校验 + 宿主机 setup 契约 + Go/Node 单元测试 + 竞态检测 + 真实旧 npm→本地新包升级、PATH 遮蔽与 bootstrap 烟测 + 覆盖率 |
+| `test` | ubuntu-latest / macos-14 / windows-latest | release / package 版本校验 + 宿主机 setup 契约 + Go/Node 单元测试 + 竞态检测 + 真实旧 npm→本地新包升级、PATH 遮蔽与 bootstrap 烟测 + Python wrapper 单测 + 生成资产 drift 检查（ubuntu） + 覆盖率 |
 | `build` | ubuntu-latest / macos-14 / windows-latest | 跨平台 `go build` + `gc version` |
 | `docker` | ubuntu-latest | Docker 构建 + shell 补全 + wheel 入口冒烟 |
 
