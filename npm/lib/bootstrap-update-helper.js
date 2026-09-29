@@ -136,11 +136,13 @@ function statePath(env = process.env) {
 }
 
 function updateMode(env = process.env) {
-  const requested = String(env.GC_UPDATE_MODE || "").toLowerCase();
+  // Trim like the Go side (resolveUpdateMode): CRLF-contaminated profile
+  // values (" off") must resolve the same on both channels.
+  const requested = String(env.GC_UPDATE_MODE || "").trim().toLowerCase();
   if (["auto", "notify", "off"].includes(requested)) return requested;
   const configRoot = env.GC_CONFIG_DIR || path.join(os.homedir(), ".config", "gc");
   const config = readJSON(path.join(configRoot, "config.json"));
-  const stored = (((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").toLowerCase();
+  const stored = String(((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").trim().toLowerCase();
   return ["auto", "notify", "off"].includes(stored) ? stored : "notify";
 }
 
@@ -385,8 +387,19 @@ function installLatest(manifest, latest) {
 
 function acquireLock(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  // Record the holder so release can verify identity by content on
+  // platforms where st_ino is unavailable (Windows). Mirrors lib/update.js.
+  const claim = () => {
+    const descriptor = fs.openSync(file, "wx", 0o600);
+    try {
+      fs.writeSync(descriptor, String(process.pid));
+    } catch {
+      // Best effort: the inode check still guards POSIX releases.
+    }
+    return descriptor;
+  };
   try {
-    return fs.openSync(file, "wx", 0o600);
+    return claim();
   } catch (error) {
     if (error.code === "EEXIST") {
       try {
@@ -401,10 +414,15 @@ function acquireLock(file) {
           const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
           fs.renameSync(file, retired);
           if (Date.now() - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
+            // Restore via link+unlink (never clobbers a third process's
+            // fresh claim on the freed path — rename would overwrite it).
+            // Mirrors lib/update.js.
             try {
-              fs.renameSync(retired, file);
+              fs.linkSync(retired, file);
+              fs.unlinkSync(retired);
             } catch {
-              // Someone claimed the path while we held their lock aside.
+              // The path is taken (or links are refused): leave the
+              // retired debris and yield the hold.
             }
             return null;
           }
@@ -413,7 +431,7 @@ function acquireLock(file) {
           } catch {
             // Best effort; a stranded .retired-* file is inert debris.
           }
-          return fs.openSync(file, "wx", 0o600);
+          return claim();
         }
       } catch {
         // Another process owns or just released the lock.
@@ -430,9 +448,14 @@ function acquireLock(file) {
 // Mirrors lib/update.js.
 function releaseLock(file, descriptor) {
   try {
+    // Identity check, doubly guarded (inode on POSIX, pid content on
+    // Windows where st_ino is 0): a reclaimed lock's path holds someone
+    // else's fresh lock and must not be removed. Mirrors lib/update.js.
     const held = fs.fstatSync(descriptor);
     const current = fs.statSync(file);
     if (held.ino !== current.ino) return;
+    const holder = fs.readFileSync(file, "utf8").trim();
+    if (holder !== String(process.pid)) return;
   } catch {
     return;
   } finally {
@@ -578,6 +601,11 @@ function recordBackgroundFailure(error) {
         message += /npm-bootstrap install manifest/.test(summarizeError(error))
           ? " Background checks are paused: rerun the npm bootstrap install (npx --yes --package=<coordinate>@latest gitcode install) to repair the install manifest."
           : ' Background checks are paused: reinstall Node.js, then run "gitcode update" to resume background checks.';
+      } else if (state.permanentError) {
+        // The pause is sticky from an earlier unrepaired failure; do not
+        // attribute it to the transient error at hand (mirrors
+        // lib/update.js).
+        message += ' Background checks remain paused from an earlier unrepaired failure; repair it (rerun the bootstrap install or reinstall Node.js), then run "gitcode update".';
       }
       state.summary = { message, shown: false };
       state.lastErrorFingerprint = fingerprint;
