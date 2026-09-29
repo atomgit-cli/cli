@@ -85,7 +85,7 @@ def detect_distribution() -> str:
     "uv tool upgrade" rather than running pip inside the uv-managed
     environment — which is exactly what uv tells users not to do.
     """
-    prefix = str(Path(sys.prefix).resolve()).replace("\\", "/")
+    prefix = str(Path(sys.prefix).resolve()).replace("\\", "/").lower()
     return "uv" if "/uv/tools/" in prefix else "pypi"
 
 

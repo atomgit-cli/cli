@@ -253,12 +253,54 @@ function pnpmChannelSymlinkError(dst) {
   } catch {
     // Broken link: the raw text still carries the pnpm marker.
   }
-  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+  // Matching is case-insensitive (Windows layouts carry arbitrary casing);
+  // the error detail keeps the original text.
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
   // Two markers: the default global layout (.../pnpm/global/...) and the
   // store layout (/.pnpm/<name>@<version>/...) — the store marker survives
   // custom PNPM_HOME naming. Keep in sync with isPnpmEnvironment's layout
   // marker in install-metadata.js.
-  if (!surface.includes("/pnpm/global/") && !surface.includes("/.pnpm/")) return null;
+  const globalLayout = surface.includes("/pnpm/global/");
+  const storeLayout = surface.includes("/.pnpm/");
+  if (!globalLayout && !storeLayout) return null;
+  let coordinate = pkg.name;
+  for (const name of OWN_NPM_PACKAGES) {
+    if (surface.includes(`/node_modules/${name}/`)) {
+      coordinate = name;
+      break;
+    }
+  }
+  const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
+  // The global layout owns "pnpm remove -g"; a store-only hit (a project's
+  // node_modules/.bin link) is a project-level dependency — no -g.
+  const removeCommand = globalLayout
+    ? `pnpm remove -g ${coordinate}`
+    : `pnpm remove ${coordinate} in the owning project`;
+  return new Error(
+    `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
+      `this symlink belongs to a pnpm ${globalLayout ? "global" : "project"} installation; run "${removeCommand}" first, ` +
+      `or keep pnpm and skip the npm bootstrap install`
+  );
+}
+
+// bun global installs share the npm package layout
+// (~/.bun/install/global/node_modules/<coordinate>/...), so the adoption
+// check would silently migrate them; refuse first like pnpm/yarn.
+function bunChannelSymlinkError(dst) {
+  let raw;
+  try {
+    raw = fs.readlinkSync(dst);
+  } catch {
+    return null;
+  }
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(dst);
+  } catch {
+    // Broken link: the raw text still carries the bun marker.
+  }
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
+  if (!surface.includes("/.bun/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -269,8 +311,8 @@ function pnpmChannelSymlinkError(dst) {
   const detail = resolved && resolved !== raw ? ` (resolves to ${resolved})` : "";
   return new Error(
     `refusing non-regular install target: ${dst} is a symlink -> ${raw}${detail}\n` +
-      `this symlink belongs to a pnpm global installation; run "pnpm remove -g ${coordinate}" first, ` +
-      `or keep pnpm and skip the npm bootstrap install`
+      `this symlink belongs to a bun global installation; run "bun remove -g ${coordinate}" first, ` +
+      `or keep bun and skip the npm bootstrap install`
   );
 }
 
@@ -291,8 +333,10 @@ function yarnChannelSymlinkError(dst) {
   } catch {
     // Broken link: the raw text still carries the yarn marker.
   }
-  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
-  if (!surface.includes("/yarn/global/")) return null;
+  const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
+  // Case-insensitive: yarn v1's Windows default global dir is
+  // %LOCALAPPDATA%\Yarn\Data\global (capital Y, an extra Data segment).
+  if (!surface.includes("/yarn/global/") && !surface.includes("/yarn/data/global/")) return null;
   let coordinate = pkg.name;
   for (const name of OWN_NPM_PACKAGES) {
     if (surface.includes(`/node_modules/${name}/`)) {
@@ -314,7 +358,9 @@ const FOREIGN_SYMLINK_CHANNEL_HINTS = [
   { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/uv/tools/", guidance: 'this symlink belongs to a uv-managed tool; run "uv tool uninstall gitcode-cli" first, or keep uv and skip the npm bootstrap install' },
+  { marker: "/.bun/", guidance: 'this symlink belongs to a bun global installation; run "bun remove -g @gitcode-cli/cli" first, or keep bun and skip the npm bootstrap install' },
   { marker: "/yarn/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
+  { marker: "/yarn/data/global/", guidance: 'this symlink belongs to a yarn global installation; run "yarn global remove @gitcode-cli/cli" first, or keep yarn and skip the npm bootstrap install' },
   { marker: "/pipx/venvs/", guidance: 'this symlink belongs to a pipx installation; run "pipx uninstall gitcode-cli" first, or remove the symlink' },
 ];
 
@@ -329,8 +375,9 @@ function nonRegularTargetError(dst) {
     }
     let detail = `: ${dst} is a symlink -> ${raw}`;
     if (resolved && resolved !== raw) detail += ` (resolves to ${resolved})`;
-    // Windows readlink/path results use backslashes; normalize for matching.
-    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/");
+    // Windows readlink/path results use backslashes; normalize for matching
+    // (case-insensitive — Windows layouts carry arbitrary casing).
+    const surface = `${raw}\n${resolved}`.split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
     let guidance;
     if (surface.includes(`/node_modules/${THIRD_PARTY_NPM_PACKAGE}/`)) {
       guidance = `the third-party npm package "${THIRD_PARTY_NPM_PACKAGE}" is not AtomGit CLI; ` +
@@ -364,6 +411,8 @@ function replacePath(src, dst, transactionID, options = {}) {
       if (pnpmError) throw pnpmError;
       const yarnError = yarnChannelSymlinkError(dst);
       if (yarnError) throw yarnError;
+      const bunError = bunChannelSymlinkError(dst);
+      if (bunError) throw bunError;
       if (!isAllowedAliasSymlink(dst, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(dst)) {
         throw nonRegularTargetError(dst);
       }
@@ -406,6 +455,8 @@ function replacePath(src, dst, transactionID, options = {}) {
         if (pnpmError) throw pnpmError;
         const yarnError = yarnChannelSymlinkError(backup);
         if (yarnError) throw yarnError;
+        const bunError = bunChannelSymlinkError(backup);
+        if (bunError) throw bunError;
         if (!isAllowedAliasSymlink(backup, options.allowedSymlinkTarget) && !resolvesIntoOwnNpmPackage(backup)) {
           throw nonRegularTargetError(backup);
         }
@@ -889,16 +940,33 @@ function foreignChannelHint(file, isWin = process.platform === "win32") {
   // python3); only options are accepted after the interpreter, never a
   // script path (the file itself is the script).
   if (/^#!\s*(?:(?:\S*\/)?env(?:\s+-\S+)*\s+python|\S*python)([0-9.]*)?(?:\s+-\S+)*\s*$/.test(firstLine)) {
-    return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
+    // The interpreter path itself says which tool owns the script: uv and
+    // pipx console scripts point at their managed venvs (where pip is often
+    // not even available).
+    return consoleScriptChannelHint(firstLine);
   }
   // Windows pip console shims are PE binaries with no shebang line at the
   // top: distlib appends "#!<python.exe path>\r\n" well into the stub, in
   // front of the zip payload. Anchor on the embedded shebang so ordinary
   // PE binaries never match.
-  if (isWin && content.startsWith("MZ") && /#![^\r\n]{0,400}pythonw?\.exe/i.test(content)) {
-    return 'pip console executable (PE shim); run "pip uninstall gitcode-cli" first to keep the pip channel';
+  if (isWin && content.startsWith("MZ")) {
+    const embedded = content.match(/#![^\r\n]{0,400}pythonw?\.exe/i);
+    if (embedded) return consoleScriptChannelHint(embedded[0]);
   }
   return "";
+}
+
+// Channel-specific guidance for a recognized python console script, keyed
+// on the interpreter path inside its shebang.
+function consoleScriptChannelHint(shebangLine) {
+  const lowered = String(shebangLine).toLowerCase();
+  if (lowered.includes("/uv/tools/")) {
+    return 'uv console script; run "uv tool uninstall gitcode-cli" first to keep the uv channel';
+  }
+  if (lowered.includes("/pipx/venvs/")) {
+    return 'pipx console script; run "pipx uninstall gitcode-cli" first to keep the pipx channel';
+  }
+  return 'python script (likely a pip console script); run "pip uninstall gitcode-cli" first to keep the pip channel';
 }
 
 // Refusal error for a foreign-channel regular file occupying an install

@@ -271,3 +271,21 @@ test("writeInstallMetadata stays readable by other users in shared directories",
   const mode = fs.statSync(path.join(root, ".gitcode-install.json")).mode & 0o777;
   assert.strictEqual(mode, 0o644, "shared bin directories must keep the manifest world-readable");
 });
+
+test("isPnpmEnvironment recognizes custom PNPM_HOME via the resolved store layout", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-pnpm-custom-"));
+  // A custom-named pnpm global root: no "pnpm" in the path, no user agent —
+  // only the resolved store layout (global/<ver>/.pnpm/<pkg>/...) says pnpm.
+  const storePkg = path.join(root, "jsbins", "global", "5", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(storePkg, { recursive: true });
+  const { isPnpmEnvironment } = require("../lib/install-metadata");
+  assert.strictEqual(isPnpmEnvironment({}, storePkg, false), true, "custom PNPM_HOME store layout must be recognized");
+  // A project-level pnpm dependency is also pnpm-managed.
+  const projectPkg = path.join(root, "proj", "node_modules", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(projectPkg, { recursive: true });
+  assert.strictEqual(isPnpmEnvironment({}, projectPkg, false), true);
+  // An ordinary npm tree is not.
+  const npmPkg = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli");
+  fs.mkdirSync(npmPkg, { recursive: true });
+  assert.strictEqual(isPnpmEnvironment({}, npmPkg, false), false);
+});

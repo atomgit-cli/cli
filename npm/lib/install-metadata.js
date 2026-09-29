@@ -139,9 +139,13 @@ function isPnpmEnvironment(env, packageRoot, isWin, options = {}) {
   const ua = /^pnpm\//.test(String((env || {}).npm_config_user_agent || ""));
   // Direct invocation outside a pnpm shim falls back to pnpm's global
   // layout. Windows paths keep backslashes through normalizePath, so unify
-  // them.
+  // them. The realpath fallback catches custom PNPM_HOME naming: the store
+  // layout (/<global-dir>/<ver>/.pnpm/<pkg>@<v>/node_modules/...) only
+  // appears after resolution. Keep the marker set in sync with
+  // pnpmChannelSymlinkError in install.js.
   const normalized = normalizePath(packageRoot, isWin).replace(/\\/g, "/");
   if (/\/pnpm\/global\//.test(normalized)) return true;
+  if (hasPnpmStoreLayout(packageRoot)) return true;
   if (!ua) return false;
   // The UA says pnpm but the package is not in pnpm's layout: an npm-global
   // install invoked from inside a pnpm script environment would otherwise be
@@ -164,6 +168,21 @@ function isPnpmEnvironment(env, packageRoot, isWin, options = {}) {
   const globalRoot = normalizePath(String(result.stdout || "").trim(), isWin).replace(/\\/g, "/");
   if (!globalRoot) return true;
   return !(normalized === globalRoot || normalized.startsWith(`${globalRoot}/`));
+}
+
+// True when the resolved package path sits inside pnpm's store layout. A
+// `<...>/global/<ver>/.pnpm/` segment means the pnpm *global* store; a bare
+// `/.pnpm/` without the global segment is a project-level install (still
+// pnpm-managed, but the caller's global field stays false).
+function hasPnpmStoreLayout(packageRoot) {
+  let resolved = "";
+  try {
+    resolved = fs.realpathSync(packageRoot);
+  } catch {
+    return false;
+  }
+  const normalized = String(resolved).split(path.sep).join("/").replace(/\\/g, "/").toLowerCase();
+  return /\/global\/[^/]+\/\.pnpm\//.test(normalized) || /\/\.pnpm\/[^/]+@[^/]+\/node_modules\//.test(normalized);
 }
 
 function discoverGlobalInstall(packageRoot, options = {}) {
