@@ -353,6 +353,12 @@ func TestAfterCommandPreservesUpdaterFailureFields(t *testing.T) {
 	}
 	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gitcode"))
 	t.Setenv("GC_STATE_DIR", stateDir)
+	// Neutralize the CI detectors: on CI runners disabled() short-circuits
+	// before the PermanentError gate, and the "must not schedule" assertion
+	// would pass vacuously without exercising the gate.
+	for _, name := range []string{"CI", "GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION", "GC_NO_UPDATE_CHECK"} {
+		t.Setenv(name, "")
+	}
 	manifest := Manifest{Distribution: "npm-bootstrap", Version: "1.2.3", TargetDir: dir, Helper: filepath.Join(dir, "missing.js")}
 	data, _ := json.Marshal(manifest)
 	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), data, 0o600); err != nil {
