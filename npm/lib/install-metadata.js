@@ -237,9 +237,51 @@ function discoverGlobalInstall(packageRoot, options = {}) {
   };
 }
 
+const DISCOVERY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function discoveryCachePath(env = process.env, platform = process.platform) {
+  return path.join(stateDir(env, platform), "discovery-cache.json");
+}
+
+function readDiscoveryCache(packageRoot, version, env, platform) {
+  try {
+    const cache = JSON.parse(fs.readFileSync(discoveryCachePath(env, platform), "utf8"));
+    if (cache.packageRoot !== packageRoot || cache.version !== version) return null;
+    if (!cache.discoveredAt || Date.now() - cache.discoveredAt > DISCOVERY_CACHE_TTL_MS) return null;
+    return cache.discovered;
+  } catch {
+    return null;
+  }
+}
+
+function writeDiscoveryCache(packageRoot, version, discovered, env, platform) {
+  try {
+    const cachePath = discoveryCachePath(env, platform);
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true, mode: 0o700 });
+    const temp = `${cachePath}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+    fs.writeFileSync(temp, `${JSON.stringify({
+      packageRoot,
+      version,
+      discoveredAt: Date.now(),
+      discovered,
+    }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    fs.renameSync(temp, cachePath);
+  } catch {
+    // The cache is an optimization for read-only package roots; failure
+    // simply means discovery runs again.
+  }
+}
+
 function ensureInstallMetadata(packageRoot, version, options = {}) {
   const existing = readInstallMetadata(packageRoot);
   if (existing) return existing;
+  // A read-only package root (root-owned npm prefix with --ignore-scripts)
+  // pays two npm subprocesses per command without somewhere to cache the
+  // discovery result; the state directory is always user-writable.
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const cached = readDiscoveryCache(packageRoot, version, env, platform);
+  if (cached) return cached;
   const discovered = discoverGlobalInstall(packageRoot, { ...options, version });
   if (!discovered) return null;
   try {
@@ -247,6 +289,10 @@ function ensureInstallMetadata(packageRoot, version, options = {}) {
   } catch {
     // Discovery still applies to this process when the package is read-only.
   }
+  // Cache regardless of whether the package root was writable: the cache
+  // covers the read-only case and doubles as a fast path when the package
+  // root metadata gets wiped by a reinstall.
+  writeDiscoveryCache(packageRoot, version, discovered, env, platform);
   return discovered;
 }
 

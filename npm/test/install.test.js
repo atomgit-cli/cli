@@ -1007,10 +1007,12 @@ test("foreignChannelHint accepts interpreter arguments and Windows PE shims", ()
 test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-lock-"));
   const lock = acquireInstallLock(root);
-  assert.strictEqual(fs.existsSync(lock), true);
+  assert.strictEqual(fs.existsSync(lock.path), true);
+  // The claim holds the descriptor open for identity-checked release.
+  assert.strictEqual(typeof lock.fd, "number");
   // The lock name must never join the leftover families: the sweep would
   // then delete a live lock mid-install.
-  assert.strictEqual(isTransactionLeftoverName(path.basename(lock)), false);
+  assert.strictEqual(isTransactionLeftoverName(path.basename(lock.path)), false);
   // A second install while the lock is fresh is refused.
   assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
   releaseInstallLock(lock);
@@ -1022,9 +1024,10 @@ test("acquireInstallLock serializes installs and reclaims stale locks", () => {
   // A lock older than the stale threshold is reclaimed.
   const stale = acquireInstallLock(root);
   const old = new Date(Date.now() - 11 * 60 * 1000);
-  fs.utimesSync(stale, old, old);
+  fs.utimesSync(stale.path, old, old);
+  fs.closeSync(stale.fd);
   const reclaimed = acquireInstallLock(root);
-  assert.strictEqual(fs.readFileSync(reclaimed, "utf8").trim().split(" ")[0], String(process.pid));
+  assert.strictEqual(fs.readFileSync(reclaimed.path, "utf8").trim().split(" ")[0], String(process.pid));
   releaseInstallLock(reclaimed);
 
   // The losing reclaimer of a stale-lock race is refused, not double-holding.
@@ -1406,4 +1409,20 @@ test("foreignChannelHint routes uv and pipx console scripts to their own guidanc
   const pipScript = path.join(root, "plain");
   fs.writeFileSync(pipScript, "#!/usr/bin/env python3\nimport gc_cli\n");
   assert.match(foreignChannelHint(pipScript), /pip uninstall gitcode-cli/);
+});
+
+test("a dangling symlink at the lock path fails with explicit guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-lock-symlink-"));
+  if (!createFileSymlinkOrSkip(t, "nowhere", path.join(root, ".gc-install-lock"))) return;
+  assert.throws(() => acquireInstallLock(root), /symbolic link; remove it manually/);
+});
+
+test("completionTarget produces both gc and gitcode names", () => {
+  for (const shell of ["bash", "zsh", "fish"]) {
+    const gc = completionTarget(shell, "/home/u");
+    const gitcode = completionTarget(shell, "/home/u", "gitcode");
+    assert.ok(gc.endsWith("gc") || gc.endsWith("_gc") || gc.endsWith("gc.fish"), shell);
+    assert.ok(gitcode.endsWith("gitcode") || gitcode.endsWith("_gitcode") || gitcode.endsWith("gitcode.fish"), shell);
+    assert.notStrictEqual(gc, gitcode, shell);
+  }
 });
