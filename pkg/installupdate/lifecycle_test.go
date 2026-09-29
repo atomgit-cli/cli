@@ -548,3 +548,33 @@ func escapedJSON(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data[1 : len(data)-1])
 }
+
+func TestRunCheckSynthesizesJSONWhenHelperDiesSilently(t *testing.T) {
+	// A helper killed before printing anything (the deadline kill scenario):
+	// --json mode must still leave exactly one JSON error object on stdout
+	// instead of empty output plus a non-zero exit.
+	node, helper := stubCheckHelper(t, "process.kill(process.pid, 'SIGKILL');\n")
+	manifest := stubCheckManifest(t, node, helper)
+	var out bytes.Buffer
+	err := RunCheck(manifest, true, &out, nil)
+	if err == nil {
+		t.Fatal("the silently-killed helper must surface an error")
+	}
+	var probe struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if jsonErr := json.Unmarshal(out.Bytes(), &probe); jsonErr != nil || probe.Status != "error" {
+		t.Fatalf("stdout must carry a JSON error object, got %q (err %v)", out.String(), jsonErr)
+	}
+	if !strings.Contains(probe.Message, "update check failed") {
+		t.Fatalf("the synthesized message must name the failure, got %q", probe.Message)
+	}
+	// Text mode: the helper's stderr is forwarded once; the returned error
+	// carries the detail (no double printing because forwarding is
+	// json-mode-disabled).
+	var textOut, textErr bytes.Buffer
+	if err := RunCheck(manifest, false, &textOut, &textErr); err == nil {
+		t.Fatal("text mode must also surface the error")
+	}
+}

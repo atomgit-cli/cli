@@ -30,17 +30,48 @@ const UPDATE_ENV_ALLOWLIST = new Set([
   "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 ]);
 
+// cobra/pflag accepts --flag and --flag=value for boolean flags; only a
+// truthy value counts as set. A non-boolean value in the =form is
+// rejected. Value flags (--manifest, --parent-pid) accept the =value form
+// alongside the space-separated form.
+function booleanFlag(args, name) {
+  return args.some((arg) => arg === name ||
+    (arg.startsWith(`${name}=`) && ["1", "true", "yes"].includes(arg.slice(name.length + 1).trim().toLowerCase())));
+}
+
+function isBooleanFlagArg(arg, name) {
+  if (arg === name) return true;
+  if (!arg.startsWith(`${name}=`)) return false;
+  return ["1", "true", "yes", "0", "false", "no", ""].includes(arg.slice(name.length + 1).trim().toLowerCase());
+}
+
 function parseArgs(args) {
   const options = { background: false, check: false, force: false, json: false, manifest: "", parentPid: 0 };
+  options.background = booleanFlag(args, "--background");
+  options.check = booleanFlag(args, "--check");
+  options.force = booleanFlag(args, "--force");
+  options.json = booleanFlag(args, "--json");
+  const booleanNames = ["--background", "--check", "--force", "--json"];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--background") options.background = true;
-    else if (arg === "--check") options.check = true;
-    else if (arg === "--force") options.force = true;
-    else if (arg === "--json") options.json = true;
-    else if (arg === "--manifest" && args[index + 1]) options.manifest = path.resolve(args[++index]);
-    else if (arg === "--parent-pid" && args[index + 1]) options.parentPid = Number(args[++index]);
-    else throw new Error(`unknown updater argument: ${arg}`);
+    let manifestValue = "";
+    let parentPidValue = "";
+    if (arg === "--manifest" && args[index + 1]) {
+      manifestValue = args[++index];
+    } else if (arg.startsWith("--manifest=")) {
+      manifestValue = arg.slice("--manifest=".length);
+    } else if (arg === "--parent-pid" && args[index + 1]) {
+      parentPidValue = args[++index];
+    } else if (arg.startsWith("--parent-pid=")) {
+      parentPidValue = arg.slice("--parent-pid=".length);
+    } else if (booleanNames.some((name) => isBooleanFlagArg(arg, name))) {
+      // Boolean flags, handled above (including =value forms).
+    } else if (arg === "--no-update-check" || arg === "--no-interactive" ||
+        arg.startsWith("--no-update-check=") || arg.startsWith("--no-interactive=")) {
+      // Global flags: accepted for CLI consistency, no effect here.
+    } else throw new Error(`unknown updater argument: ${arg}`);
+    if (manifestValue) options.manifest = path.resolve(manifestValue);
+    if (parentPidValue) options.parentPid = Number(parentPidValue);
   }
   if (!options.manifest) options.manifest = path.join(__dirname, ".gitcode-install.json");
   return options;
@@ -458,6 +489,10 @@ function run(options) {
       const note = prerelease ? ", a prerelease" : "";
       result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}); run "gitcode update" to install it.` };
     } else if (updateMode() === "off" && !options.force) {
+      // off disables the automatic daily checks, never an explicit command:
+      // --check and --force are both exempt (checked earlier in this chain),
+      // so `gitcode update` still installs under off — mirroring the npm
+      // channel's foreground semantics.
       result = { status: "disabled", distribution: "npm-bootstrap", current: manifest.version, latest, message: "Automatic updates are disabled." };
     } else {
       waitForParent(options.parentPid);

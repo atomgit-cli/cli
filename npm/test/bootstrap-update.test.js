@@ -467,3 +467,16 @@ test("bootstrap summarizeError collapses and bounds error text", () => {
   assert.strictEqual(summarizeError(long).length, 203);
   assert.ok(summarizeError(new Error("line1\nline2")).includes("line1 line2"));
 });
+
+test("bootstrap updater parseArgs accepts =value forms for all its flags", () => {
+  assert.deepStrictEqual(parseArgs(["--check=true", "--json=1", "--manifest=/tmp/m.json", "--parent-pid=42"]), {
+    background: false, check: true, force: false, json: true, manifest: "/tmp/m.json", parentPid: 42,
+  });
+  assert.deepStrictEqual(parseArgs(["--force=false", "--manifest=/tmp/m.json"]), {
+    background: false, check: false, force: false, json: false, manifest: "/tmp/m.json", parentPid: 0,
+  });
+  assert.deepStrictEqual(parseArgs(["--background=1", "--manifest=/tmp/m.json"]), {
+    background: true, check: false, force: false, json: false, manifest: "/tmp/m.json", parentPid: 0,
+  });
+  assert.throws(() => parseArgs(["--check=banana"]), /unknown updater argument/);
+});

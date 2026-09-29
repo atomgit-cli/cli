@@ -108,3 +108,13 @@ test("performUpdate distinguishes project-level pnpm dependencies from global in
     (error) => /pnpm-managed dependency/.test(error.message) && /pnpm update/.test(error.message)
   );
 });
+
+test("update parseArgs accepts boolean =value forms and rejects unknown flags", () => {
+  assert.deepStrictEqual(parseArgs(["--check=true", "--json=1"]), {
+    background: false, checkOnly: true, json: true, help: false,
+  });
+  assert.deepStrictEqual(parseArgs(["--background=false"]), {
+    background: false, checkOnly: false, json: false, help: false,
+  });
+  assert.throws(() => parseArgs(["--check=banana"]), /unknown update argument/);
+});

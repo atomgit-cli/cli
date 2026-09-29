@@ -284,19 +284,44 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	cmd.Env = updaterEnvironment()
 	// Capture the streams so a failed check can surface the helper's reason
 	// in the returned error (matching CheckNow's wrapping) instead of a bare
-	// "exit status 1"; everything captured is still forwarded to the
-	// caller's writers.
+	// "exit status 1". Captured stdout is always forwarded; the helper's
+	// stderr is forwarded only in text mode — in --json mode the returned
+	// error carries the detail, and forwarding it too would print the same
+	// reason twice.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if out != nil {
 		cmd.Stdout = io.MultiWriter(out, &stdout)
 	}
-	if errOut != nil {
+	if errOut != nil && !jsonOutput {
 		cmd.Stderr = io.MultiWriter(errOut, &stderr)
 	}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("update check failed: %s", truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err)))
+		detail := truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err))
+		if jsonOutput {
+			// The --json contract: stdout always carries exactly one JSON
+			// object. A helper killed by the deadline (or a crash before any
+			// output) leaves stdout empty, so synthesize the error object
+			// here instead of leaving the consumer with empty stdout and a
+			// non-zero exit.
+			var probe struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(stdout.Bytes(), &probe) != nil || probe.Status == "" {
+				synthesized := map[string]string{
+					"status":       "error",
+					"distribution": "npm-bootstrap",
+					"current":      manifest.Version,
+					"latest":       "",
+					"message":      "update check failed: " + detail,
+				}
+				if data, marshalErr := json.Marshal(synthesized); marshalErr == nil && out != nil {
+					fmt.Fprintln(out, string(data))
+				}
+			}
+		}
+		return fmt.Errorf("update check failed: %s", detail)
 	}
 	return nil
 }
