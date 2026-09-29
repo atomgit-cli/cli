@@ -1412,8 +1412,14 @@ test("foreignChannelHint routes uv and pipx console scripts to their own guidanc
 });
 
 test("a dangling symlink at the lock path fails with explicit guidance", (t) => {
+  // POSIX only: Windows open(O_CREAT|O_EXCL) on a dangling symlink creates
+  // the target instead of failing, so the claim path differs there.
+  if (process.platform === "win32") {
+    t.skip("POSIX symlink-at-lock semantics only");
+    return;
+  }
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-lock-symlink-"));
-  if (!createFileSymlinkOrSkip(t, "nowhere", path.join(root, ".gc-install-lock"))) return;
+  fs.symlinkSync("nowhere", path.join(root, ".gc-install-lock"), "file");
   assert.throws(() => acquireInstallLock(root), /symbolic link; remove it manually/);
 });
 
