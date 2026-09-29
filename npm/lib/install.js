@@ -356,7 +356,7 @@ function yarnChannelSymlinkError(dst) {
 // Channel-specific guidance for foreign symlinks, matched against both the
 // raw link text and the resolved path.
 const FOREIGN_SYMLINK_CHANNEL_HINTS = [
-  { marker: "/Cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
+  { marker: "/cellar/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/opt/homebrew/", guidance: 'this symlink belongs to a Homebrew installation; run "brew uninstall gc" first, or keep Homebrew and skip the npm bootstrap install' },
   { marker: "/uv/tools/", guidance: 'this symlink belongs to a uv-managed tool; run "uv tool uninstall gitcode-cli" first, or keep uv and skip the npm bootstrap install' },
   { marker: "/.bun/", guidance: 'this symlink belongs to a bun global installation; run "bun remove -g @gitcode-cli/cli" first, or keep bun and skip the npm bootstrap install' },

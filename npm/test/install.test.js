@@ -1432,3 +1432,25 @@ test("completionTarget produces both gc and gitcode names", () => {
     assert.notStrictEqual(gc, gitcode, shell);
   }
 });
+
+test("install gives Homebrew guidance for an Intel Mac Cellar symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-cellar-case-"));
+  const brewBin = path.join(root, "usr", "local", "Cellar", "gc", "0.14.0", "bin", "gc");
+  fs.mkdirSync(path.dirname(brewBin), { recursive: true });
+  fs.writeFileSync(brewBin, "brew-binary");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, brewBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "cellar-case"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /brew uninstall gc/.test(message);
+    }
+  );
+});
