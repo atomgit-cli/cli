@@ -281,7 +281,8 @@ test("bootstrap --json reports argument errors as JSON", () => {
   assert.match(payload.message, /unknown updater argument/);
 });
 
-test("a background bootstrap update re-checks the TTL under the lock", { timeout: 30000 }, () => {  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-cached-"));
+test("a background bootstrap update re-checks the TTL under the lock", { timeout: 30000 }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-cached-"));
   const stateDir = path.join(root, "state");
   fs.mkdirSync(stateDir, { recursive: true });
   const { stub, attemptsFile } = flakyNpmStub(root, 0, "9.9.9");
@@ -307,6 +308,65 @@ test("a background bootstrap update re-checks the TTL under the lock", { timeout
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
   assert.strictEqual(state.status, undefined, "a cached run must not touch the state");
   assert.strictEqual(fs.existsSync(attemptsFile), false, "the npm stub must not be invoked");
+});
+
+test("an explicit --force update after a foreground check still installs (Go update chain)", { timeout: 30000 }, () => {
+  // The Go `gitcode update` chain: CheckNow (--check, unconditionally writes
+  // nextCheck = +24h) then StartDetached(manifest, force=true) spawning
+  // --background --force. The under-lock TTL recheck must not swallow that
+  // forced spawn on the nextCheck the check itself just wrote (the regression
+  // the fifth review found: the install silently never happened).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gc-bootstrap-force-chain-"));
+  const stateDir = path.join(root, "state");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const { stub, attemptsFile } = flakyNpmStub(root, 0, "9.9.9");
+  // A fake installed entry for the post-install health check. POSIX only:
+  // on Windows the health check fails after the install attempt, which
+  // still proves the gate passed and the install path ran.
+  if (process.platform !== "win32") {
+    fs.writeFileSync(path.join(root, "gitcode"), "#!/bin/sh\necho '{\"version\":\"9.9.9\"}'\n", { mode: 0o755 });
+  }
+  const manifestFile = path.join(root, "install.json");
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    distribution: "npm-bootstrap",
+    version: "0.0.1",
+    targetDir: root,
+    npm: stub,
+    helper: path.join(root, "helper.js"),
+  }));
+  const helperPath = path.join(__dirname, "..", "lib", "bootstrap-update-helper.js");
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, GC_STATE_DIR: stateDir };
+
+  // STEP 1 — the foreground check: "available" and nextCheck = +24h.
+  const check = spawnSync(process.execPath, [helperPath, "--check", "--json", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env,
+  });
+  assert.strictEqual(check.status, 0, check.stderr);
+  assert.strictEqual(JSON.parse(check.stdout).status, "available");
+
+  // STEP 2 — the chain's forced background spawn must run the install.
+  const forced = spawnSync(process.execPath, [helperPath, "--background", "--force", "--manifest", manifestFile], {
+    encoding: "utf8",
+    timeout: 20000,
+    env,
+  });
+  const attempts = Number(fs.readFileSync(attemptsFile, "utf8"));
+  // STEP 1: one view. STEP 2 (fixed): view + exec. A swallowed spawn stops
+  // at one invocation.
+  assert.ok(attempts >= 3, `the forced update must run the install (attempts: ${attempts})`);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, "update-state.json"), "utf8"));
+  if (process.platform === "win32") {
+    assert.strictEqual(forced.status, 1, "the health check fails without a runnable gitcode.exe");
+    // The failure is the health check's entry spawn itself (result.error is
+    // thrown verbatim), so either message shape proves the install path ran.
+    assert.match(state.summary.message, /gitcode\.exe ENOENT|health check/, "the install path must have run to the health check");
+  } else {
+    assert.strictEqual(forced.status, 0, forced.stderr);
+    assert.match(state.summary.message, /Updated GitCode CLI 0\.0\.1 -> 9\.9\.9/);
+    assert.strictEqual(state.summary.shown, false, "the update summary is queued for the next launch");
+  }
 });
 
 test("bootstrap stale-lock reclamation stays single-owner under a reclaim race", () => {

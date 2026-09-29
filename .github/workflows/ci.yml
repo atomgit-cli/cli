@@ -101,6 +101,17 @@ jobs:
         shell: bash
         run: python3 -m unittest tests.test_wrapper -v
 
+      - name: Check generated package assets for drift
+        # build/ holds generated copies (gitcode completions, deb/rpm
+        # postinstall) consumed by nfpm; when scripts/ or completions/
+        # change without regenerating them, the release preflight fails.
+        # Catch the drift here, at PR time.
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          bash scripts/prepare-package-assets.sh
+          git diff --exit-code build/
+
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v6

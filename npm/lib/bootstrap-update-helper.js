@@ -437,8 +437,12 @@ function run(options) {
   try {
     // Re-check under the lock (mirrors lib/update.js): a foreground check
     // that finished while we waited for the lock must not be repeated, and
-    // its freshly written nextCheck/summary must not be overwritten.
-    if (options.background) {
+    // its freshly written nextCheck/summary must not be overwritten. An
+    // explicit --force spawn is exempt (mirrors the pre-lock gate): the Go
+    // `gitcode update` chain runs a --check first — which writes nextCheck —
+    // and then spawns --background --force; gating that on the TTL the check
+    // itself just wrote would silently skip the install the user asked for.
+    if (options.background && !options.force) {
       const pending = readJSON(stateFile);
       if (pending.permanentError || (pending.nextCheck && Number(pending.nextCheck) > Date.now())) {
         return { status: "cached", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Update check is not due yet." };
