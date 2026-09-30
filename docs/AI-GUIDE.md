@@ -98,7 +98,7 @@ gitcode version
 **从源码构建:**
 
 ```bash
-git clone https://gitcode.com/gitcode-cli/cli.git
+git clone https://gitcode.com/atomgit-cli/cli.git
 cd cli
 go build -o gc ./cmd/gc
 ```
@@ -330,7 +330,7 @@ AI 会自动使用 `gitcode` 命令执行操作。
 ## 更多信息
 
 - [命令详细文档](./COMMANDS.md)
-- [GitCode CLI 仓库](https://gitcode.com/gitcode-cli/cli)
+- [GitCode CLI 仓库](https://gitcode.com/atomgit-cli/cli)
 
 ---
 

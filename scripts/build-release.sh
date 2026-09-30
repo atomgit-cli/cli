@@ -9,7 +9,10 @@ VERSION=${1:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE=$(date -u +%Y-%m-%d)
 
+# darwin keeps its symbol table (-w only): -s drops LC_UUID, which dyld
+# requires (same policy as ci.yml and the goreleaser overrides).
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+LDFLAGS_DARWIN="-w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
 
 echo "Building gc ${VERSION} (commit: ${COMMIT}, date: ${DATE})"
 
@@ -25,11 +28,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/gc_
 
 # Build for Darwin AMD64
 echo "Building for darwin/amd64..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/gc_darwin_amd64 ./cmd/gc
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS_DARWIN}" -o dist/gc_darwin_amd64 ./cmd/gc
 
 # Build for Darwin ARM64
 echo "Building for darwin/arm64..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/gc_darwin_arm64 ./cmd/gc
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS_DARWIN}" -o dist/gc_darwin_arm64 ./cmd/gc
 
 # Build for Windows AMD64
 echo "Building for windows/amd64..."

@@ -37,7 +37,7 @@ npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@lat
 
 (For scoped coordinates, additionally pin the scope registry, e.g. `--@atomgit-cli:registry=https://registry.npmjs.org`.)
 
-Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions.
+Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions for both `gc` and `gitcode` (zsh: `~/.zsh/completions` must be on your `fpath` — see [Uninstall](#uninstall) below for all file locations).
 If an older installation left a same-directory `gitcode -> gc` alias, or bin symlinks resolving into one of our own npm package trees — a classic global install or a project-level `node_modules` (`proj/node_modules/@gitcode-cli/cli/...`) of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) — bootstrap migrates those verified links transactionally; pnpm (`/pnpm/global/` or `/.pnpm/` store) and yarn (`/yarn/global/`) symlinks are refused with their own removal guidance even when they resolve into our coordinates; links to any other target are never overwritten.
 On Windows it installs both `gc.exe` and `gitcode.exe`, then prepends the install directory to the persistent user PATH. Pass `--no-modify-path` to opt out. An npx child process cannot refresh the already-running PowerShell process, so the installer prints explicit Chinese instructions for refreshing `$env:Path` immediately or closing all PowerShell/Windows Terminal windows before reopening. It never changes the machine PATH or removes another package manager's entry. Use `gitcode` in PowerShell because `gc` is the built-in `Get-Content` alias.
 
@@ -82,6 +82,20 @@ The bootstrap installer refuses to replace a symlink at the install target. Syml
 - Otherwise remove the stale symlink manually, or install to another directory with `--target-dir <dir>`.
 
 After a successful migration, the old classic global package tree stays behind and can be removed with `npm uninstall -g <coordinate>` (for example `npm uninstall -g @gitcode-cli/cli`).
+
+### Uninstall
+
+`npm uninstall` removes the package files but intentionally leaves the bootstrap-installed binary, manifest, and shell completions in place (they live outside the package tree). To remove a bootstrap install manually:
+
+1. Delete `gc` and `gitcode` (on Windows: `gc.exe` / `gitcode.exe`) from the install directory, plus the adjacent `gitcode-update-helper.js` and `.gitcode-install.json`.
+2. Delete the completion files (all six, both command names):
+
+   - `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/gc` and `.../gitcode`
+     (if `BASH_COMPLETION_USER_DIR` is set, they live in its first entry's `completions/` instead)
+   - `~/.zsh/completions/_gc` and `_gitcode` (rerun `compinit` afterwards)
+   - `${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish` and `gitcode.fish`
+
+3. Run `gitcode doctor install` to confirm which providers (if any) still resolve on PATH.
 
 ## Supported platforms
 

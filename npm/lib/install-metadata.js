@@ -17,16 +17,57 @@ function normalizePath(value, isWin = process.platform === "win32") {
   return normalized;
 }
 
+// Mirrors Go's filepath.SplitList on Windows: a separator inside quotes
+// does not split, and all quotes are stripped from the resulting entries
+// (Go's SplitList keeps them, its callers Trim). POSIX PATH has no quoting
+// semantics and splits on ":".
 function pathEntries(env = process.env, isWin = process.platform === "win32") {
-  const delimiter = isWin ? ";" : ":";
-  return (env.PATH || env.Path || "")
-    .split(delimiter)
-    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean);
+  const raw = env.PATH || env.Path || "";
+  if (!isWin) {
+    return raw.split(":").map((entry) => entry.trim()).filter(Boolean);
+  }
+  const entries = [];
+  let start = 0;
+  let quoted = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '"') quoted = !quoted;
+    else if (c === ";" && !quoted) {
+      entries.push(raw.slice(start, i));
+      start = i + 1;
+    }
+  }
+  entries.push(raw.slice(start));
+  return entries.map((entry) => entry.replace(/"/g, "").trim()).filter(Boolean);
+}
+
+// Mirrors the Go doctor's windowsExecutableExtensions: PATHEXT order with
+// the documented default fallback, .ps1 always appended, extensionless last.
+function windowsExecutableExtensions(env = process.env) {
+  const raw = env.PATHEXT || env.PathExt || "";
+  const exts = [];
+  const seen = new Set();
+  const add = (ext) => {
+    if (!ext || seen.has(ext)) return;
+    seen.add(ext);
+    exts.push(ext);
+  };
+  for (let entry of raw.split(";")) {
+    entry = entry.trim();
+    if (!entry) continue;
+    if (!entry.startsWith(".")) entry = `.${entry}`;
+    add(entry.toLowerCase());
+  }
+  if (exts.length === 0) {
+    for (const ext of [".com", ".exe", ".bat", ".cmd"]) add(ext);
+  }
+  add(".ps1");
+  exts.push("");
+  return exts;
 }
 
 function commandCandidates(name, env = process.env, isWin = process.platform === "win32") {
-  const extensions = isWin ? [".exe", ".com", ".bat", ".cmd", ".ps1", ""] : [""];
+  const extensions = isWin ? windowsExecutableExtensions(env) : [""];
   const candidates = [];
   const seen = new Set();
   for (const dir of pathEntries(env, isWin)) {
@@ -315,6 +356,7 @@ module.exports = {
   npmInvocation,
   pathConflict,
   pathEntries,
+  windowsExecutableExtensions,
   readInstallMetadata,
   stateDir,
   writeInstallMetadata,

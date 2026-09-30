@@ -422,12 +422,15 @@ func (c *Client) PatchForm(path string, formValues url.Values, response interfac
 	return nil
 }
 
-// UploadToURL uploads a file to an external URL with custom headers
-func (c *Client) UploadToURL(uploadURL, filename string, content []byte, contentType string, headers map[string]string) error {
-	req, err := http.NewRequest("PUT", uploadURL, bytes.NewReader(content))
+// UploadToURL uploads a file to an external URL with custom headers. The
+// content streams from the reader; contentLength is set explicitly because
+// presigned upload URLs (S3/OSS style) reject chunked PUTs without a length.
+func (c *Client) UploadToURL(uploadURL, filename string, content io.Reader, contentLength int64, contentType string, headers map[string]string) error {
+	req, err := http.NewRequest("PUT", uploadURL, content)
 	if err != nil {
 		return fmt.Errorf("failed to create upload request: %w", err)
 	}
+	req.ContentLength = contentLength
 
 	// Set Content-Type
 	req.Header.Set("Content-Type", contentType)

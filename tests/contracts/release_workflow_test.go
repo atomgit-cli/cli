@@ -44,7 +44,8 @@ func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 		`CHECKSUM_LINE="$(grep -F`,
 		`test "${ACTUAL_PACKAGE_SHA}" = "${PACKAGE_SHA_EXPECTED}"`,
 		`package/bin/platforms/gc-linux-amd64`,
-		`refusing to move npm dist-tag backwards`,
+		// The backslide guard lives in scripts/npm-dist-tag-guard.mjs; the
+		// workflow must invoke it on BOTH the main publish path and recovery.
 		`npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"`,
 		`recovery-packages.tsv`,
 		`RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv`,
@@ -52,6 +53,13 @@ func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing npm recovery protection %q", required)
 		}
+	}
+
+	// The backslide guard (scripts/npm-dist-tag-guard.mjs) must run on BOTH
+	// the main publish path and the recovery path — a single Contains would
+	// stay green if either invocation were dropped.
+	if got := strings.Count(workflow, `node scripts/npm-dist-tag-guard.mjs "${VERSION_NUM}" "${CURRENT_TAG_VERSION}"`); got != 2 {
+		t.Errorf("dist-tag guard invocations = %d, want 2 (main publish + recovery)", got)
 	}
 }
 

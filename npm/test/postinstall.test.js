@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict, writeInstallMetadata } = require("../lib/install-metadata");
+const { commandCandidates, discoverGlobalInstall, normalizePath, pathConflict, pathEntries, windowsExecutableExtensions, writeInstallMetadata } = require("../lib/install-metadata");
 const { isGlobalInstall, runPostinstall } = require("../lib/postinstall");
 
 test("normalizes Windows paths case-insensitively and trims separators", () => {
@@ -317,4 +317,33 @@ test("discovery caches to the state dir when the package root is read-only", () 
   const third = ensureInstallMetadata(packageRoot, "2.0.0", options);
   assert.ok(third);
   assert.strictEqual(spawns, 4, "a version change re-runs discovery");
+});
+
+test("pathEntries keeps quoted Windows separators intact", () => {
+  // Mirrors Go's filepath.SplitList: separators inside quotes do not split,
+  // and quotes are stripped from the entries.
+  assert.deepStrictEqual(
+    pathEntries({ PATH: '"C:\\a;b";C:\\c' }, true),
+    ["C:\\a;b", "C:\\c"]
+  );
+  assert.deepStrictEqual(
+    pathEntries({ PATH: 'C:\\plain;C:\\other' }, true),
+    ["C:\\plain", "C:\\other"]
+  );
+  assert.deepStrictEqual(pathEntries({ PATH: "/a:/b" }, false), ["/a", "/b"]);
+});
+
+test("windowsExecutableExtensions follows PATHEXT with documented fallback", () => {
+  // Default order matches cmd.exe's documented PATHEXT, .ps1 is always
+  // appended (npm writes ps1 shims), extensionless stays last.
+  assert.deepStrictEqual(windowsExecutableExtensions({}), [".com", ".exe", ".bat", ".cmd", ".ps1", ""]);
+  assert.deepStrictEqual(
+    windowsExecutableExtensions({ PATHEXT: ".XYZ;.FOO" }),
+    [".xyz", ".foo", ".ps1", ""]
+  );
+  // Duplicates and missing leading dots are normalized.
+  assert.deepStrictEqual(
+    windowsExecutableExtensions({ PATHEXT: ".exe;EXE;.foo;.foo" }),
+    [".exe", ".foo", ".ps1", ""]
+  );
 });

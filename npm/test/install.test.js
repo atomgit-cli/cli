@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions, providerIsRunningPackage,
   firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
   persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
@@ -154,10 +154,99 @@ test("chooseGlobalBinDir returns the Windows per-user dir on win32 (no FS writab
 
 test("completionTarget maps each shell to a standard path", () => {
   const home = "/u/home";
-  assert.strictEqual(completionTarget("bash", home), path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
-  assert.strictEqual(completionTarget("zsh", home), path.join(home, ".zsh", "completions", "_gc"));
-  assert.strictEqual(completionTarget("fish", home), path.join(home, ".config", "fish", "completions", "gc.fish"));
-  assert.strictEqual(completionTarget("powershell", home), null);
+  assert.strictEqual(completionTarget("bash", home, "gc", {}), path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  assert.strictEqual(completionTarget("zsh", home, "gc", {}), path.join(home, ".zsh", "completions", "_gc"));
+  assert.strictEqual(completionTarget("fish", home, "gc", {}), path.join(home, ".config", "fish", "completions", "gc.fish"));
+  assert.strictEqual(completionTarget("powershell", home, "gc", {}), null);
+});
+
+test("completionTarget honors XDG and BASH_COMPLETION_USER_DIR", () => {
+  const home = "/u/home";
+  const xdg = { XDG_DATA_HOME: "/xdg/data", XDG_CONFIG_HOME: "/xdg/config" };
+  assert.strictEqual(completionTarget("bash", home, "gc", xdg), path.join("/xdg/data", "bash-completion", "completions", "gc"));
+  assert.strictEqual(completionTarget("fish", home, "gitcode", xdg), path.join("/xdg/config", "fish", "completions", "gitcode.fish"));
+  // Relative XDG values are treated as unset: targets must stay absolute.
+  assert.strictEqual(completionTarget("bash", home, "gc", { XDG_DATA_HOME: "rel/data" }),
+    path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  // bash-completion's own override wins for bash; zsh has no XDG standard.
+  assert.strictEqual(completionTarget("bash", home, "gc", { ...xdg, BASH_COMPLETION_USER_DIR: "/bcd" }),
+    path.join("/bcd", "completions", "gc"));
+  assert.strictEqual(completionTarget("zsh", home, "gc", xdg), path.join(home, ".zsh", "completions", "_gc"));
+});
+
+test("installCompletions installs six targets and pins the command name env per pass", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const calls = [];
+  const runner = (bin, args, options) => {
+    calls.push({ bin, args, env: options.env });
+    return { status: 0, stdout: "# completion script" };
+  };
+  // A polluted base env must not leak into the gc-named passes (the Go side
+  // resolves the command name env-first over argv[0]).
+  const result = installCompletions("/fake/bin/gc", home,
+    { env: { GITCODE_CLI_COMMAND_NAME: "gitcode" }, runner });
+  assert.strictEqual(result.installed.length, 6);
+  assert.strictEqual(result.skipped.length, 0);
+  for (const [shell, name] of [
+    ["bash", "gc"], ["bash", "gitcode"], ["zsh", "gc"], ["zsh", "gitcode"],
+    ["fish", "gc"], ["fish", "gitcode"],
+  ]) {
+    const call = calls.find((c) => c.args[0] === "completion" && c.args[1] === shell && c.env.GITCODE_CLI_COMMAND_NAME === name);
+    assert.ok(call, `missing ${shell} (${name}) pass`);
+  }
+  assert.ok(calls.every((c) => c.env.GC_NO_UPDATE_CHECK === "1"));
+});
+
+test("installCompletions emits the zsh fpath notice only when zsh files land", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const ok = { env: {}, runner: () => ({ status: 0, stdout: "# s" }) };
+  const result = installCompletions("/fake/gc", home, ok);
+  assert.strictEqual(result.installed.length, 6);
+  assert.strictEqual(result.notices.length, 1);
+  assert.match(result.notices[0], /fpath/);
+  assert.match(result.notices[0], /compinit/);
+
+  const failing = installCompletions("/fake/gc", home, { env: {}, runner: () => ({ status: 1, stdout: "" }) });
+  assert.strictEqual(failing.installed.length, 0);
+  assert.strictEqual(failing.notices.length, 0);
+});
+
+test("installCompletions skips shadowed command names without touching the other name", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const result = installCompletions("/fake/gc", home, {
+    env: {},
+    runner: () => ({ status: 0, stdout: "# s" }),
+    shadowedBy: { gc: "/usr/local/bin/gc" },
+  });
+  assert.strictEqual(result.installed.length, 3);
+  assert.ok(result.installed.every((entry) => entry.includes("(gitcode)")));
+  assert.strictEqual(result.skipped.length, 3);
+  assert.ok(result.skipped.every((entry) => entry.includes("shadowed by /usr/local/bin/gc")));
+});
+
+test("installCompletions attributes each skip reason", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const okRunner = () => ({ status: 0, stdout: "# s" });
+
+  // 1. The completion command itself fails.
+  const failing = installCompletions("/fake/gc", home, { env: {}, runner: () => ({ status: 1, stdout: "" }) });
+  assert.strictEqual(failing.skipped.length, 6);
+  assert.ok(failing.skipped.every((s) => s.endsWith("completion command failed")));
+
+  // 2. A symlink already sits at one bash target.
+  const bashGc = completionTarget("bash", home, "gc", {});
+  fs.mkdirSync(path.dirname(bashGc), { recursive: true });
+  fs.symlinkSync("/elsewhere", bashGc);
+  const withSymlink = installCompletions("/fake/gc", home, { env: {}, runner: okRunner });
+  assert.ok(withSymlink.skipped.some((s) => s.includes("bash (gc)") && s.includes("is a symlink")));
+  assert.strictEqual(withSymlink.installed.length, 5);
+
+  // 3. The zsh target parent cannot be created (regular file in the way).
+  const home2 = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  fs.writeFileSync(path.join(home2, ".zsh"), "not a directory");
+  const blocked = installCompletions("/fake/gc", home2, { env: {}, runner: okRunner });
+  assert.strictEqual(blocked.installed.length, 4);
+  assert.ok(blocked.skipped.every((s) => s.includes("zsh") && s.includes("not writable")));
 });
 
 test("dirOnPath reflects the current PATH delimiter", () => {
@@ -1425,8 +1514,8 @@ test("a dangling symlink at the lock path fails with explicit guidance", (t) => 
 
 test("completionTarget produces both gc and gitcode names", () => {
   for (const shell of ["bash", "zsh", "fish"]) {
-    const gc = completionTarget(shell, "/home/u");
-    const gitcode = completionTarget(shell, "/home/u", "gitcode");
+    const gc = completionTarget(shell, "/home/u", "gc", {});
+    const gitcode = completionTarget(shell, "/home/u", "gitcode", {});
     assert.ok(gc.endsWith("gc") || gc.endsWith("_gc") || gc.endsWith("gc.fish"), shell);
     assert.ok(gitcode.endsWith("gitcode") || gitcode.endsWith("_gitcode") || gitcode.endsWith("gitcode.fish"), shell);
     assert.notStrictEqual(gc, gitcode, shell);
@@ -1453,4 +1542,29 @@ test("install gives Homebrew guidance for an Intel Mac Cellar symlink", (t) => {
         /brew uninstall gc/.test(message);
     }
   );
+});
+
+test("providerIsRunningPackage detects the running package tree as self", () => {
+  // A provider inside the package running these tests is self — the npx
+  // flow prepends the package's own cache node_modules/.bin to PATH, and
+  // those shims must not count as a foreign provider.
+  const inside = path.join(__dirname, "..", "bin", "gc.js");
+  assert.strictEqual(providerIsRunningPackage(inside), true);
+  // Anything else is a real provider (an old global install, a third-party
+  // package).
+  assert.strictEqual(providerIsRunningPackage("/usr/local/bin/gc"), false);
+  assert.strictEqual(providerIsRunningPackage("/opt/other/bin/gitcode"), false);
+});
+
+test("completionTarget ignores relative BASH_COMPLETION_USER_DIR entries", () => {
+  const home = "/u/home";
+  // Relative entries are treated as unset, like relative XDG values.
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel/dir" }),
+    path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  // A list with one absolute entry takes that entry. "/abs dir" is
+  // absolute on both POSIX and win32 (root-relative), and the delimiter
+  // must follow the running platform.
+  const abs = "/abs dir";
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: `rel${path.delimiter}${abs}` }),
+    path.join(abs, "completions", "gc"));
 });

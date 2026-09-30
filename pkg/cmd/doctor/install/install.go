@@ -76,7 +76,16 @@ func Inspect(environ []string, goos, version, commit, built string) Report {
 	if entrypoint == "" {
 		entrypoint = binary
 	}
-	distribution := detectDistribution(env, binary)
+	// One canonical resolution for the whole report: DetectDistribution
+	// resolves internally, while the bootstrap targetDir check used to read
+	// the manifest next to the unresolved path — a symlinked invocation
+	// could report the channel from the resolved manifest yet silently
+	// skip the on-PATH check. Report.Binary keeps the invoked path.
+	resolvedBinary := binary
+	if resolved, err := filepath.EvalSymlinks(binary); err == nil && resolved != "" {
+		resolvedBinary = resolved
+	}
+	distribution := detectDistribution(env, resolvedBinary)
 	report := Report{
 		Version:           version,
 		Commit:            commit,
@@ -97,7 +106,7 @@ func Inspect(environ []string, goos, version, commit, built string) Report {
 		}
 		report.Commands[name] = CommandResolution{Selected: selected, Candidates: candidates}
 	}
-	addDiagnostics(&report, env, goos)
+	addDiagnostics(&report, env, goos, resolvedBinary)
 	return report
 }
 
@@ -120,7 +129,7 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 	pathValue := env["PATH"]
 	extensions := []string{""}
 	if goos == "windows" {
-		extensions = []string{".exe", ".com", ".bat", ".cmd", ".ps1", ""}
+		extensions = windowsExecutableExtensions(env["PATHEXT"])
 	}
 	seen := map[string]struct{}{}
 	var candidates []string
@@ -142,7 +151,49 @@ func commandCandidates(name string, env map[string]string, goos string) []string
 			}
 		}
 	}
+	if candidates == nil {
+		// JSON contract: commands.<name>.candidates is always an array,
+		// never null (the "not on PATH" case is the main diagnostic path).
+		return []string{}
+	}
 	return candidates
+}
+
+// windowsExecutableExtensions expands the user's PATHEXT order (cmd.exe
+// resolves extensions in that order, .COM before .EXE by default); the
+// fallback matches the documented default PATHEXT. .ps1 is always appended:
+// npm writes gc.ps1/gitcode.ps1 shims on every Windows install and doctor
+// promises to list every candidate. The extensionless form stays last so
+// Git Bash sh shims remain visible (within one directory the PATHEXT
+// extensions still win; a bare file earlier on PATH is a diagnostic, not a
+// resolution claim).
+func windowsExecutableExtensions(pathext string) []string {
+	var exts []string
+	seen := map[string]bool{}
+	add := func(ext string) {
+		if ext == "" || seen[ext] {
+			return
+		}
+		seen[ext] = true
+		exts = append(exts, ext)
+	}
+	for _, entry := range strings.Split(pathext, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !strings.HasPrefix(entry, ".") {
+			entry = "." + entry
+		}
+		add(strings.ToLower(entry))
+	}
+	if len(exts) == 0 {
+		for _, ext := range []string{".com", ".exe", ".bat", ".cmd"} {
+			add(ext)
+		}
+	}
+	add(".ps1")
+	return append(exts, "")
 }
 
 // transactionLeftoverPrefixes matches the temp/backup file names an
@@ -205,7 +256,7 @@ func transactionLeftovers(dir string) (files, symlinks []string) {
 	return files, symlinks
 }
 
-func addDiagnostics(report *Report, env map[string]string, goos string) {
+func addDiagnostics(report *Report, env map[string]string, goos, resolvedBinary string) {
 	// PATH-candidate directories only: membership answers "is this
 	// directory on PATH" (the leftover scan below uses a wider set).
 	pathDirs := map[string]struct{}{}
@@ -296,7 +347,7 @@ func addDiagnostics(report *Report, env map[string]string, goos string) {
 		// invocation by full path) is invisible to the candidate-based
 		// checks; a shadowed-but-on-PATH install is covered by the
 		// multiple-provider check above.
-		if target := manifestTargetDir(report.Binary); target != "" {
+		if target := manifestTargetDir(resolvedBinary); target != "" {
 			if _, ok := pathDirs[normalizedPath(target, goos)]; !ok {
 				report.Conflicts = append(report.Conflicts,
 					fmt.Sprintf("the bootstrap install at %s is not on PATH (invoked directly)", target))
@@ -399,6 +450,11 @@ func normalizedPath(value, goos string) string {
 
 func writeHuman(cmd *cobra.Command, report Report) {
 	out := cmd.OutOrStdout()
+	// Version first (COMMANDS.md documents this output): the first question
+	// when diagnosing an install is usually "which build is this".
+	fmt.Fprintf(out, "Version:      %s\n", emptyValue(report.Version))
+	fmt.Fprintf(out, "Commit:       %s\n", emptyValue(report.Commit))
+	fmt.Fprintf(out, "Built:        %s\n", emptyValue(report.Built))
 	fmt.Fprintf(out, "Distribution: %s\n", report.Distribution)
 	fmt.Fprintf(out, "Entrypoint:   %s\n", report.Entrypoint)
 	fmt.Fprintf(out, "Binary:       %s\n", report.Binary)

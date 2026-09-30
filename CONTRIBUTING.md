@@ -192,7 +192,7 @@ Real command verification still requires a valid token and must only target
 
 ```bash
 # Clone the repository
-git clone https://gitcode.com/gitcode-cli/cli.git
+git clone https://gitcode.com/atomgit-cli/cli.git
 cd gitcode-cli
 
 # Install dependencies

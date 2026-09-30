@@ -13,6 +13,7 @@ import (
 	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
+	"gitcode.com/gitcode-cli/cli/pkg/output"
 )
 
 type ListOptions struct {
@@ -157,7 +158,7 @@ func listRun(opts *ListOptions) error {
 			// Show first line of body
 			lines := strings.Split(r.Body, "\n")
 			if len(lines) > 0 && lines[0] != "" {
-				fmt.Fprintf(opts.IO.Out, "  %s\n", truncate(lines[0], 60))
+				fmt.Fprintf(opts.IO.Out, "  %s\n", output.Truncate(lines[0], 60))
 			}
 		}
 		fmt.Fprintf(opts.IO.Out, "  %s\n", r.HTMLURL)
@@ -234,11 +235,4 @@ func sortReleasesByDate(releases []api.Release) {
 
 func parseRepo(repo string) (string, string, error) {
 	return cmdutil.ParseRepo(repo)
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }
