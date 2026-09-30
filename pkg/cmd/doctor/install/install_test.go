@@ -399,3 +399,179 @@ func TestInspectScansAllPathDirectoriesForLeftovers(t *testing.T) {
 		t.Fatalf("a leftover in a gc-less PATH directory must be reported, got %#v", report.Leftovers)
 	}
 }
+
+func TestInspectCandidatesJSONIsNullArray(t *testing.T) {
+	// The not-on-PATH case is doctor's main diagnostic path: candidates must
+	// serialize as [], never null (stable JSON contract).
+	dir := t.TempDir()
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaped struct {
+		Commands map[string]struct {
+			Candidates json.RawMessage `json:"candidates"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(data, &shaped); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"gc", "gitcode"} {
+		resolution, ok := shaped.Commands[name]
+		if !ok {
+			t.Fatalf("commands.%s missing from %s", name, data)
+		}
+		if got := strings.TrimSpace(string(resolution.Candidates)); got != "[]" {
+			t.Errorf("commands.%s.candidates = %s, want []", name, got)
+		}
+	}
+}
+
+func TestInspectNpmPrefixConflict(t *testing.T) {
+	root := t.TempDir()
+	prefix := filepath.Join(root, "npm-prefix")
+	packageRoot := filepath.Join(root, "pkg")
+	oldDir := filepath.Join(root, "old")
+	npmBin := prefix
+	if err := os.MkdirAll(npmBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{packageRoot, oldDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := []byte(`{"distribution":"npm","prefix":"` + prefix + `"}`)
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		goos        string
+		command     string
+		pathValue   string
+		wantNominal bool
+	}{
+		// Single-entry PATHs on purpose: filepath.SplitList is host-aware,
+		// so a ";"-joined list would not split on a Linux host (and ":" not
+		// on Windows). The branch under test is the prefix comparison and
+		// the windows no-/bin expectation, both exercisable with one dir.
+		// POSIX: the npm prefix's bin/ is the expected directory.
+		{name: "posix conflict", goos: "linux", command: "gitcode", pathValue: oldDir, wantNominal: true},
+		{name: "posix clean", goos: "linux", command: "gitcode", pathValue: filepath.Join(prefix, "bin"), wantNominal: false},
+		// Windows: the prefix itself is the expected directory (no /bin).
+		{name: "windows conflict", goos: "windows", command: "gitcode.exe", pathValue: oldDir, wantNominal: true},
+		{name: "windows clean", goos: "windows", command: "gitcode.exe", pathValue: prefix, wantNominal: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, dir := range []string{oldDir, npmBin} {
+				// The candidate must exist in both the shadowing directory
+				// and the expected one (windows uses the prefix itself).
+				target := dir
+				if tt.goos != "windows" && dir == npmBin {
+					target = filepath.Join(prefix, "bin")
+				}
+				if err := os.MkdirAll(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(target, tt.command), []byte("x"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			environ := []string{
+				"PATH=" + tt.pathValue,
+				"GITCODE_CLI_DISTRIBUTION=npm",
+				packageRootEnv + "=" + packageRoot,
+			}
+			report := Inspect(environ, tt.goos, "", "", "")
+			found := false
+			for _, conflict := range report.Conflicts {
+				if strings.Contains(conflict, "another gitcode command appears before the npm global bin directory") {
+					found = true
+				}
+			}
+			if found != tt.wantNominal {
+				t.Fatalf("prefix conflict = %v, want %v (conflicts: %v)", found, tt.wantNominal, report.Conflicts)
+			}
+		})
+	}
+}
+
+func TestDoctorInstallHumanOutputLeadsWithVersion(t *testing.T) {
+	f := cmdutil.TestFactory()
+	cmd := NewCmdInstall(f, "1.2.3", "abc", "today")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"Version:      1.2.3\n", "Commit:       abc\n", "Built:        today\n", "Distribution: "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+
+	// Empty build metadata degrades to the (not found) placeholder.
+	empty := NewCmdInstall(f, "", "", "")
+	var out2 bytes.Buffer
+	empty.SetOut(&out2)
+	empty.SetArgs([]string{})
+	if err := empty.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out2.String(), "Version:      (not found)\n") {
+		t.Errorf("empty version should print (not found):\n%s", out2.String())
+	}
+}
+
+func TestInspectSymlinkedBootstrapChecksOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "real")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(target, "gitcode")
+	if err := os.WriteFile(binary, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"distribution":"npm-bootstrap","targetDir":"` + target + `"}`)
+	if err := os.WriteFile(filepath.Join(target, ".gitcode-install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(root, "links")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(linkDir, "gitcode")
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(root, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report := Inspect([]string{"PATH=" + elsewhere, binaryEnv + "=" + link}, runtime.GOOS, "", "", "")
+	if report.Distribution != "npm-bootstrap" {
+		t.Fatalf("Distribution = %q, want npm-bootstrap", report.Distribution)
+	}
+	// The manifest is only visible through the resolved path; reading it
+	// next to the symlink used to silently skip the on-PATH check.
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected not-on-PATH conflict for symlinked bootstrap, got %v", report.Conflicts)
+	}
+}

@@ -130,3 +130,24 @@ func TestDetectDistributionAdjacentManifest(t *testing.T) {
 		t.Fatalf("adjacent manifest must win over path heuristics, got %q", got)
 	}
 }
+
+func TestDetectDistributionEmptyBinaryIgnoresCwdManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifest := []byte(`{"distribution":"npm-bootstrap"}`)
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	// filepath.Dir("") is ".": without the guard this reads the CWD manifest
+	// (e.g. doctor run from an npm package root) and misreports the channel.
+	if got := DetectDistribution(map[string]string{}, ""); got != "archive-or-source" {
+		t.Fatalf("DetectDistribution(empty binary) = %q, want archive-or-source", got)
+	}
+}
