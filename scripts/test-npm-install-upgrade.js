@@ -104,6 +104,28 @@ function assertVersion(entrypoint, expected, env) {
   if (actual !== expected) throw new Error(`${entrypoint} reported ${actual}, expected ${expected}`);
 }
 
+// The gc/gitcode completion scripts are named after their command, and
+// "gc" is a prefix of "gitcode": match the padded header line (bash/fish)
+// or the exact line (zsh) so one name can never satisfy the other's check.
+function assertCompletionFiles(home) {
+  const checks = [
+    [".local/share/bash-completion/completions/gc", /^# bash completion V2 for gc( |$)/],
+    [".local/share/bash-completion/completions/gitcode", /^# bash completion V2 for gitcode( |$)/],
+    [".zsh/completions/_gc", /^#compdef gc$/],
+    [".zsh/completions/_gitcode", /^#compdef gitcode$/],
+    [".config/fish/completions/gc.fish", /^# fish completion for gc( |$)/],
+    [".config/fish/completions/gitcode.fish", /^# fish completion for gitcode( |$)/],
+  ];
+  for (const [relative, pattern] of checks) {
+    const target = path.join(home, relative);
+    if (!fs.existsSync(target)) throw new Error(`completion file missing after install: ${target}`);
+    const firstLine = fs.readFileSync(target, "utf8").split("\n", 1)[0];
+    if (!pattern.test(firstLine)) {
+      throw new Error(`completion header mismatch at ${target}:\n${firstLine}`);
+    }
+  }
+}
+
 function main() {
   const tarball = buildPackage();
   fs.mkdirSync(prefix, { recursive: true });
@@ -140,8 +162,21 @@ function main() {
     throw new Error(`doctor did not diagnose npm shadowing: ${doctor.stdout}`);
   }
 
+  // Regression (#608): a user-exported GITCODE_CLI_COMMAND_NAME must not
+  // leak into the gc-named completion files written by the bootstrap
+  // install (the CLI resolves the command name env-first, overriding
+  // argv[0]). Install under an isolated HOME with the name exported as
+  // the opposite command and verify every file matches its own name.
+  const completionHome = fs.mkdtempSync(path.join(os.tmpdir(), "gc-completion-home-"));
+  const completionEnv = process.platform === "win32"
+    ? {}
+    : { HOME: completionHome, GITCODE_CLI_COMMAND_NAME: "gitcode" };
   run(process.execPath, [path.join(packageDir, "bin", "gc.js"), "install", "--target-dir", bootstrap], {
-    env: { PATH: process.env.PATH || "", Path: process.env.Path || process.env.PATH || "" },
+    env: {
+      PATH: process.env.PATH || "",
+      Path: process.env.Path || process.env.PATH || "",
+      ...completionEnv,
+    },
   });
   const bootstrapEntry = path.join(bootstrap, process.platform === "win32" ? "gitcode.exe" : "gitcode");
   assertVersion(bootstrapEntry, TEST_VERSION);
@@ -149,6 +184,7 @@ function main() {
   if (manifest.distribution !== "npm-bootstrap" || !manifest.sha256 || !fs.existsSync(manifest.helper)) {
     throw new Error(`invalid bootstrap manifest: ${JSON.stringify(manifest)}`);
   }
+  if (process.platform !== "win32") assertCompletionFiles(completionHome);
 
   process.stdout.write(`npm upgrade smoke passed: ${OLD_VERSION} -> ${TEST_VERSION} on ${process.platform}/${process.arch}\n`);
 }
