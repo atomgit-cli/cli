@@ -256,3 +256,80 @@ func TestUploadRunStreamsFileContentIntact(t *testing.T) {
 		t.Errorf("Content-Length = %d, want %d", putLength, int64(len(payload)))
 	}
 }
+
+func TestUploadRunReleaseNotFoundIsWrapped(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	ioStreams, _, _, _ := iostreams.Test()
+	filePath := filepath.Join(t.TempDir(), "asset.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	err := uploadRun(&UploadOptions{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v9.9.9",
+		Files:      []string{filePath},
+	})
+	if err == nil || !strings.Contains(err.Error(), "release v9.9.9 not found in owner/repo") {
+		t.Fatalf("error = %v, want wrapped not-found", err)
+	}
+	if code := cmdutil.ExitCode(err); code != 3 {
+		t.Errorf("exit code = %d, want 3", code)
+	}
+}
+
+func TestUploadRunRefusesDirectoryAndBatchDuplicates(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	ioStreams, _, _, _ := iostreams.Test()
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	twinA := filepath.Join(dir, "a", "tool.txt")
+	twinB := filepath.Join(dir, "b", "tool.txt")
+	for _, f := range []string{twinA, twinB} {
+		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v5/repos/owner/repo/releases/tags/v1.0.0") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tag_name":"v1.0.0","assets":[]}`))
+			return
+		}
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	options := func(files ...string) *UploadOptions {
+		return &UploadOptions{
+			IO:         ioStreams,
+			HttpClient: func() (*http.Client, error) { return client, nil },
+			Repository: "owner/repo",
+			TagName:    "v1.0.0",
+			Files:      files,
+		}
+	}
+
+	// A directory argument is rejected by the stat check.
+	if err := uploadRun(options(inner)); err == nil || !strings.Contains(err.Error(), "cannot upload a directory") {
+		t.Errorf("directory error = %v, want cannot-upload-a-directory", err)
+	}
+	// Two files with the same basename conflict within the batch.
+	if err := uploadRun(options(twinA, twinB)); err == nil ||
+		!strings.Contains(err.Error(), "tool.txt (twice in this batch)") {
+		t.Errorf("batch duplicate error = %v, want batch-duplicate refusal", err)
+	}
+}

@@ -120,7 +120,7 @@ make check             # test + lint
 ```bash
 ./scripts/package.sh <version> [release|linux|deb|rpm|pypi]
 make release-local     # goreleaser 本地快照
-make release           # goreleaser 正式发布（需 tag）
+make release           # goreleaser 本地正式构建（不发布；正式发布走 release workflow）
 make completions       # 生成 shell 补全
 ```
 

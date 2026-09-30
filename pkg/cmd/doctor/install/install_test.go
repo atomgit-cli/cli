@@ -510,10 +510,11 @@ func TestDoctorInstallHumanOutputLeadsWithVersion(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"Version:      1.2.3\n", "Commit:       abc\n", "Built:        today\n", "Distribution: "} {
-		if !strings.Contains(got, want) {
-			t.Errorf("output missing %q:\n%s", want, got)
-		}
+	// The fix moved these three lines to the TOP of the report: pin the
+	// order, not just presence (Contains alone stays green if they drift
+	// to the bottom).
+	if !strings.HasPrefix(got, "Version:      1.2.3\nCommit:       abc\nBuilt:        today\nDistribution: ") {
+		t.Errorf("output header = %q, want version metadata leading the report", got[:min(len(got), 120)])
 	}
 
 	// Empty build metadata degrades to the (not found) placeholder.
@@ -573,5 +574,34 @@ func TestInspectSymlinkedBootstrapChecksOnPath(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected not-on-PATH conflict for symlinked bootstrap, got %v", report.Conflicts)
+	}
+}
+
+func TestWindowsExecutableExtensions(t *testing.T) {
+	// Mirrors the JS-side cases in npm/test/postinstall.test.js: the two
+	// doctor implementations must keep the same PATHEXT semantics.
+	tests := []struct {
+		name    string
+		pathext string
+		want    []string
+	}{
+		{"default fallback", "", []string{".com", ".exe", ".bat", ".cmd", ".ps1", ""}},
+		{"custom order", ".XYZ;.FOO", []string{".xyz", ".foo", ".ps1", ""}},
+		{"pathtext order wins", ".COM;.EXE;.BAT;.CMD", []string{".com", ".exe", ".bat", ".cmd", ".ps1", ""}},
+		{"dedupe and dotless entries", ".exe;EXE;.foo;.foo", []string{".exe", ".foo", ".ps1", ""}},
+		{"ps1 already present is not duplicated", ".exe;.ps1", []string{".exe", ".ps1", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := windowsExecutableExtensions(tt.pathext)
+			if len(got) != len(tt.want) {
+				t.Fatalf("windowsExecutableExtensions(%q) = %v, want %v", tt.pathext, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("windowsExecutableExtensions(%q)[%d] = %q, want %q (full: %v)", tt.pathext, i, got[i], tt.want[i], got)
+				}
+			}
+		})
 	}
 }

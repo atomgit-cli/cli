@@ -215,7 +215,10 @@ func downloadAsset(asset api.ReleaseAsset, outputDir string, httpClient *http.Cl
 	}
 	// An existing file is the user's data: refuse by default (gh release
 	// download semantics) instead of silently clobbering it.
-	if _, err := os.Stat(outputPath); err == nil {
+	if info, statErr := os.Stat(outputPath); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf("output path is a directory: %s", outputPath)
+		}
 		if skipExisting {
 			fmt.Fprintf(out, "%s Skipped %s (exists)\n", cs.Yellow("!"), asset.Name)
 			return nil

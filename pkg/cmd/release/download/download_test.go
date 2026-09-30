@@ -744,8 +744,14 @@ func TestDownloadClobberAndSkipExistingAreMutuallyExclusive(t *testing.T) {
 	f := cmdutil.TestFactory()
 	cmd := NewCmdDownload(f, nil)
 	cmd.SetArgs([]string{"v1.0.0", "app.tar.gz", "-R", "owner/repo", "--clobber", "--skip-existing"})
-	if err := cmd.Execute(); err == nil {
+	err := cmd.Execute()
+	if err == nil {
 		t.Fatal("Execute() error = nil, want mutual-exclusion error")
+	}
+	// Pin the cobra flag-group error: a bare err != nil also passes when
+	// the flags are merely incompatible for unrelated reasons (e.g. auth).
+	if !strings.Contains(err.Error(), "flags in the group") {
+		t.Fatalf("error = %v, want cobra mutually-exclusive flags error", err)
 	}
 }
 

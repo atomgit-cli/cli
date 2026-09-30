@@ -127,8 +127,18 @@ func uploadRun(opts *UploadOptions) error {
 		existing[asset.Name] = true
 	}
 	var conflicts []string
+	seenFiles := map[string]bool{}
 	for _, file := range opts.Files {
-		if name := filepath.Base(file); existing[name] {
+		name := filepath.Base(file)
+		// Batch-internal duplicates hit the same undefined platform
+		// overwrite behavior as a release-side conflict; catch them up
+		// front with the same error.
+		if seenFiles[name] {
+			conflicts = append(conflicts, fmt.Sprintf("%s (twice in this batch)", name))
+			continue
+		}
+		seenFiles[name] = true
+		if existing[name] {
 			conflicts = append(conflicts, name)
 		}
 	}

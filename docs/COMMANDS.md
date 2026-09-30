@@ -2112,7 +2112,7 @@ gc release upload v1.0.0 app.zip -R infra-test/gctest1 --json
 - `--label` 参数当前不受 GitCode release upload API 支持；CLI 现在会直接报错，不再静默忽略。
 - 上传前检查同名资产：release 中已存在同名资产时整批拒绝（错误信息提示先 `gc release delete-asset` 删除或改名再传），不会部分上传。
 - 多文件上传时任一文件失败即中止，错误信息附带本次已成功上传的文件清单。
-- 文件以流式上传（不整文件读入内存）；`--json` 仍只在全部文件上传完成后输出。
+- 文件以流式上传（不整文件读入内存）。
 - `--json` 只在所有文件上传完成后输出上传结果数组；每项包含 `name`、`path`、`size` 和 `content_type`，不会混入文本提示。
 
 ### release download - 下载资产
@@ -3713,8 +3713,8 @@ gc completion zsh > ~/.zsh/completions/_gc
 # fish
 gc completion fish > ${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish
 
-# PowerShell（Windows 下用 gitcode 调用，gc 是 Get-Content 别名）
-gitcode completion powershell > $PROFILE.Completions
+# PowerShell（Windows 下用 gitcode 调用，gc 是 Get-Content 别名；profile 不存在时先 New-Item -ItemType File -Path $PROFILE -Force）
+gitcode completion powershell >> $PROFILE
 
 # 生成不含描述的精简版本
 gc completion bash --no-descriptions
@@ -3723,7 +3723,7 @@ gc completion bash --no-descriptions
 说明：
 - cobra 内建命令，支持 `bash` / `zsh` / `fish` / `powershell` 四种 shell，脚本输出到 stdout。
 - 命令名跟随调用名与 `GITCODE_CLI_COMMAND_NAME`：`gitcode` 启动或显式设置时生成 gitcode 命名版本（见 version 节的命令名说明）。
-- npm 渠道安装器会自动安装 gc 与 gitcode 双名补全（bash/zsh/fish；Windows 跳过，用上面的 powershell 命令）；zsh 需 `fpath` 配置才会加载（见 npm README 的 Uninstall 小节了解补全文件位置）。
+- npm 渠道安装器会自动安装 gc 与 gitcode 双名补全（bash/zsh/fish；Windows 跳过，用上面的 powershell 命令）。跳过项（如某命令名被 PATH 上其他提供者占用）会在安装输出中逐一列明；zsh 需 `fpath` 配置才会加载（见 npm README 的 Uninstall 小节了解补全文件位置）。
 - 本命令不进入 schema 命令树（见 schema 节说明）。
 
 ### schema - 命令元数据

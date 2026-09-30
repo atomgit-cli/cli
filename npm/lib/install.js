@@ -140,9 +140,12 @@ function completionTarget(shell, home, commandName = "gc", env = process.env) {
   switch (shell) {
     case "bash": {
       // bash-completion >= 2.12 honors $BASH_COMPLETION_USER_DIR first (a
-      // path list); each entry gets a completions/ subdirectory.
+      // path list); each entry gets a completions/ subdirectory. Relative
+      // entries are ignored, same policy as the XDG vars above.
       const userDir = String(env.BASH_COMPLETION_USER_DIR || "")
-        .split(path.delimiter).map((s) => s.trim()).find(Boolean);
+        .split(path.delimiter)
+        .map((s) => s.trim())
+        .find((s) => s && path.isAbsolute(s));
       return path.join(userDir ? path.join(userDir, "completions")
         : path.join(dataHome, "bash-completion", "completions"), name);
     }
@@ -626,6 +629,23 @@ function writeCompletionFile(target, content) {
   return { skipped: false };
 }
 
+// providerIsRunningPackage reports whether a PATH provider resolves into the
+// package tree that is running this installer. `npx <coordinate> install`
+// (the primary install path) prepends the package's own npx-cache
+// node_modules/.bin to PATH: those gc/gitcode shims are this very install,
+// not a foreign provider, and treating them as a shadow would skip every
+// completion file. A different persistent install of our coordinate (an old
+// global npm tree) resolves elsewhere and still counts as a shadow.
+function providerIsRunningPackage(provider) {
+  try {
+    const resolved = fs.realpathSync(provider);
+    const packageRoot = fs.realpathSync(path.resolve(__dirname, ".."));
+    return resolved === packageRoot || resolved.startsWith(packageRoot + path.sep);
+  } catch {
+    return false;
+  }
+}
+
 function installCompletions(bin, home, options = {}) {
   const env = options.env || process.env;
   const shadowedBy = options.shadowedBy || {};
@@ -680,7 +700,7 @@ function installCompletions(bin, home, options = {}) {
     // files are written but never loaded, while the summary claims success.
     notices.push(
       `zsh: ${path.join(home, ".zsh", "completions")} is not on zsh's default fpath; ` +
-        `add 'fpath=(~/.zsh/completions $fpath)' to your .zshrc and run 'compinit' (see the README Shell completion section)`
+        `add 'fpath=(~/.zsh/completions $fpath)' to your .zshrc and run 'compinit' (see the Uninstall section of the npm README for all completion file locations)`
     );
   }
   return { installed, skipped, notices };
@@ -1357,7 +1377,8 @@ async function runInstall(args = []) {
   if (!isWin) {
     for (const name of ["gc", "gitcode"]) {
       const provider = firstProviderOnPath(name);
-      if (provider && path.resolve(path.dirname(provider)) !== path.resolve(dir)) {
+      if (provider && !providerIsRunningPackage(provider) &&
+          path.resolve(path.dirname(provider)) !== path.resolve(dir)) {
         shadowedBy[name] = provider;
       }
     }
@@ -1419,6 +1440,7 @@ async function runInstall(args = []) {
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
   ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions,
+  providerIsRunningPackage,
   firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,

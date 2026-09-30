@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions, providerIsRunningPackage,
   firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
   persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
@@ -1542,4 +1542,26 @@ test("install gives Homebrew guidance for an Intel Mac Cellar symlink", (t) => {
         /brew uninstall gc/.test(message);
     }
   );
+});
+
+test("providerIsRunningPackage detects the running package tree as self", () => {
+  // A provider inside the package running these tests is self — the npx
+  // flow prepends the package's own cache node_modules/.bin to PATH, and
+  // those shims must not count as a foreign provider.
+  const inside = path.join(__dirname, "..", "bin", "gc.js");
+  assert.strictEqual(providerIsRunningPackage(inside), true);
+  // Anything else is a real provider (an old global install, a third-party
+  // package).
+  assert.strictEqual(providerIsRunningPackage("/usr/local/bin/gc"), false);
+  assert.strictEqual(providerIsRunningPackage("/opt/other/bin/gitcode"), false);
+});
+
+test("completionTarget ignores relative BASH_COMPLETION_USER_DIR entries", () => {
+  const home = "/u/home";
+  // Relative entries are treated as unset, like relative XDG values.
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel/dir" }),
+    path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  // A list with one absolute entry takes that entry.
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel:/abs dir" }),
+    path.join("/abs dir", "completions", "gc"));
 });

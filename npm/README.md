@@ -91,6 +91,7 @@ After a successful migration, the old classic global package tree stays behind a
 2. Delete the completion files (all six, both command names):
 
    - `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/gc` and `.../gitcode`
+     (if `BASH_COMPLETION_USER_DIR` is set, they live in its first entry's `completions/` instead)
    - `~/.zsh/completions/_gc` and `_gitcode` (rerun `compinit` afterwards)
    - `${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish` and `gitcode.fish`
 
