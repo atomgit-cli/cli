@@ -128,13 +128,13 @@ go build -o ./gc ./cmd/gc
 
 ### 6.4 同步文档版本号
 
-`README.md` 与 `docs/PACKAGING.md` 含版本号绑定的下载 URL 与示例，必须随发版同步，否则滞后（见 #314）。使用专用脚本自动探测当前版本串并替换为目标版本，幂等，替换后校验无残留：
+`README.md`、`docs/PACKAGING.md` 与 `docs/AI-GUIDE.md` 含版本号绑定的下载 URL 与示例，必须随发版同步，否则滞后（见 #314）。使用专用脚本自动探测各文件当前版本串并替换为目标版本（逐文件检测，部分滞后的文档树一次运行即可自愈），幂等，替换后校验无残留：
 
 ```bash
 ./scripts/sync-docs-version.sh vX.Y.Z
 ```
 
-脚本支持 `--dry-run` 预览。同步后提交到 `main`，再创建 tag，使 tag 指向的提交包含正确的文档版本引用。下载 URL 指向的 release 产物在 release 创建与上传完成后（§6.5）即生效。
+脚本支持 `--dry-run` 预览与 `--check` 校验。`--check` 同时是发布门禁：release workflow preflight 与 CI 均会在文档未引用目标版本时失败（三份文档各须包含 `releases/download/vX.Y.Z/` 下载 URL），修复方式即运行上面的同步命令后提交。同步后提交到 `main`，再创建 tag，使 tag 指向的提交包含正确的文档版本引用。下载 URL 指向的 release 产物在 release 创建与上传完成后（§6.5）即生效。
 
 ### 6.5 创建正式 tag、GitHub Release 与 PyPI 包
 
