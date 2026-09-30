@@ -2062,12 +2062,20 @@ gc release create v1.0.0 -R infra-test/gctest1 --title "v1.0.0" --notes "Release
 # 列出所有 Releases
 gc release list -R infra-test/gctest1
 
+# 列出 150 个（跨 API 页自动累积）
+gc release list -R infra-test/gctest1 --limit 150
+
+# 只取第 2 页（单次请求）
+gc release list -R infra-test/gctest1 --page 2
+
 # 输出 JSON
 gc release list -R infra-test/gctest1 --json
 ```
 
 说明：
 - `--limit`（默认 30）返回最新 N 个 release：CLI 向 API 请求 `direction=desc`（最新优先），客户端再按 `published_at`（缺失时回退 `created_at`）降序排序。
+- API 单页上限 100：`--limit` 超过 100 时 CLI 自动跨页累积取满 N 个（不会静默截断），累积完成后统一按发布时间排序再截取。
+- `--page N`（默认 0）显式取第 N 页（单次请求，语义对齐 `issue list`/`pr list`）；与大于 100 的 `--limit` 互斥，组合时报参数错误（退出码 2）。
 - 文本输出中只有最新一个正式 release 会标记为 `(latest)`。
 - 其他正式 release 会标记为 `(published)`；草稿和预发布仍分别显示 `(draft)`、`(pre-release)`。
 
