@@ -1561,7 +1561,10 @@ test("completionTarget ignores relative BASH_COMPLETION_USER_DIR entries", () =>
   // Relative entries are treated as unset, like relative XDG values.
   assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel/dir" }),
     path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
-  // A list with one absolute entry takes that entry.
-  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel:/abs dir" }),
-    path.join("/abs dir", "completions", "gc"));
+  // A list with one absolute entry takes that entry. "/abs dir" is
+  // absolute on both POSIX and win32 (root-relative), and the delimiter
+  // must follow the running platform.
+  const abs = "/abs dir";
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: `rel${path.delimiter}${abs}` }),
+    path.join(abs, "completions", "gc"));
 });
