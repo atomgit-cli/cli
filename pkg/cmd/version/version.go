@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cmdutil "gitcode.com/atomgit-cli/cli/pkg/cmdutil"
+	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 )
 
 // VersionInfo represents the JSON output for version command

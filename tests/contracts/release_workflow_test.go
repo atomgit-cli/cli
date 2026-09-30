@@ -44,7 +44,9 @@ func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 		`CHECKSUM_LINE="$(grep -F`,
 		`test "${ACTUAL_PACKAGE_SHA}" = "${PACKAGE_SHA_EXPECTED}"`,
 		`package/bin/platforms/gc-linux-amd64`,
-		`refusing to move npm dist-tag backwards`,
+		// The backslide guard lives in scripts/npm-dist-tag-guard.mjs; the
+		// workflow must invoke it (main publish path and recovery).
+		`node scripts/npm-dist-tag-guard.mjs "${VERSION_NUM}" "${CURRENT_TAG_VERSION}"`,
 		`npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"`,
 		`recovery-packages.tsv`,
 		`RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv`,
