@@ -23,8 +23,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    goarm:
-      - "6"
     ignore:
       - goos: windows
         goarch: arm64
@@ -90,16 +88,15 @@ changelog:
     - title: "Others"
       order: 999
 
+# Formula generation only: goreleaser runs with --skip=publish everywhere,
+# and the tap push is performed by the release workflow's brew job with its
+# own author and commit message (the commit_author/branch/commit_msg fields
+# only apply to goreleaser's own push, which never happens).
 brews:
   - name: gc
     repository:
       owner: atomgit-cli
       name: homebrew-tap
-      branch: main
-    commit_author:
-      name: github-actions[bot]
-      email: 41898282+github-actions[bot]@users.noreply.github.com
-    commit_msg_template: "chore: update gc formula for {{ .Tag }}"
     homepage: https://gitcode.com/atomgit-cli/cli
     description: GitCode CLI - Command line tool for GitCode
     license: MIT
@@ -112,19 +109,3 @@ brews:
     test: |
       assert_match "gc version", shell_output("#{bin}/gc version")
       assert_match "gitcode version", shell_output("#{bin}/gitcode version")
-
-release:
-  draft: false
-  prerelease: auto
-  mode: replace
-  footer: |
-    **Full Changelog**: https://gitcode.com/atomgit-cli/cli/compare/{{ .PreviousTag }}...{{ .Tag }}
-
-announce:
-  skip: false
-  twitter:
-    enabled: false
-  slack:
-    enabled: false
-  discord:
-    enabled: false

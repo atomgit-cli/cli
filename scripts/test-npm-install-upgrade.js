@@ -9,6 +9,10 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { resolveBinaryName } = require("../npm/lib/platform");
 
+// 0.10.3 is the first published version of the @gitcode-cli/cli coordinate.
+// Pin the install source explicitly: the repo has migrated coordinates
+// before (package.json name changes), and atomgit-cli@0.10.3 never existed.
+const OLD_COORDINATE = "@gitcode-cli/cli";
 const OLD_VERSION = "0.10.3";
 const TEST_VERSION = "9.9.9";
 const root = path.resolve(__dirname, "..");
@@ -130,7 +134,7 @@ function assertCompletionFiles(home) {
 function main() {
   const tarball = buildPackage();
   fs.mkdirSync(prefix, { recursive: true });
-  npm(["install", "-g", `${require("../npm/package.json").name}@${OLD_VERSION}`, "--prefix", prefix, "--no-audit", "--no-fund"]);
+  npm(["install", "-g", `${OLD_COORDINATE}@${OLD_VERSION}`, "--prefix", prefix, "--no-audit", "--no-fund"]);
   assertVersion(npmEntrypoint(), OLD_VERSION);
 
   writeShadow();

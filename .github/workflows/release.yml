@@ -485,6 +485,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false  # never cache in release builds
 
+      # The dist-tag guard script lives in the repo; the job previously ran
+      # without a checkout at all.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-assets
@@ -519,6 +525,19 @@ jobs:
               *) return 1 ;;
             esac
           }
+          # Depth-of-defense: never move a dist-tag backwards even when the
+          # version input passes preflight (e.g. republishing an older
+          # version whose tarballs were never on npm). Same guard as the
+          # recovery path, via the shared script.
+          for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
+            CURRENT_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
+            if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
+              node scripts/npm-dist-tag-guard.mjs "${VERSION_NUM}" "${CURRENT_TAG_VERSION}" || {
+                echo "::error::refusing to publish: ${PUBLISH_TAG} for ${COORDINATE} would move backwards (${CURRENT_TAG_VERSION} -> ${VERSION_NUM})"
+                exit 1
+              }
+            fi
+          done
           for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
             # Absolute path: a relative path with slashes makes npm treat the
             # tarball argument as a git shorthand spec instead of a file.
@@ -533,7 +552,7 @@ jobs:
                 echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
                 exit 1
               }
-              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}")"
+              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
               test "${TAG_VERSION}" = "${VERSION_NUM}" || {
                 echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} points to ${TAG_VERSION}, expected ${VERSION_NUM}"
                 exit 1
@@ -696,15 +715,19 @@ jobs:
           # Bounded retries absorb registry dist-tag propagation delay, which
           # already produced a false-negative recovery gate in v0.14.0.
           dist_tag_with_retry() {
-            local coordinate="$1" attempt tag_version
-            for attempt in 1 2 3; do
-              tag_version="$(npm view "${coordinate}" "dist-tags.${PUBLISH_TAG}")"
+            local coordinate="$1" attempt tag_version=""
+            # 12x15s matches the main publish path: registry propagation was
+            # observed at >35s in the v0.14.1 release. A failed lookup
+            # (registry hiccup) must consume a retry, not kill the step
+            # through errexit.
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              tag_version="$(npm view "${coordinate}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
               if [[ "${tag_version}" = "${VERSION_NUM}" ]]; then
                 printf '%s' "${tag_version}"
                 return 0
               fi
-              if [[ "${attempt}" -lt 3 ]]; then
-                sleep 10
+              if [[ "${attempt}" -lt 12 ]]; then
+                sleep 15
               fi
             done
             printf '%s' "${tag_version}"
@@ -713,24 +736,7 @@ jobs:
           while IFS=$'\t' read -r COORDINATE PACKAGE_NAME PACKAGE_SHA_EXPECTED <&3; do
             CURRENT_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
             if [[ -n "${CURRENT_TAG_VERSION}" ]]; then
-              node - "${VERSION_NUM}" "${CURRENT_TAG_VERSION}" <<'NODE'
-          function parse(value) {
-            const match = value.match(/^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$/);
-            if (!match) throw new Error(`unsupported release version: ${value}`);
-            return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] || null, Number(match[5] || 0)];
-          }
-          function compare(left, right) {
-            for (let index = 0; index < 3; index += 1) {
-              if (left[index] !== right[index]) return Math.sign(left[index] - right[index]);
-            }
-            if (left[3] === null || right[3] === null) return left[3] === right[3] ? 0 : (left[3] === null ? 1 : -1);
-            const rank = {alpha: 0, beta: 1, rc: 2};
-            return rank[left[3]] === rank[right[3]] ? Math.sign(left[4] - right[4]) : Math.sign(rank[left[3]] - rank[right[3]]);
-          }
-          if (compare(parse(process.argv[2]), parse(process.argv[3])) < 0) {
-            throw new Error(`refusing to move npm dist-tag backwards from ${process.argv[3]} to ${process.argv[2]}`);
-          }
-          NODE
+              node scripts/npm-dist-tag-guard.mjs "${VERSION_NUM}" "${CURRENT_TAG_VERSION}"
             fi
             PACKAGE_FILE="$(realpath "release-assets/${PACKAGE_NAME}")"
             if npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1; then
@@ -742,7 +748,10 @@ jobs:
                 echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
                 exit 1
               }
-              TAG_VERSION="$(dist_tag_with_retry "${COORDINATE}")"
+              if ! TAG_VERSION="$(dist_tag_with_retry "${COORDINATE}")"; then
+                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION:-unavailable}; expected ${VERSION_NUM}"
+                exit 1
+              fi
               test "${TAG_VERSION}" = "${VERSION_NUM}"
               echo "npm ${COORDINATE}@${VERSION_NUM} already published with identical content; skipping"
               rm -rf existing-npm

@@ -1,7 +1,11 @@
 # GitCode CLI Docker Image
 # Uses pre-built binary from GoReleaser
 
-FROM alpine:3.19
+# 3.19 reached end of life on 2025-11-01. 3.22 is supported until 2027-05-01.
+# TODO: pin the multi-arch index digest once registry access is available
+# (docker manifest inspect alpine:3.22) — a per-arch child digest would
+# break the linux/arm64 build.
+FROM alpine:3.22
 
 RUN apk add --no-cache \
     ca-certificates \
@@ -41,5 +45,5 @@ CMD ["--help"]
 LABEL org.opencontainers.image.title="GitCode CLI"
 LABEL org.opencontainers.image.description="Command line tool for GitCode"
 LABEL org.opencontainers.image.url="https://gitcode.com"
-LABEL org.opencontainers.image.source="https://github.com/gitcode-com/gitcode-cli"
+LABEL org.opencontainers.image.source="https://github.com/atomgit-cli/cli"
 LABEL org.opencontainers.image.vendor="GitCode"
