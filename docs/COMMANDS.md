@@ -3446,7 +3446,7 @@ gc config list --json
 
 ### config clear-cache - 清除缓存
 
-清除 CLI 缓存目录中的临时文件（API 缓存、补全脚本等），不影响认证和配置文件。
+清除 CLI 缓存目录中的文件，不影响认证和配置文件。
 
 ```bash
 gc config clear-cache
@@ -3695,6 +3695,31 @@ gc help --topic issues
 # 输出 JSON
 gc help --json
 ```
+
+### completion - 生成 Shell 补全脚本
+
+```bash
+# 生成 bash 补全（输出到 stdout，需自行重定向）
+gc completion bash > ${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/gc
+
+# zsh：目标目录需在 fpath 中，之后运行 compinit
+gc completion zsh > ~/.zsh/completions/_gc
+
+# fish
+gc completion fish > ${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish
+
+# PowerShell（Windows 下用 gitcode 调用，gc 是 Get-Content 别名）
+gitcode completion powershell > $PROFILE.Completions
+
+# 生成不含描述的精简版本
+gc completion bash --no-descriptions
+```
+
+说明：
+- cobra 内建命令，支持 `bash` / `zsh` / `fish` / `powershell` 四种 shell，脚本输出到 stdout。
+- 命令名跟随调用名与 `GITCODE_CLI_COMMAND_NAME`：`gitcode` 启动或显式设置时生成 gitcode 命名版本（见 version 节的命令名说明）。
+- npm 渠道安装器会自动安装 gc 与 gitcode 双名补全（bash/zsh/fish；Windows 跳过，用上面的 powershell 命令）；zsh 需 `fpath` 配置才会加载（见 npm README 的 Uninstall 小节了解补全文件位置）。
+- 本命令不进入 schema 命令树（见 schema 节说明）。
 
 ### schema - 命令元数据
 

@@ -128,16 +128,28 @@ function chooseGlobalBinDir(home, isWin, posixCandidates, brewCellarPath = "/usr
 }
 
 // Completion target dirs per shell (user-writable, auto-loaded where possible).
-// Pure: derives the path from the shell + home.
-function completionTarget(shell, home, commandName = "gc") {
+// Pure: derives the path from the shell + home + env. XDG overrides must be
+// absolute — relative values are treated as unset per the XDG spec (install
+// targets must land on concrete absolute paths).
+function completionTarget(shell, home, commandName = "gc", env = process.env) {
   const name = commandName === "gitcode" ? "gitcode" : "gc";
+  const dataHome = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME)
+    ? env.XDG_DATA_HOME : path.join(home, ".local", "share");
+  const configHome = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME)
+    ? env.XDG_CONFIG_HOME : path.join(home, ".config");
   switch (shell) {
-    case "bash":
-      return path.join(home, ".local", "share", "bash-completion", "completions", name);
+    case "bash": {
+      // bash-completion >= 2.12 honors $BASH_COMPLETION_USER_DIR first (a
+      // path list); each entry gets a completions/ subdirectory.
+      const userDir = String(env.BASH_COMPLETION_USER_DIR || "")
+        .split(path.delimiter).map((s) => s.trim()).find(Boolean);
+      return path.join(userDir ? path.join(userDir, "completions")
+        : path.join(dataHome, "bash-completion", "completions"), name);
+    }
     case "zsh":
       return path.join(home, ".zsh", "completions", `_${name}`);
     case "fish":
-      return path.join(home, ".config", "fish", "completions", `${name}.fish`);
+      return path.join(configHome, "fish", "completions", `${name}.fish`);
     default:
       return null;
   }
@@ -551,14 +563,18 @@ function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function runGc(bin, args, extraEnv = {}) {
-  return spawnSync(bin, args, {
+function runGc(bin, args, extraEnv = {}, options = {}) {
+  // runner/env injection mirrors persistWindowsUserPath: tests drive the
+  // loop without spawning the real binary.
+  const runner = options.runner || spawnSync;
+  const baseEnv = options.env || process.env;
+  return runner(bin, args, {
     encoding: "utf8",
     // A blocked child (AV scanning the fresh binary, hung shell) must not
     // hang the whole install indefinitely.
     timeout: 30000,
     env: {
-      ...process.env,
+      ...baseEnv,
       ...extraEnv,
       // The installer's own probes must not run the update lifecycle: the
       // spawned binary reads the adjacent bootstrap manifest and would
@@ -610,25 +626,38 @@ function writeCompletionFile(target, content) {
   return { skipped: false };
 }
 
-function installCompletions(bin, home) {
+function installCompletions(bin, home, options = {}) {
+  const env = options.env || process.env;
+  const shadowedBy = options.shadowedBy || {};
   const installed = [];
   const skipped = [];
+  const notices = [];
   // Both command names get completions (matching the deb/rpm packages,
   // which ship gc and gitcode scripts). Every pass pins the command name
   // env: resolveCommandName honors the environment over argv[0], so a
   // user-exported GITCODE_CLI_COMMAND_NAME would otherwise leak into the
   // gc-named scripts and silently break "gc <TAB>".
+  let zshInstalled = false;
   for (const [shell, commandName] of [
     ["bash", "gc"], ["bash", "gitcode"],
     ["zsh", "gc"], ["zsh", "gitcode"],
     ["fish", "gc"], ["fish", "gitcode"],
   ]) {
-    const res = runGc(bin, ["completion", shell], { GITCODE_CLI_COMMAND_NAME: commandName });
+    // A command name that PATH resolves to a different provider must not
+    // get a completion file: shells load completions by command name, so
+    // the script would serve the foreign binary instead of this install.
+    const shadowProvider = shadowedBy[commandName];
+    if (shadowProvider) {
+      skipped.push(`${shell} (${commandName}): shadowed by ${shadowProvider}; completion skipped`);
+      continue;
+    }
+    const res = runGc(bin, ["completion", shell], { GITCODE_CLI_COMMAND_NAME: commandName },
+      { runner: options.runner, env });
     if (res.status !== 0 || !res.stdout) {
       skipped.push(`${shell} (${commandName}): completion command failed`);
       continue;
     }
-    const target = completionTarget(shell, home, commandName);
+    const target = completionTarget(shell, home, commandName, env);
     if (!target) {
       skipped.push(`${shell} (${commandName}): no completion target`);
       continue;
@@ -640,12 +669,21 @@ function installCompletions(bin, home) {
         skipped.push(`${shell} (${commandName}): ${target} is a symlink`);
         continue;
       }
+      if (shell === "zsh") zshInstalled = true;
       installed.push(`${shell} (${commandName}): ${target}`);
     } catch {
       skipped.push(`${shell} (${commandName}): ${target} not writable`);
     }
   }
-  return { installed, skipped };
+  if (zshInstalled) {
+    // ~/.zsh/completions is not on stock zsh's fpath; without this the
+    // files are written but never loaded, while the summary claims success.
+    notices.push(
+      `zsh: ${path.join(home, ".zsh", "completions")} is not on zsh's default fpath; ` +
+        `add 'fpath=(~/.zsh/completions $fpath)' to your .zshrc and run 'compinit' (see the README Shell completion section)`
+    );
+  }
+  return { installed, skipped, notices };
 }
 
 // Whether the per-user fallback dir is on PATH (pure).
@@ -1312,8 +1350,21 @@ async function runInstall(args = []) {
     releaseInstallLock(installLock);
   }
 
-  // Completions (posix only; Windows shell completion differs).
-  const completions = isWin ? { installed: [], skipped: [] } : installCompletions(dst, home);
+  // Completions (posix only; Windows shell completion differs). The shadow
+  // map is computed before any file is written: a command name PATH resolves
+  // to another provider must not get a completion registered under it.
+  let shadowedBy = {};
+  if (!isWin) {
+    for (const name of ["gc", "gitcode"]) {
+      const provider = firstProviderOnPath(name);
+      if (provider && path.resolve(path.dirname(provider)) !== path.resolve(dir)) {
+        shadowedBy[name] = provider;
+      }
+    }
+  }
+  const completions = isWin
+    ? { installed: [], skipped: [], notices: [] }
+    : installCompletions(dst, home, { shadowedBy });
   const windowsPathResult = isWin && options.modifyPath
     ? persistWindowsUserPath(dir)
     : { ok: true, changed: false };
@@ -1324,7 +1375,9 @@ async function runInstall(args = []) {
     process.stdout.write(`Shell completions installed:\n`);
     for (const c of completions.installed) process.stdout.write(`  ${c}\n`);
   } else if (isWin) {
-    process.stdout.write(`Shell completions: skipped on Windows. Run "gc completion bash|powershell" manually if needed.\n`);
+    // PowerShell resolves "gc" as Get-Content; the runnable name there is
+    // gitcode (see postinstall guidance and the final line below).
+    process.stdout.write(`Shell completions: skipped on Windows. Run "gitcode completion powershell" manually if needed.\n`);
   } else {
     process.stdout.write(`Shell completions: none installed. Run "gc completion bash|zsh|fish" manually.\n`);
   }
@@ -1333,21 +1386,23 @@ async function runInstall(args = []) {
   for (const s of completions.skipped) {
     process.stdout.write(`  skipped: ${s}\n`);
   }
+  // Advisory notes (e.g. zsh needs fpath setup before files load).
+  for (const n of completions.notices) {
+    process.stdout.write(`  note: ${n}\n`);
+  }
 
   // PATH registration and guidance.
   if (isWin) {
     process.stdout.write(windowsPathGuidance(dir, options, windowsPathResult));
   } else {
-    // Shadowing check: another provider earlier on PATH would win over the
-    // fresh install (mirrors the npm-channel postinstall warning).
-    for (const name of ["gc", "gitcode"]) {
-      const provider = firstProviderOnPath(name);
-      if (provider && path.resolve(path.dirname(provider)) !== path.resolve(dir)) {
-        process.stdout.write(
-          `Warning: PATH resolves "${name}" to ${provider}; the new installation is at ${dir}.\n` +
-            `  Move ${dir} earlier on PATH, or remove the other provider (run "gc doctor install" for details).\n`
-        );
-      }
+    // Shadowing warnings: another provider earlier on PATH wins over the
+    // fresh install (mirrors the npm-channel postinstall warning). The map
+    // was computed before installing completions; reuse it.
+    for (const [name, provider] of Object.entries(shadowedBy)) {
+      process.stdout.write(
+        `Warning: PATH resolves "${name}" to ${provider}; the new installation is at ${dir}.\n` +
+          `  Move ${dir} earlier on PATH, or remove the other provider (run "gc doctor install" for details).\n`
+      );
     }
     if (dir === path.join(home, ".local", "bin")) {
       if (!dirOnPath(dir)) {
@@ -1363,7 +1418,7 @@ async function runInstall(args = []) {
 
 module.exports = {
   runInstall, chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions,
   firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
   helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs, persistWindowsUserPath,
   prependWindowsUserPath, pnpmChannelSymlinkError, quotePowerShell, replacePath, rollbackTransaction,

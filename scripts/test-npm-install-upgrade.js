@@ -169,9 +169,22 @@ function main() {
   // argv[0]). Install under an isolated HOME with the name exported as
   // the opposite command and verify every file matches its own name.
   const completionHome = fs.mkdtempSync(path.join(os.tmpdir(), "gc-completion-home-"));
+  // Empty strings neutralize any runner-exported XDG/BASH_COMPLETION vars so
+  // the assertions below can pin the default HOME-relative target paths. The
+  // install dir leads PATH so the just-installed binaries own both command
+  // names — on a machine with an existing gc install the shadow check would
+  // otherwise (correctly) skip every completion file.
   const completionEnv = process.platform === "win32"
     ? {}
-    : { HOME: completionHome, GITCODE_CLI_COMMAND_NAME: "gitcode" };
+    : {
+        HOME: completionHome,
+        GITCODE_CLI_COMMAND_NAME: "gitcode",
+        XDG_DATA_HOME: "",
+        XDG_CONFIG_HOME: "",
+        BASH_COMPLETION_USER_DIR: "",
+        PATH: `${bootstrap}${path.delimiter}${process.env.PATH || ""}`,
+        Path: `${bootstrap}${path.delimiter}${process.env.Path || process.env.PATH || ""}`,
+      };
   run(process.execPath, [path.join(packageDir, "bin", "gc.js"), "install", "--target-dir", bootstrap], {
     env: {
       PATH: process.env.PATH || "",
