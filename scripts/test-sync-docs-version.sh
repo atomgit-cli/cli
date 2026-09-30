@@ -95,6 +95,21 @@ for f in README.md docs/PACKAGING.md docs/AI-GUIDE.md; do
     expect_file_contains "${case_dir}/${f}" "template: releases/download/v{VERSION}/{FILENAME}" "normal upgrade"
 done
 
+# 1b. Left boundary: a longer version that merely ends with the old
+#     version (v10.6.1 while syncing 0.6.1) must survive both the replace
+#     and the residual check.
+new_case
+write_all_docs "0.6.1"
+for f in README.md docs/PACKAGING.md docs/AI-GUIDE.md; do
+    echo "see also v10.6.1 for the older major" >> "${case_dir}/${f}"
+done
+run_sync v0.7.0
+expect_status 0 "left boundary"
+for f in README.md docs/PACKAGING.md docs/AI-GUIDE.md; do
+    expect_file_contains "${case_dir}/${f}" "see also v10.6.1 for the older major" "left boundary"
+    expect_file_not_contains "${case_dir}/${f}" "v10.7.0 for the older major" "left boundary"
+done
+
 # 2. Old is a prefix of new (0.6.1 -> 0.6.10): the two-pass placeholders
 #    must not turn the new version into 0.6.100.
 new_case
@@ -117,6 +132,18 @@ expect_status 0 "drift self-heal"
 for f in README.md docs/PACKAGING.md docs/AI-GUIDE.md; do
     expect_file_contains "${case_dir}/${f}" "releases/download/v0.8.0/gc_0.8.0_amd64.deb" "drift self-heal"
 done
+
+# 3b. The silent no-op trap: the first file already at the target while
+#     another lags — the old README-only detection no-op'ed here; per-file
+#     detection must heal the lagging file in the same run.
+new_case
+write_doc "${case_dir}/README.md" "0.8.0"
+write_doc "${case_dir}/docs/PACKAGING.md" "0.8.0"
+write_doc "${case_dir}/docs/AI-GUIDE.md" "0.6.1"
+run_sync v0.8.0
+expect_status 0 "self-heal at target"
+expect_file_contains "${case_dir}/docs/AI-GUIDE.md" "releases/download/v0.8.0/gc_0.8.0_amd64.deb" "self-heal at target"
+expect_file_not_contains "${case_dir}/docs/AI-GUIDE.md" "releases/download/v0.6.1/" "self-heal at target"
 
 # 4. No-op: everything already at the target version.
 new_case

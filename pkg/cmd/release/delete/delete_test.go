@@ -181,6 +181,90 @@ func TestDeleteRun405WithoutHTMLURLFallsBack(t *testing.T) {
 	}
 }
 
+// Success path: the platform does not support deletes today, but if it
+// ever enables the endpoint this is the only lock on the success output.
+func TestDeleteRunSucceeds(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	t.Setenv("GITCODE_TOKEN", "")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	var deletePath string
+	opts := &DeleteOptions{
+		IO:         f.IOStreams,
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Yes:        true,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					if req.Method == "GET" {
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Header:     make(http.Header),
+							Body: io.NopCloser(strings.NewReader(
+								`{"tag_name":"v1.0.0","name":"rel","html_url":"https://gitcode.com/owner/repo/-/releases/v1.0.0","id":123}`)),
+						}, nil
+					}
+					deletePath = req.URL.Path
+					return &http.Response{
+						StatusCode: http.StatusNoContent,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(``)),
+					}, nil
+				}),
+			}, nil
+		},
+	}
+
+	if err := deleteRun(opts); err != nil {
+		t.Fatalf("deleteRun() error = %v", err)
+	}
+	if !strings.Contains(deletePath, "/releases/tags/v1.0.0") && !strings.Contains(deletePath, "/releases/") {
+		t.Errorf("delete path = %q, want a release delete endpoint", deletePath)
+	}
+	if !strings.Contains(out.String(), "Deleted release v1.0.0") {
+		t.Fatalf("output = %q, want success line", out.String())
+	}
+}
+
+func TestDeleteRunReleaseNotFoundIsWrapped(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	t.Setenv("GITCODE_TOKEN", "")
+	f := cmdutil.TestFactory()
+	f.IOStreams.Out = &strings.Builder{}
+
+	opts := &DeleteOptions{
+		IO:         f.IOStreams,
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Yes:        true,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(``)),
+					}, nil
+				}),
+			}, nil
+		},
+	}
+
+	err := deleteRun(opts)
+	if err == nil {
+		t.Fatal("deleteRun() error = nil, want not-found error")
+	}
+	if !strings.Contains(err.Error(), "release v1.0.0 not found in owner/repo") {
+		t.Fatalf("error = %q, want wrapped not-found message", err.Error())
+	}
+	if code := cmdutil.ExitCode(err); code != 3 {
+		t.Errorf("exit code = %d, want 3 (not found)", code)
+	}
+}
+
 func TestDeleteRunErrNoReleaseIDMessage(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 	t.Setenv("GITCODE_TOKEN", "")

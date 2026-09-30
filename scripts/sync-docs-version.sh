@@ -104,16 +104,26 @@ detect_doc_version() {
 
 # Escape regex metachars (dots) for LHS; new is RHS literal.
 new_re="${new_num//./\\.}"
-# Boundary-aware: version followed by non-digit or EOL, so 0.6.1 is not
-# falsely matched inside 0.6.10 and vice versa. The same boundary guards
-# the replace below: an unbounded prefix replace would corrupt a longer
-# version string (0.6.1 -> 0.7.0 would turn a v0.6.10 mention into
-# v0.7.00) and the residual check could not catch the damage.
-new_pat="v?${new_re}([^0-9]|$)"
+# Boundary-aware on both sides: the version must not be preceded or
+# followed by a digit, so 0.6.1 is not falsely matched inside 0.6.10,
+# 10.6.1 or v10.6.1. The same boundary guards the replace below: an
+# unbounded prefix replace would corrupt a longer version string
+# (0.6.1 -> 0.7.0 would turn a v10.6.1 mention into v10.7.0) and the
+# residual check would count the embedded old version inside the new
+# one (0.6.1 -> 10.6.1 stays "residual" forever).
+new_pat="(^|[^0-9])v?${new_re}([^0-9]|$)"
 # Two-pass placeholder replace: move old (v-prefixed + bare) to distinct
 # placeholders, then placeholders to new. Prevents corrupting the new
 # version when old_num is a string prefix of new_num (e.g. 0.6.1 -> 0.6.10
 # would otherwise turn v0.6.10 into v0.6.100).
+#
+# Known limitation of the consumed-boundary form: two occurrences of the
+# same version separated by a single boundary character (e.g. "0.6.1
+# 0.6.1") leave the second unmatched, because the first match consumes the
+# separating character. The residual check below then fails loudly (exit 1)
+# instead of silently missing it; docs never carry back-to-back same-
+# version tokens in practice (URLs and filenames keep other characters
+# between them).
 ptag="__GCDOC_VER_TAG__"
 pnum="__GCDOC_VER_NUM__"
 
@@ -131,14 +141,14 @@ for f in "${readme}" "${packaging}" "${ai_guide}"; do
         continue
     fi
     old_re="${old_num//./\\.}"
-    old_pat="v?${old_re}([^0-9]|$)"
+    old_pat="(^|[^0-9])v?${old_re}([^0-9]|$)"
     before=$(grep -c -E "${old_pat}" "${f}" || true)
     echo "  $(basename "${f}"): ${old_tag} -> ${new_tag} (${before} line(s))"
     if [[ ${dry_run} -eq 1 ]]; then
         echo "  [dry-run] would touch ${before} line(s) in $(basename "${f}")"
         continue
     fi
-    sed -E -i "s/v${old_re}([^0-9]|$)/${ptag}\1/g; s/${old_re}([^0-9]|$)/${pnum}\1/g" "${f}"
+    sed -E -i "s/(^|[^0-9])v${old_re}([^0-9]|$)/\1${ptag}\2/g; s/(^|[^0-9])${old_re}([^0-9]|$)/\1${pnum}\2/g" "${f}"
     sed -i "s/${ptag}/v${new_num}/g; s/${pnum}/${new_num}/g" "${f}"
     after_old=$(grep -c -E "${old_pat}" "${f}" || true)
     after_new=$(grep -c -E "${new_pat}" "${f}" || true)

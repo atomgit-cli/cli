@@ -2076,7 +2076,7 @@ gc release list -R infra-test/gctest1 --json
 - `--limit`（默认 30）返回最新 N 个 release：CLI 向 API 请求 `direction=desc`（最新优先），客户端再按 `published_at`（缺失时回退 `created_at`）降序排序。
 - API 单页上限 100：`--limit` 超过 100 时 CLI 自动跨页累积取满 N 个（不会静默截断），累积完成后统一按发布时间排序再截取。
 - `--page N`（默认 0）显式取第 N 页（单次请求，语义对齐 `issue list`/`pr list`）；与大于 100 的 `--limit` 互斥，组合时报参数错误（退出码 2）。
-- 文本输出中只有最新一个正式 release 会标记为 `(latest)`。
+- 文本输出中只有最新一个正式 release 会标记为 `(latest)`（`--page` 翻页时指该页窗口内最新的正式 release，而非全仓库最新）。
 - 其他正式 release 会标记为 `(published)`；草稿和预发布仍分别显示 `(draft)`、`(pre-release)`。
 
 ### release view - 查看 Release
@@ -2173,7 +2173,7 @@ gc release delete v1.0.0 -R infra-test/gctest1 --dry-run
 
 说明：
 - GitCode 官方 OpenAPI 当前没有 Release 删除接口，实际删除请求会返回 `405 Method Not Allowed`。
-- 405 时命令错误信息包含该 Release 的网页链接（`html_url`），指引到仓库 Release 页面完成删除。
+- 405 时命令错误信息指引到仓库 Release 页面完成删除（API 响应含 `html_url` 时附上网页链接，缺失时给无链接指引）。
 - `--dry-run` 仅预览目标和参数，不执行删除；需要删除时请使用仓库 Release 页面。
 
 ### release delete-asset - 删除 Release 附件

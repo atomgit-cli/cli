@@ -104,9 +104,10 @@ function assertVersion(entrypoint, expected, env) {
   if (actual !== expected) throw new Error(`${entrypoint} reported ${actual}, expected ${expected}`);
 }
 
-// The gc/gitcode completion scripts are named after their command, and
-// "gc" is a prefix of "gitcode": match the padded header line (bash/fish)
-// or the exact line (zsh) so one name can never satisfy the other's check.
+// Each completion file must carry its own command name in its generated
+// header. The patterns anchor the name — padded header line for bash/fish,
+// exact line for zsh — so one command's header can never satisfy the
+// other's check.
 function assertCompletionFiles(home) {
   const checks = [
     [".local/share/bash-completion/completions/gc", /^# bash completion V2 for gc( |$)/],

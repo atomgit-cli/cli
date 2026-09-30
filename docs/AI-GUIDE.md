@@ -89,7 +89,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 固定版本安装，避免 PyPI 尚未同步时安装旧版本
-python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.11.1
+python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.14.1
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
