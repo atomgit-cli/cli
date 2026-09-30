@@ -236,10 +236,3 @@ func sortReleasesByDate(releases []api.Release) {
 func parseRepo(repo string) (string, string, error) {
 	return cmdutil.ParseRepo(repo)
 }
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}

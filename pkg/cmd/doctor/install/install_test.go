@@ -442,7 +442,13 @@ func TestInspectNpmPrefixConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	manifest := []byte(`{"distribution":"npm","prefix":"` + prefix + `"}`)
+	// json.Marshal: a Windows prefix contains backslashes, which are invalid
+	// JSON escape sequences when interpolated raw (the parse would fail and
+	// npmPrefix would silently return empty, skipping the conflict branch).
+	manifest, err := json.Marshal(map[string]string{"distribution": "npm", "prefix": prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +549,11 @@ func TestInspectSymlinkedBootstrapChecksOnPath(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := []byte(`{"distribution":"npm-bootstrap","targetDir":"` + target + `"}`)
+	// Same escaping rationale as the npm prefix manifest above.
+	manifest, err := json.Marshal(map[string]string{"distribution": "npm-bootstrap", "targetDir": target})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(target, ".gitcode-install.json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
