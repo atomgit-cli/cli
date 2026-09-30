@@ -92,6 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/sync-package-version.sh "${VERSION_NUM}" --check
+          bash scripts/sync-docs-version.sh "${VERSION_NUM}" --check
 
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.3

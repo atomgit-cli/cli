@@ -1,13 +1,16 @@
 package list
 
 import (
-	"gitcode.com/gitcode-cli/cli/pkg/testutil"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
+	"gitcode.com/gitcode-cli/cli/pkg/testutil"
 )
 
 func TestNewCmdList(t *testing.T) {
@@ -368,5 +371,388 @@ func TestListRunRequestsDirectionDesc(t *testing.T) {
 	}
 	if !strings.Contains(gotQuery, "per_page=5") {
 		t.Errorf("expected per_page=5 in query, got %q", gotQuery)
+	}
+}
+
+// releasePageJSON builds a page of count releases starting at index from
+// (r<from> .. r<from+count-1>) with strictly decreasing published_at, so
+// r1 is the newest and the display sort is deterministic.
+func releasePageJSON(from, count int) string {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	entries := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		n := from + i
+		stamp := base.Add(-time.Duration(n) * time.Minute).Format(time.RFC3339)
+		entries = append(entries, fmt.Sprintf(`{"tag_name":"r%d","name":"r%d","published_at":%q}`, n, n, stamp))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
+}
+
+type releaseTagOnly struct {
+	TagName string `json:"tag_name"`
+}
+
+func TestListRunPaginatesUntilLimit(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	var gotPages []string
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					gotPages = append(gotPages, req.URL.Query().Get("page"))
+					if req.URL.Query().Get("per_page") != "100" {
+						t.Errorf("per_page = %q, want 100", req.URL.Query().Get("per_page"))
+					}
+					switch req.URL.Query().Get("page") {
+					case "1":
+						return listJSONResponse(releasePageJSON(1, 100)), nil
+					case "2":
+						return listJSONResponse(releasePageJSON(101, 100)), nil
+					default:
+						t.Fatalf("unexpected page %s", req.URL.RawQuery)
+						return nil, nil
+					}
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      150,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Errorf("pages = %v, want exactly [1 2]", gotPages)
+	}
+	var releases []releaseTagOnly
+	if err := json.Unmarshal([]byte(out.String()), &releases); err != nil {
+		t.Fatalf("invalid JSON output: %v\n%s", err, out.String())
+	}
+	if len(releases) != 150 {
+		t.Fatalf("got %d releases, want 150", len(releases))
+	}
+	if releases[0].TagName != "r1" || releases[149].TagName != "r150" {
+		t.Errorf("trim kept wrong window: first %q last %q, want r1..r150", releases[0].TagName, releases[149].TagName)
+	}
+}
+
+func TestListRunStopsOnShortPage(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	var requestCount int
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestCount++
+					switch req.URL.Query().Get("page") {
+					case "1":
+						return listJSONResponse(releasePageJSON(1, 100)), nil
+					case "2":
+						return listJSONResponse(releasePageJSON(101, 30)), nil
+					default:
+						t.Fatalf("unexpected page %s", req.URL.RawQuery)
+						return nil, nil
+					}
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      150,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if requestCount != 2 {
+		t.Errorf("requests = %d, want 2 (short page must end the loop)", requestCount)
+	}
+	var releases []releaseTagOnly
+	if err := json.Unmarshal([]byte(out.String()), &releases); err != nil {
+		t.Fatalf("invalid JSON output: %v", err)
+	}
+	if len(releases) != 130 {
+		t.Fatalf("got %d releases, want 130", len(releases))
+	}
+}
+
+func TestListRunPageFlagSingleRequest(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	f.IOStreams.Out = &strings.Builder{}
+
+	var gotQuery string
+	var requestCount int
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestCount++
+					gotQuery = req.URL.RawQuery
+					return listJSONResponse(`[]`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      30,
+		Page:       2,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if requestCount != 1 {
+		t.Errorf("requests = %d, want a single request for --page", requestCount)
+	}
+	for _, want := range []string{"page=2", "per_page=30", "direction=desc"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want contains %q", gotQuery, want)
+		}
+	}
+}
+
+func TestListRunPageWithLimitAboveCapIsUsageError(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	f.IOStreams.Out = &strings.Builder{}
+
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					t.Fatalf("unexpected request to %s", req.URL.String())
+					return nil, nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      150,
+		Page:       2,
+	})
+	if err == nil {
+		t.Fatal("listRun() error = nil, want usage error")
+	}
+	if !strings.Contains(err.Error(), "--page cannot be combined") {
+		t.Fatalf("error = %q, want --page cannot be combined", err.Error())
+	}
+	if code := cmdutil.ExitCode(err); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestListRunNegativePageIsUsageError(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	f.IOStreams.Out = &strings.Builder{}
+
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					t.Fatalf("unexpected request to %s", req.URL.String())
+					return nil, nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      30,
+		Page:       -1,
+	})
+	if err == nil {
+		t.Fatal("listRun() error = nil, want usage error")
+	}
+	if !strings.Contains(err.Error(), "--page must be greater than or equal to 0") {
+		t.Fatalf("error = %q, want --page must be greater than or equal to 0", err.Error())
+	}
+	if code := cmdutil.ExitCode(err); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestListRunDefaultLimitSingleRequest(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	var gotQuery string
+	var requestCount int
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestCount++
+					gotQuery = req.URL.RawQuery
+					return listJSONResponse(releasePageJSON(1, 5)), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      30,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if requestCount != 1 {
+		t.Errorf("requests = %d, want 1 for a default limit", requestCount)
+	}
+	if !strings.Contains(gotQuery, "per_page=30") {
+		t.Errorf("query = %q, want per_page=30", gotQuery)
+	}
+	var releases []releaseTagOnly
+	if err := json.Unmarshal([]byte(out.String()), &releases); err != nil {
+		t.Fatalf("invalid JSON output: %v", err)
+	}
+	if len(releases) != 5 {
+		t.Fatalf("got %d releases, want 5", len(releases))
+	}
+}
+
+func TestListRunEmptyResultJSONIsEmptyArray(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return listJSONResponse(`[]`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      30,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "[]" {
+		t.Fatalf("output = %q, want []", got)
+	}
+}
+
+// releasePageJSONWithOverride is releasePageJSON with one release's
+// published_at replaced by a stamp newer than every default stamp, for
+// locking the sort-before-trim order.
+func releasePageJSONWithOverride(from, count, overrideIndex int) string {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newest := base.Add(10 * time.Minute).Format(time.RFC3339)
+	entries := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		n := from + i
+		stamp := base.Add(-time.Duration(n) * time.Minute).Format(time.RFC3339)
+		if n == overrideIndex {
+			stamp = newest
+		}
+		entries = append(entries, fmt.Sprintf(`{"tag_name":"r%d","name":"r%d","published_at":%q}`, n, n, stamp))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
+}
+
+// The accumulated pool arrives in created_at order, but the display window
+// is published_at order: a release beyond the limit window in accumulation
+// order must still survive when it is newer-published than the boundary
+// entries. Trim-before-sort would drop it silently.
+func TestListRunSortsBeforeTrimmingAcrossPages(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	f.IOStreams.Out = out
+
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					switch req.URL.Query().Get("page") {
+					case "1":
+						return listJSONResponse(releasePageJSON(1, 100)), nil
+					case "2":
+						// r160 sits past the 150-entry accumulation window
+						// but is the newest release by published_at.
+						return listJSONResponse(releasePageJSONWithOverride(101, 100, 160)), nil
+					default:
+						t.Fatalf("unexpected page %s", req.URL.RawQuery)
+						return nil, nil
+					}
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      150,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	var releases []releaseTagOnly
+	if err := json.Unmarshal([]byte(out.String()), &releases); err != nil {
+		t.Fatalf("invalid JSON output: %v", err)
+	}
+	if len(releases) != 150 {
+		t.Fatalf("got %d releases, want 150", len(releases))
+	}
+	if releases[0].TagName != "r160" {
+		t.Errorf("first release = %q, want r160 (newest published must head the window)", releases[0].TagName)
+	}
+	if releases[149].TagName != "r149" {
+		t.Errorf("last release = %q, want r149 (oldest kept at the trim boundary)", releases[149].TagName)
+	}
+}
+
+// --page with --limit exactly at the API cap is the allowed boundary of
+// the mutual-exclusion guard (the guard rejects only limit > 100).
+func TestListRunPageWithLimitAtCapSucceeds(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	f := cmdutil.TestFactory()
+	f.IOStreams.Out = &strings.Builder{}
+
+	var gotQuery string
+	err := listRun(&ListOptions{
+		IO: f.IOStreams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					gotQuery = req.URL.RawQuery
+					return listJSONResponse(`[]`), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		Limit:      100,
+		Page:       2,
+	})
+	if err != nil {
+		t.Fatalf("listRun() error = %v", err)
+	}
+	if !strings.Contains(gotQuery, "per_page=100") || !strings.Contains(gotQuery, "page=2") {
+		t.Errorf("query = %q, want per_page=100 and page=2", gotQuery)
+	}
+}
+
+func listJSONResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     http.StatusText(http.StatusOK),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

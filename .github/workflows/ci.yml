@@ -67,6 +67,15 @@ jobs:
         run: |
           bash scripts/test-release-version-validation.sh
           bash scripts/sync-package-version.sh "$(cat VERSION)" --check
+          bash scripts/sync-docs-version.sh "$(cat VERSION)" --check
+
+      - name: Validate docs version sync script
+        # The sync mode relies on GNU sed -E -i (capture-group backwrites),
+        # so it is exercised on Linux only; --check above is plain grep and
+        # runs on every platform.
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: bash scripts/test-sync-docs-version.sh
 
       - name: Download dependencies
         run: go mod download

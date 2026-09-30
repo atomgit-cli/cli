@@ -614,16 +614,16 @@ function installCompletions(bin, home) {
   const installed = [];
   const skipped = [];
   // Both command names get completions (matching the deb/rpm packages,
-  // which ship gc and gitcode scripts): the second pass sets the command
-  // name env so cobra's generator produces gitcode-named scripts.
+  // which ship gc and gitcode scripts). Every pass pins the command name
+  // env: resolveCommandName honors the environment over argv[0], so a
+  // user-exported GITCODE_CLI_COMMAND_NAME would otherwise leak into the
+  // gc-named scripts and silently break "gc <TAB>".
   for (const [shell, commandName] of [
     ["bash", "gc"], ["bash", "gitcode"],
     ["zsh", "gc"], ["zsh", "gitcode"],
     ["fish", "gc"], ["fish", "gitcode"],
   ]) {
-    const res = commandName === "gc"
-      ? runGc(bin, ["completion", shell])
-      : runGc(bin, ["completion", shell], { GITCODE_CLI_COMMAND_NAME: commandName });
+    const res = runGc(bin, ["completion", shell], { GITCODE_CLI_COMMAND_NAME: commandName });
     if (res.status !== 0 || !res.stdout) {
       skipped.push(`${shell} (${commandName}): completion command failed`);
       continue;
