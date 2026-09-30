@@ -171,8 +171,8 @@ make verify-remote-facts REPO=owner/repo [ISSUE=1] [PR=2] [HEAD_SHA=<sha>]
 
 ### 3.6 远端 CI（GitCode 原生 + GitHub 镜像）
 
-CI 同时运行在 **GitCode Actions**（主仓 `gitcode.com/gitcode-cli/cli`）和 **GitHub Actions**
-（镜像仓 `github.com/gitcode-cli/cli`）。GitCode 原生工作流定义在 `.gitcode/workflows/ci.yml`，
+CI 同时运行在 **GitCode Actions**（主仓 `gitcode.com/atomgit-cli/cli`）和 **GitHub Actions**
+（镜像仓 `github.com/atomgit-cli/cli`）。GitCode 原生工作流定义在 `.gitcode/workflows/ci.yml`，
 对齐 GitHub CI 的 Linux 路径；GitHub 工作流定义在 `.github/workflows/ci.yml`，继续承担
 Linux/macOS/Windows 跨平台验证。正式规范见 [spec/delivery/ci-workflows.md](./spec/delivery/ci-workflows.md)。
 
@@ -195,9 +195,9 @@ Linux/macOS/Windows 跨平台验证。正式规范见 [spec/delivery/ci-workflow
 
 ```bash
 # GitCode 主仓原生 CI
-gc actions run list -R gitcode-cli/cli --pr <pr-number> --workflow "CI" --json
-gc actions run view <run-id> -R gitcode-cli/cli --json
-gc actions job list <run-id> -R gitcode-cli/cli --json
+gc actions run list -R atomgit-cli/cli --pr <pr-number> --workflow "CI" --json
+gc actions run view <run-id> -R atomgit-cli/cli --json
+gc actions job list <run-id> -R atomgit-cli/cli --json
 
 # GitHub 镜像仓跨平台 CI
 gh run list --workflow=ci.yml --branch <pr-branch> --limit 1
@@ -233,7 +233,7 @@ gh run view <run-id> --log --job=<job-id>
 - 测试文件与源文件同目录，命名 `<source>_test.go`；函数以 `Test` 开头，推荐表格驱动测试
 - 覆盖率：新功能 ≥ 70%，核心模块 ≥ 80%
 - 命令行为变更必须至少做一个真实命令验证，且**只能使用 `infra-test/*` 仓库**（首选 `infra-test/gctest1`）
-- 禁止使用个人仓库、其他组织仓库或 `gitcode-cli/cli` 自身测试
+- 禁止使用个人仓库、其他组织仓库或 `atomgit-cli/cli` 自身测试
 - 优先执行核心回归脚本：`./scripts/regression-core.sh`
 - 真实命令验证前需先完成认证（如人工 `gc auth login` 或自行管理的环境变量），并用 `./gc auth status` 验证；脚本和 AI 代理不得读取、打印或转存真实 token
 - Mock/Stub 通过接口实现，参考 `pkg/testutil/roundtrip.go`
