@@ -341,7 +341,7 @@ func TestUploadToURL(t *testing.T) {
 	c := NewClientFromHTTP(mockClient)
 
 	// Get the mock server URL
-	err := c.UploadToURL("http://localhost:1/upload", "test.txt", []byte("data"), "text/plain", nil)
+	err := c.UploadToURL("http://localhost:1/upload", "test.txt", bytes.NewReader([]byte("data")), int64(len("data")), "text/plain", nil)
 	// Will fail because localhost:1 doesn't exist, but covers the code path
 	if err == nil {
 		t.Log("UploadToURL succeeded unexpectedly")
@@ -376,7 +376,7 @@ func TestUploadToURL_TruncatesLongErrorBody(t *testing.T) {
 	}
 	c := &Client{httpClient: mockClient}
 
-	err := c.UploadToURL("http://upload.example.com/u", "f.txt", []byte("data"), "text/plain", nil)
+	err := c.UploadToURL("http://upload.example.com/u", "f.txt", bytes.NewReader([]byte("data")), int64(len("data")), "text/plain", nil)
 	if err == nil {
 		t.Fatal("UploadToURL returned nil error, want error for 400")
 	}

@@ -288,12 +288,12 @@ v2.0.0         # 重大更新版本
 ### Linux 二进制文件
 \`\`\`bash
 # AMD64
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/gc_linux_amd64
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/gc_linux_amd64
 chmod +x gc_linux_amd64
 sudo mv gc_linux_amd64 /usr/local/bin/gc
 
 # ARM64
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/gc_linux_arm64
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/gc_linux_arm64
 chmod +x gc_linux_arm64
 sudo mv gc_linux_arm64 /usr/local/bin/gc
 \`\`\`
@@ -304,7 +304,7 @@ sudo mv gc_linux_arm64 /usr/local/bin/gc
 pip install gitcode-cli
 
 # 方式二：从 Release 下载安装
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/gitcode_cli-{VERSION}-py3-none-any.whl
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/gitcode_cli-{VERSION}-py3-none-any.whl
 pip install gitcode_cli-{VERSION}-py3-none-any.whl
 \`\`\`
 
@@ -315,7 +315,7 @@ pip install gitcode_cli-{VERSION}-py3-none-any.whl
 
 **重要**：所有下载链接必须使用完整路径格式：
 ```
-https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/{FILENAME}
+https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/{FILENAME}
 ```
 
 ---

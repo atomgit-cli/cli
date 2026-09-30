@@ -84,7 +84,10 @@ esac
 
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE=$(date -u +%Y-%m-%d)
+# darwin keeps its symbol table (-w only): -s drops LC_UUID, which dyld
+# requires (same policy as ci.yml and the goreleaser overrides).
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+LDFLAGS_DARWIN="-w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
 
 echo ""
 echo "============================================"
@@ -105,36 +108,14 @@ info "Step 1: Syncing version to all config files..."
 bash scripts/sync-package-version.sh "${VERSION}"
 success "Aligned VERSION and all package-manager metadata"
 
-# Update README.md (download links; release badge is de-pinned to "latest")
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc_/v${VERSION}\/gc_/g" README.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc-/v${VERSION}\/gc-/g" README.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gitcode_cli/v${VERSION}\/gitcode_cli/g" README.md
-sed -i "s/gc_[0-9]\+\.[0-9]\+\.[0-9]\+/gc_${VERSION}/g" README.md
-sed -i "s/gc-[0-9]\+\.[0-9]\+\.[0-9]\+-1/gc-${VERSION}-1/g" README.md
-sed -i "s/gitcode_cli-[0-9]\+\.[0-9]\+\.[0-9]\+-py3/gitcode_cli-${VERSION}-py3/g" README.md
-success "Updated README.md"
-
-# Update docs/AI-GUIDE.md (Installation commands)
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc_/v${VERSION}\/gc_/g" docs/AI-GUIDE.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc-/v${VERSION}\/gc-/g" docs/AI-GUIDE.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gitcode_cli/v${VERSION}\/gitcode_cli/g" docs/AI-GUIDE.md
-sed -i "s/gc_[0-9]\+\.[0-9]\+\.[0-9]\+/gc_${VERSION}/g" docs/AI-GUIDE.md
-sed -i "s/gc-[0-9]\+\.[0-9]\+\.[0-9]\+-1/gc-${VERSION}-1/g" docs/AI-GUIDE.md
-sed -i "s/gitcode_cli-[0-9]\+\.[0-9]\+\.[0-9]\+-py3/gitcode_cli-${VERSION}-py3/g" docs/AI-GUIDE.md
-success "Updated docs/AI-GUIDE.md"
-
-# Update docs/PACKAGING.md (Example commands)
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc_/v${VERSION}\/gc_/g" docs/PACKAGING.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gc-/v${VERSION}\/gc-/g" docs/PACKAGING.md
-sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+\/gitcode_cli/v${VERSION}\/gitcode_cli/g" docs/PACKAGING.md
-sed -i "s/gc_[0-9]\+\.[0-9]\+\.[0-9]\+/gc_${VERSION}/g" docs/PACKAGING.md
-sed -i "s/gc-[0-9]\+\.[0-9]\+\.[0-9]\+-1/gc-${VERSION}-1/g" docs/PACKAGING.md
-sed -i "s/gitcode_cli-[0-9]\+\.[0-9]\+\.[0-9]\+-py3/gitcode_cli-${VERSION}-py3/g" docs/PACKAGING.md
-sed -i "s/gitcode_cli-[0-9]\+\.[0-9]\+\.[0-9]\+\.tar/gitcode_cli-${VERSION}.tar/g" docs/PACKAGING.md
-# Update gc release create/upload commands in PACKAGING.md
-sed -i "s/gc release create v[0-9]\+\.[0-9]\+\.[0-9]\+/gc release create v${VERSION}/g" docs/PACKAGING.md
-sed -i "s/gc release upload v[0-9]\+\.[0-9]\+\.[0-9]\+/gc release upload v${VERSION}/g" docs/PACKAGING.md
-success "Updated docs/PACKAGING.md"
+# Sync the three user-facing docs (README, AI-GUIDE, PACKAGING) through the
+# dedicated script: it detects each file's current version independently,
+# replaces with boundary awareness (no corruption of longer version strings),
+# and refuses to exit 0 on residual old versions. The inline sed blocks it
+# replaces were unbounded, rewrote historical version mentions, and had no
+# residual check.
+bash scripts/sync-docs-version.sh "v${VERSION}"
+success "Updated README.md, docs/AI-GUIDE.md, docs/PACKAGING.md"
 
 # ============================================
 # Step 2: Create dist directory
@@ -215,11 +196,11 @@ build_pypi() {
     verify_build "  gc_cli/bin/gc-linux-arm64"
 
     # macOS amd64
-    GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o gc_cli/bin/gc-darwin-amd64 ./cmd/gc
+    GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS_DARWIN}" -o gc_cli/bin/gc-darwin-amd64 ./cmd/gc
     verify_build "  gc_cli/bin/gc-darwin-amd64"
 
     # macOS arm64
-    GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o gc_cli/bin/gc-darwin-arm64 ./cmd/gc
+    GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS_DARWIN}" -o gc_cli/bin/gc-darwin-arm64 ./cmd/gc
     verify_build "  gc_cli/bin/gc-darwin-arm64"
 
     # Windows amd64

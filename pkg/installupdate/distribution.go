@@ -24,6 +24,14 @@ func DetectDistribution(env map[string]string, binary string) string {
 	if value := strings.TrimSpace(env[DistributionEnv]); value != "" {
 		return value
 	}
+	if binary == "" {
+		// No explicit binary env and os.Executable failed: filepath.Dir("")
+		// is ".", so the adjacent-manifest lookup below would read a
+		// .gitcode-install.json from the current working directory (e.g.
+		// running doctor from an npm package root) and misreport the
+		// channel. Fall through to the documented default instead.
+		return "archive-or-source"
+	}
 	// Resolve symlinks before matching path markers: Homebrew's bin
 	// directory is a symlink farm into the Cellar (/usr/local/bin/gc on
 	// Intel Macs, /home/linuxbrew/.linuxbrew/bin/gc on Linux), and

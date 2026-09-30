@@ -19,6 +19,10 @@ type ViewOptions struct {
 	HttpClient func() (*http.Client, error)
 	BaseRepo   func() (string, error)
 
+	// OpenBrowser opens the given URL; injected for tests (default
+	// browser.Open). Mirrors the pr create / auth login seams.
+	OpenBrowser func(string) error
+
 	// Arguments
 	TagName string
 
@@ -31,9 +35,10 @@ type ViewOptions struct {
 // NewCmdView creates the view command
 func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Command {
 	opts := &ViewOptions{
-		IO:         f.IOStreams,
-		HttpClient: f.HttpClient,
-		BaseRepo:   f.BaseRepo,
+		IO:          f.IOStreams,
+		HttpClient:  f.HttpClient,
+		BaseRepo:    f.BaseRepo,
+		OpenBrowser: browser.Open,
 	}
 
 	cmd := &cobra.Command{
@@ -97,7 +102,11 @@ func viewRun(opts *ViewOptions) error {
 	// Open in browser if requested
 	if opts.Web {
 		fmt.Fprintf(opts.IO.Out, "Opening %s in your browser.\n", release.HTMLURL)
-		if err := browser.Open(release.HTMLURL); err != nil {
+		openBrowser := opts.OpenBrowser
+		if openBrowser == nil {
+			openBrowser = browser.Open
+		}
+		if err := openBrowser(release.HTMLURL); err != nil {
 			if opts.IO.IsStdoutTTY() {
 				return err
 			}

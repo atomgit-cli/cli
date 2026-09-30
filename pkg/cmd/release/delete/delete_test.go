@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/testutil"
 )
@@ -304,5 +305,24 @@ func TestDeleteRunErrNoReleaseIDMessage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tag-based endpoint unavailable") {
 		t.Fatalf("error = %q, want tag-based endpoint unavailable", err.Error())
+	}
+}
+
+func TestConfirmTitle(t *testing.T) {
+	tests := []struct {
+		name    string
+		release api.Release
+		want    string
+	}{
+		{name: "name equals tag", release: api.Release{TagName: "v1.0.0", Name: "v1.0.0"}, want: "v1.0.0"},
+		{name: "name differs from tag", release: api.Release{TagName: "v1.0.0", Name: "Version 1.0.0"}, want: "Version 1.0.0 (tag: v1.0.0)"},
+		{name: "empty name falls back to tag", release: api.Release{TagName: "v1.0.0"}, want: "v1.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := confirmTitle(&tt.release); got != tt.want {
+				t.Errorf("confirmTitle() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

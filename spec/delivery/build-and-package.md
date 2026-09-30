@@ -63,7 +63,6 @@ make install PREFIX="$HOME/.local"
 
 ```bash
 make release-local
-make release-snapshot
 ```
 
 这些命令用于本地快照验证，不等同于正式 release。

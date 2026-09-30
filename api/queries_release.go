@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/url"
 	"sort"
 	"strconv"
@@ -340,8 +341,9 @@ func UploadReleaseAsset(client *Client, owner, repo string, releaseID int64, fil
 	return client.UploadAsset(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(releaseID, 10)+"/assets", filename, content, contentType)
 }
 
-// UploadReleaseAssetByTag uploads a file to a release by tag name using two-step process
-func UploadReleaseAssetByTag(client *Client, owner, repo, tag, filename string, content []byte, contentType string) error {
+// UploadReleaseAssetByTag uploads a file to a release by tag name using the
+// two-step process; content streams from the reader (no full-asset buffering).
+func UploadReleaseAssetByTag(client *Client, owner, repo, tag, filename string, content io.Reader, contentLength int64, contentType string) error {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -357,7 +359,7 @@ func UploadReleaseAssetByTag(client *Client, owner, repo, tag, filename string, 
 	}
 
 	// Step 2: Upload file to the returned URL with headers
-	return client.UploadToURL(uploadInfo.URL, filename, content, contentType, uploadInfo.Headers)
+	return client.UploadToURL(uploadInfo.URL, filename, content, contentLength, contentType, uploadInfo.Headers)
 }
 
 // ErrNoReleaseID is returned when the GitCode API omits release IDs.

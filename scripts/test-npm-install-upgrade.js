@@ -9,6 +9,10 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { resolveBinaryName } = require("../npm/lib/platform");
 
+// 0.10.3 is the first published version of the @gitcode-cli/cli coordinate.
+// Pin the install source explicitly: the repo has migrated coordinates
+// before (package.json name changes), and atomgit-cli@0.10.3 never existed.
+const OLD_COORDINATE = "@gitcode-cli/cli";
 const OLD_VERSION = "0.10.3";
 const TEST_VERSION = "9.9.9";
 const root = path.resolve(__dirname, "..");
@@ -130,7 +134,7 @@ function assertCompletionFiles(home) {
 function main() {
   const tarball = buildPackage();
   fs.mkdirSync(prefix, { recursive: true });
-  npm(["install", "-g", `${require("../npm/package.json").name}@${OLD_VERSION}`, "--prefix", prefix, "--no-audit", "--no-fund"]);
+  npm(["install", "-g", `${OLD_COORDINATE}@${OLD_VERSION}`, "--prefix", prefix, "--no-audit", "--no-fund"]);
   assertVersion(npmEntrypoint(), OLD_VERSION);
 
   writeShadow();
@@ -169,9 +173,22 @@ function main() {
   // argv[0]). Install under an isolated HOME with the name exported as
   // the opposite command and verify every file matches its own name.
   const completionHome = fs.mkdtempSync(path.join(os.tmpdir(), "gc-completion-home-"));
+  // Empty strings neutralize any runner-exported XDG/BASH_COMPLETION vars so
+  // the assertions below can pin the default HOME-relative target paths. The
+  // install dir leads PATH so the just-installed binaries own both command
+  // names — on a machine with an existing gc install the shadow check would
+  // otherwise (correctly) skip every completion file.
   const completionEnv = process.platform === "win32"
     ? {}
-    : { HOME: completionHome, GITCODE_CLI_COMMAND_NAME: "gitcode" };
+    : {
+        HOME: completionHome,
+        GITCODE_CLI_COMMAND_NAME: "gitcode",
+        XDG_DATA_HOME: "",
+        XDG_CONFIG_HOME: "",
+        BASH_COMPLETION_USER_DIR: "",
+        PATH: `${bootstrap}${path.delimiter}${process.env.PATH || ""}`,
+        Path: `${bootstrap}${path.delimiter}${process.env.Path || process.env.PATH || ""}`,
+      };
   run(process.execPath, [path.join(packageDir, "bin", "gc.js"), "install", "--target-dir", bootstrap], {
     env: {
       PATH: process.env.PATH || "",

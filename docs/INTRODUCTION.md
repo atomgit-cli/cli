@@ -4,9 +4,9 @@
 
 GitCode CLI 把这些工作带回终端：仓库、Issue、Pull Request、Commit、标签、里程碑、Release 和 Actions 都可以通过统一命令完成。对开发者，它减少上下文切换；对团队，它让操作可以复用和审计；对 AI 代理，它提供结构化、可发现、带安全边界的 GitCode 执行入口。本文统一使用跨平台入口 `gitcode`；通过 npm、PyPI、Homebrew、DEB/RPM 或 wheel 安装时都会同时提供 `gitcode` 和 `gc` 两个入口。
 
-- 项目仓库：[gitcode-cli/cli](https://gitcode.com/gitcode-cli/cli)
+- 项目仓库：[atomgit-cli/cli](https://gitcode.com/atomgit-cli/cli)
 - 安装渠道：[npm](https://www.npmjs.com/package/@gitcode-cli/cli)｜[PyPI](https://pypi.org/project/gitcode-cli/)｜[GitCode Release](https://gitcode.com/atomgit-cli/cli/releases)｜[GitHub Release](https://github.com/atomgit-cli/cli/releases)
-- 完整命令手册：[docs/COMMANDS.md](https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md)
+- 完整命令手册：[docs/COMMANDS.md](https://gitcode.com/atomgit-cli/cli/blob/main/docs/COMMANDS.md)
 
 ## 五分钟开始使用
 
@@ -78,7 +78,7 @@ After generating a token in the browser, paste it below.
 gitcode auth status   # 确认登录状态
 ```
 
-认证来源、优先级和安全注意事项见[认证说明](https://gitcode.com/gitcode-cli/cli/blob/main/docs/AUTH.md)。
+认证来源、优先级和安全注意事项见[认证说明](https://gitcode.com/atomgit-cli/cli/blob/main/docs/AUTH.md)。
 
 ### 3. 给你的 AI 装上 GitCode 技能
 
@@ -115,17 +115,17 @@ AI 不会悄悄执行破坏性操作：
 
 ### 想自己敲命令？
 
-CLI 同样完整可用，命令树与参数见 [命令手册 COMMANDS.md](https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md)。只读命令支持 `--json`，写命令支持 `--dry-run`，退出码 0-5 稳定语义；`gitcode help --json` 与 `gitcode schema` 可程序化发现命令。
+CLI 同样完整可用，命令树与参数见 [命令手册 COMMANDS.md](https://gitcode.com/atomgit-cli/cli/blob/main/docs/COMMANDS.md)。只读命令支持 `--json`，写命令支持 `--dry-run`，退出码 0-5 稳定语义；`gitcode help --json` 与 `gitcode schema` 可程序化发现命令。
 
 常用入口：
 
-- 所有命令和参数：[命令手册](https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md)
-- 登录与 Token 安全：[认证说明](https://gitcode.com/gitcode-cli/cli/blob/main/docs/AUTH.md)
-- AI 操作建议：[AI 使用指南](https://gitcode.com/gitcode-cli/cli/blob/main/docs/AI-GUIDE.md)
-- 安装、构建与平台说明：[项目 README](https://gitcode.com/gitcode-cli/cli)
-- 可复制的业务场景：[应用案例库](https://gitcode.com/gitcode-cli/cli/tree/main/Example)
+- 所有命令和参数：[命令手册](https://gitcode.com/atomgit-cli/cli/blob/main/docs/COMMANDS.md)
+- 登录与 Token 安全：[认证说明](https://gitcode.com/atomgit-cli/cli/blob/main/docs/AUTH.md)
+- AI 操作建议：[AI 使用指南](https://gitcode.com/atomgit-cli/cli/blob/main/docs/AI-GUIDE.md)
+- 安装、构建与平台说明：[项目 README](https://gitcode.com/atomgit-cli/cli)
+- 可复制的业务场景：[应用案例库](https://gitcode.com/atomgit-cli/cli/tree/main/Example)
 - AI 工作流 skills：[gitcode-cli/skills](https://gitcode.com/gitcode-cli/skills)
-- 问题反馈与功能建议：[Issues](https://gitcode.com/gitcode-cli/cli/issues)
+- 问题反馈与功能建议：[Issues](https://gitcode.com/atomgit-cli/cli/issues)
 
 ## 真实样例：开箱即用
 
@@ -135,22 +135,22 @@ CLI 同样完整可用，命令树与参数见 [命令手册 COMMANDS.md](https:
 
 ```bash
 # 当前有哪些待评审 PR？一条命令拿到结构化清单
-gitcode pr list -R gitcode-cli/cli --state open --json
+gitcode pr list -R atomgit-cli/cli --state open --json
 
 # 最近 CI 有没有挂？直接筛失败流水线
-gitcode actions run list -R gitcode-cli/cli --status FAILED --json
+gitcode actions run list -R atomgit-cli/cli --status FAILED --json
 
 # 不开浏览器看某 PR 的改动
-gitcode pr view 440 -R gitcode-cli/cli --json
+gitcode pr view 440 -R atomgit-cli/cli --json
 
 # 一条命令给 issue 打多个标签
-gitcode issue label 497 --add feature,scope/actions -R gitcode-cli/cli
+gitcode issue label 497 --add feature,scope/actions -R atomgit-cli/cli
 
 # 把 PR 的 diff 导出成 patch 评审
-gitcode pr diff 440 -R gitcode-cli/cli > review.patch
+gitcode pr diff 440 -R atomgit-cli/cli > review.patch
 
 # 列出某仓库所有 release 资产
-gitcode release view v0.11.1 -R gitcode-cli/cli --json
+gitcode release view v0.11.1 -R atomgit-cli/cli --json
 ```
 
 ### 把任务交给 AI，你审结论
@@ -206,7 +206,7 @@ gitcode pr review 42 -R owner/repo --comment-file review.md
 gitcode release create v1.0.0 -R owner/repo --title "v1.0.0" --notes-file CHANGELOG.md --json
 ```
 
-命令参数、输出字段和平台限制以[完整命令手册](https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md)为准。
+命令参数、输出字段和平台限制以[完整命令手册](https://gitcode.com/atomgit-cli/cli/blob/main/docs/COMMANDS.md)为准。
 
 ### 自动化不必依赖脆弱的页面脚本
 
@@ -238,7 +238,7 @@ gitcode api repos/owner/repo
 
 > 找出 `main` 分支最近失败的 Actions 运行，定位失败 job，下载日志并给出根因判断。
 
-面向 Codex、Claude 等 AI 客户端的可安装 skills 已独立维护在 [gitcode-cli/skills](https://gitcode.com/gitcode-cli/skills)。其中包括 Issue 创建与评审、PR 创建与评审、反馈修复、Release 发布、安全检查、流水线分析等端到端工作流。更完整的 AI 使用约定见[使用 AI 操作 GitCode 指南](https://gitcode.com/gitcode-cli/cli/blob/main/docs/AI-GUIDE.md)。
+面向 Codex、Claude 等 AI 客户端的可安装 skills 已独立维护在 [gitcode-cli/skills](https://gitcode.com/gitcode-cli/skills)。其中包括 Issue 创建与评审、PR 创建与评审、反馈修复、Release 发布、安全检查、流水线分析等端到端工作流。更完整的 AI 使用约定见[使用 AI 操作 GitCode 指南](https://gitcode.com/atomgit-cli/cli/blob/main/docs/AI-GUIDE.md)。
 
 ### 自动化有边界，危险动作不会悄悄发生
 
@@ -250,7 +250,7 @@ gitcode repo delete owner/repo --dry-run
 gitcode release delete v1.0.0 -R owner/repo --dry-run
 ```
 
-认证信息不应出现在聊天、Prompt、脚本参数、Issue 或 PR 正文中。登录必须由用户本人在私有、未录制且不由 AI 控制的本地终端完成，AI 只运行 `gitcode auth status` 确认认证是否可用。详细规则见[认证说明](https://gitcode.com/gitcode-cli/cli/blob/main/docs/AUTH.md)。
+认证信息不应出现在聊天、Prompt、脚本参数、Issue 或 PR 正文中。登录必须由用户本人在私有、未录制且不由 AI 控制的本地终端完成，AI 只运行 `gitcode auth status` 确认认证是否可用。详细规则见[认证说明](https://gitcode.com/atomgit-cli/cli/blob/main/docs/AUTH.md)。
 
 ## 适合哪些场景
 
@@ -263,7 +263,7 @@ gitcode release delete v1.0.0 -R owner/repo --dry-run
 | AI 编码代理 | 获取远端事实、提交 Issue/PR、评审、核验结果 | 获得可发现、结构化、受约束的执行接口 |
 | 企业自动化平台 | 跨仓库统计、流水线巡检、标准化交付 | 以统一 CLI 代替零散 API 脚本和页面自动化 |
 
-仓库中已经整理了可直接复用的真实场景，包括 Issue 到 PR 的完整链路、发布评审、CI 流水线定位、安全检查和 AI 全流程交付，见 [GitCode CLI 应用案例库](https://gitcode.com/gitcode-cli/cli/tree/main/Example)。
+仓库中已经整理了可直接复用的真实场景，包括 Issue 到 PR 的完整链路、发布评审、CI 流水线定位、安全检查和 AI 全流程交付，见 [GitCode CLI 应用案例库](https://gitcode.com/atomgit-cli/cli/tree/main/Example)。
 
 ## 从今天的一件小事开始
 

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
@@ -288,11 +287,7 @@ func truncateDescription(desc string) string {
 	if desc == "" {
 		return "-"
 	}
-	if utf8.RuneCountInString(desc) > 60 {
-		runes := []rune(desc)
-		return string(runes[:57]) + "..."
-	}
-	return desc
+	return output.Truncate(desc, 60)
 }
 
 func resolveOutputFormat(jsonFlag bool, raw string) (output.Format, error) {

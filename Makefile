@@ -3,7 +3,12 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+# darwin keeps its symbol table (-w only): stripping with -s drops LC_UUID,
+# which dyld requires (same policy as ci.yml and the goreleaser overrides).
+HOST_GOOS := $(shell go env GOOS)
+STRIP := $(if $(filter darwin,$(HOST_GOOS)),-w,-s -w)
+LDFLAGS := -ldflags "$(STRIP) -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+LDFLAGS_DARWIN := -ldflags "-w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
 
 # Binary name
 BINARY_NAME := gc
@@ -25,7 +30,7 @@ GOMOD := $(GOCMD) mod
 
 .PHONY: all build build-all clean test system-test system-test-write install fmt lint help
 .PHONY: docker docker-build docker-push docker-run
-.PHONY: release release-local release-snapshot
+.PHONY: release release-local
 .PHONY: completions validate-ai-template validate-ai-record validate-ai-templates validate-sigs
 .PHONY: classify-change-risk verify-remote-facts
 .PHONY: deps update-deps dev-setup dev-doctor install uninstall
@@ -44,8 +49,8 @@ build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-arm64 ./cmd/gc
 
 build-darwin:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-amd64 ./cmd/gc
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-arm64 ./cmd/gc
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS_DARWIN) -o bin/$(BINARY_NAME)-darwin-amd64 ./cmd/gc
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS_DARWIN) -o bin/$(BINARY_NAME)-darwin-arm64 ./cmd/gc
 
 build-windows:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-windows-amd64.exe ./cmd/gc
@@ -111,13 +116,10 @@ docker-all:
 
 # Release targets
 release:
-	goreleaser release --clean
+	goreleaser release --clean --skip=publish
 
 release-local:
 	goreleaser release --snapshot --clean
-
-release-snapshot:
-	goreleaser release --snapshot --rm-dist
 
 # Development
 dev:
