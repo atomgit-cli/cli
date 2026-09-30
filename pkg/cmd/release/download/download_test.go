@@ -255,7 +255,7 @@ func TestDownloadAssetUsesAuthorizationHeader(t *testing.T) {
 	client := api.NewClientFromHTTP(httpClient)
 	client.SetToken("test-token", "test")
 
-	err := downloadAsset(api.ReleaseAsset{Name: "app.tar.gz"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	err := downloadAsset(api.ReleaseAsset{Name: "app.tar.gz"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err != nil {
 		t.Fatalf("downloadAsset() error = %v", err)
 	}
@@ -298,7 +298,7 @@ func TestDownloadAssetFallsBackToAttachFilesEndpointWithoutBrowserDownloadURL(t 
 	client := api.NewClientFromHTTP(httpClient)
 	client.SetToken("test-token", "test")
 
-	err := downloadAsset(api.ReleaseAsset{Name: "app.tar.gz"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	err := downloadAsset(api.ReleaseAsset{Name: "app.tar.gz"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err != nil {
 		t.Fatalf("downloadAsset() error = %v", err)
 	}
@@ -333,7 +333,7 @@ func TestDownloadAssetIgnoresNonArchiveBrowserDownloadURL(t *testing.T) {
 	err := downloadAsset(api.ReleaseAsset{
 		Name:               "asset.txt",
 		BrowserDownloadURL: "https://api.gitcode.com/owner/repo/releases/download/v1.0.0/asset.txt",
-	}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err != nil {
 		t.Fatalf("downloadAsset() error = %v", err)
 	}
@@ -463,7 +463,7 @@ func TestDownloadAssetRejectsPathTraversal(t *testing.T) {
 
 	client := api.NewClientFromHTTP(httpClient)
 
-	err := downloadAsset(api.ReleaseAsset{Name: "../outside.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	err := downloadAsset(api.ReleaseAsset{Name: "../outside.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err == nil {
 		t.Fatal("downloadAsset() expected error for path traversal, got nil")
 	}
@@ -494,7 +494,7 @@ func TestDownloadAssetRejectsAbsolutePath(t *testing.T) {
 
 	client := api.NewClientFromHTTP(httpClient)
 
-	err := downloadAsset(api.ReleaseAsset{Name: "/tmp/malicious.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	err := downloadAsset(api.ReleaseAsset{Name: "/tmp/malicious.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err == nil {
 		t.Fatal("downloadAsset() expected error for absolute path, got nil")
 	}
@@ -519,7 +519,7 @@ func TestDownloadAssetRejectsPathSeparator(t *testing.T) {
 
 	client := api.NewClientFromHTTP(httpClient)
 
-	err := downloadAsset(api.ReleaseAsset{Name: "nested/file.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0")
+	err := downloadAsset(api.ReleaseAsset{Name: "nested/file.txt"}, tempDir, httpClient, cs, io.Discard, client, "owner", "repo", "v1.0.0", false, false)
 	if err == nil {
 		t.Fatal("downloadAsset() expected error for path separator, got nil")
 	}
@@ -604,4 +604,240 @@ func TestFilterSourceArchives(t *testing.T) {
 	if len(got) != len(wantKept) {
 		t.Errorf("filterSourceArchives() returned %d assets, want %d", len(got), len(wantKept))
 	}
+}
+
+// run-level fixture: one release with a normal asset and a source archive.
+func downloadFixtureClient(t *testing.T, requests *[]string) *http.Client {
+	t.Helper()
+	return &http.Client{
+		Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			path := req.URL.Path
+			if req.URL.RawQuery != "" {
+				path += "?" + req.URL.RawQuery
+			}
+			if requests != nil {
+				*requests = append(*requests, req.Method+" "+path)
+			}
+			switch {
+			case req.Method == http.MethodGet && path == "/api/v5/repos/owner/repo/releases/tags/v1.0.0":
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     http.StatusText(http.StatusOK),
+					Header:     make(http.Header),
+					Body: io.NopCloser(strings.NewReader(`{
+						"tag_name":"v1.0.0",
+						"assets":[
+							{"name":"app.tar.gz"},
+							{"name":"v1.0.0.zip","browser_download_url":"https://raw.gitcode.com/owner/repo/archive/refs/heads/v1.0.0.zip"}
+						]
+					}`)),
+				}, nil
+			case req.Method == http.MethodGet && (strings.HasSuffix(path, "/download") || strings.Contains(path, "/archive/refs/heads/")):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     http.StatusText(http.StatusOK),
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("asset-body")),
+				}, nil
+			default:
+				t.Fatalf("unexpected request: %s %s", req.Method, path)
+				return nil, nil
+			}
+		}),
+	}
+}
+
+func TestDownloadRunRefusesExistingFileByDefault(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "app.tar.gz"), []byte("previous"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests []string
+	client := downloadFixtureClient(t, &requests)
+
+	err := downloadRun(&DownloadOptions{
+		IO:         viewTestIO(),
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+		Assets:     []string{"app.tar.gz"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "file already exists") || !strings.Contains(err.Error(), "--clobber") {
+		t.Fatalf("error = %v, want already-exists error mentioning --clobber", err)
+	}
+	// The refusal happens before any download request.
+	for _, r := range requests {
+		if strings.HasSuffix(r, "/download") {
+			t.Errorf("unexpected download request: %s", r)
+		}
+	}
+	// The pre-existing content is untouched.
+	data, _ := os.ReadFile(filepath.Join(tempDir, "app.tar.gz"))
+	if string(data) != "previous" {
+		t.Fatalf("existing file was modified: %q", data)
+	}
+}
+
+func TestDownloadRunSkipExistingSkipsOnlyPresentFiles(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "app.tar.gz"), []byte("previous"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests []string
+	client := downloadFixtureClient(t, &requests)
+
+	ioStreams, _, out, _ := iostreams.Test()
+	err := downloadRun(&DownloadOptions{
+		IO:           ioStreams,
+		HttpClient:   func() (*http.Client, error) { return client, nil },
+		Repository:   "owner/repo",
+		TagName:      "v1.0.0",
+		Output:       tempDir,
+		All:          true,
+		SkipExisting: true,
+	})
+	if err != nil {
+		t.Fatalf("downloadRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Skipped app.tar.gz (exists)") {
+		t.Errorf("output = %q, want skip notice", out.String())
+	}
+	if !strings.Contains(out.String(), "Downloaded v1.0.0.zip") {
+		t.Errorf("output = %q, want the other asset downloaded", out.String())
+	}
+	data, _ := os.ReadFile(filepath.Join(tempDir, "app.tar.gz"))
+	if string(data) != "previous" {
+		t.Fatalf("skipped file was modified: %q", data)
+	}
+}
+
+func TestDownloadRunClobberOverwrites(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "app.tar.gz"), []byte("previous"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := downloadFixtureClient(t, nil)
+
+	err := downloadRun(&DownloadOptions{
+		IO:         viewTestIO(),
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+		Assets:     []string{"app.tar.gz"},
+		Clobber:    true,
+	})
+	if err != nil {
+		t.Fatalf("downloadRun() error = %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(tempDir, "app.tar.gz"))
+	if string(data) != "asset-body" {
+		t.Fatalf("file content = %q, want overwritten with download", data)
+	}
+}
+
+func TestDownloadClobberAndSkipExistingAreMutuallyExclusive(t *testing.T) {
+	f := cmdutil.TestFactory()
+	cmd := NewCmdDownload(f, nil)
+	cmd.SetArgs([]string{"v1.0.0", "app.tar.gz", "-R", "owner/repo", "--clobber", "--skip-existing"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("Execute() error = nil, want mutual-exclusion error")
+	}
+}
+
+func TestDownloadRunNamedAssetMissingIsAnError(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	client := downloadFixtureClient(t, nil)
+
+	err := downloadRun(&DownloadOptions{
+		IO:         viewTestIO(),
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+		Assets:     []string{"missing.txt"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing.txt") || !strings.Contains(err.Error(), "available assets") {
+		t.Fatalf("error = %v, want missing-name error with available list", err)
+	}
+	if !strings.Contains(err.Error(), "app.tar.gz") {
+		t.Errorf("error = %v, want available list to name app.tar.gz", err)
+	}
+}
+
+func TestDownloadRunPartiallyNamedAssetsStillError(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	client := downloadFixtureClient(t, nil)
+
+	err := downloadRun(&DownloadOptions{
+		IO:         viewTestIO(),
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+		Assets:     []string{"app.tar.gz", "missing.txt"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing.txt") {
+		t.Fatalf("error = %v, want partial miss to fail the batch", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tempDir, "app.tar.gz")); statErr == nil {
+		t.Error("matched asset should not be downloaded when a sibling name misses")
+	}
+}
+
+func TestDownloadRunNamedSourceArchiveBypassesFilter(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	client := downloadFixtureClient(t, nil)
+
+	err := downloadRun(&DownloadOptions{
+		IO:         viewTestIO(),
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+		Assets:     []string{"v1.0.0.zip"},
+	})
+	if err != nil {
+		t.Fatalf("downloadRun() error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tempDir, "v1.0.0.zip")); statErr != nil {
+		t.Errorf("named source archive not downloaded: %v", statErr)
+	}
+}
+
+func TestDownloadRunUnnamedSourceArchiveStaysFiltered(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	tempDir := t.TempDir()
+	client := downloadFixtureClient(t, nil)
+
+	ioStreams, _, out, _ := iostreams.Test()
+	err := downloadRun(&DownloadOptions{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		TagName:    "v1.0.0",
+		Output:     tempDir,
+	})
+	if err != nil {
+		t.Fatalf("downloadRun() error = %v", err)
+	}
+	// Unnamed + no --all: the archive is filtered, the normal asset stays.
+	if !strings.Contains(out.String(), "Downloaded app.tar.gz") {
+		t.Errorf("output = %q, want the normal asset downloaded", out.String())
+	}
+	if strings.Contains(out.String(), "v1.0.0.zip") {
+		t.Errorf("output = %q, want the source archive filtered out", out.String())
+	}
+}
+
+func viewTestIO() *iostreams.IOStreams {
+	ioStreams, _, _, _ := iostreams.Test()
+	return ioStreams
 }

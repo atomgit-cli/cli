@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -66,9 +67,6 @@ func NewCmdUpload(f *cmdutil.Factory, runF func(*UploadOptions) error) *cobra.Co
 			# Upload to a specific repository
 			$ gc release upload v1.0.0 app.zip -R owner/repo
 
-			# Label is currently unsupported by the GitCode API
-			$ gc release upload v1.0.0 app.zip -R owner/repo --label "linux-amd64"
-
 			# Output as JSON
 			$ gc release upload v1.0.0 app.zip -R owner/repo --json
 		`),
@@ -117,12 +115,44 @@ func uploadRun(opts *UploadOptions) error {
 		return err
 	}
 
+	// Same-name precheck: the platform's overwrite behavior for duplicate
+	// asset names is undefined; refuse the whole batch before any upload so
+	// a rerun cannot half-clobber an existing release.
+	release, err := api.GetRelease(client, owner, repo, opts.TagName)
+	if err != nil {
+		return cmdutil.WrapNotFound(err, "release %s not found in %s/%s", opts.TagName, owner, repo)
+	}
+	existing := map[string]bool{}
+	for _, asset := range release.Assets {
+		existing[asset.Name] = true
+	}
+	var conflicts []string
+	for _, file := range opts.Files {
+		if name := filepath.Base(file); existing[name] {
+			conflicts = append(conflicts, name)
+		}
+	}
+	if len(conflicts) > 0 {
+		sort.Strings(conflicts)
+		return fmt.Errorf("release %s already has asset(s): %s\nremove them with \"gc release delete-asset\" first, or upload files with different names",
+			opts.TagName, strings.Join(conflicts, ", "))
+	}
+
 	results := make([]uploadResult, 0, len(opts.Files))
 
 	// Upload each file using two-step process
 	for _, file := range opts.Files {
 		result, err := uploadFile(client, owner, repo, opts.TagName, file, opts.Label, cs, opts.IO.Out, !opts.JSON)
 		if err != nil {
+			// A partial batch must not look like a clean failure: name what
+			// already landed so the user can clean up or resume knowingly.
+			if len(results) > 0 {
+				uploaded := make([]string, 0, len(results))
+				for _, r := range results {
+					uploaded = append(uploaded, r.Name)
+				}
+				err = fmt.Errorf("%w\nalready uploaded in this run: %s", err, strings.Join(uploaded, ", "))
+			}
 			return err
 		}
 		results = append(results, result)
@@ -136,27 +166,33 @@ func uploadRun(opts *UploadOptions) error {
 }
 
 func uploadFile(client *api.Client, owner, repo, tag, filePath, label string, cs *iostreams.ColorScheme, out io.Writer, writeText bool) (uploadResult, error) {
-	// Open file
+	// Open file; the upload streams from the handle instead of buffering
+	// the whole asset in memory.
 	file, err := os.Open(filePath)
 	if err != nil {
 		return uploadResult{}, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
-	// Read file content
-	content, err := io.ReadAll(file)
+	info, err := file.Stat()
 	if err != nil {
-		return uploadResult{}, fmt.Errorf("failed to read file: %w", err)
+		return uploadResult{}, fmt.Errorf("failed to stat file: %w", err)
+	}
+	if info.IsDir() {
+		return uploadResult{}, fmt.Errorf("cannot upload a directory: %s", filePath)
 	}
 
 	// Get filename
 	filename := filepath.Base(filePath)
 
-	// Detect content type
-	contentType := detectContentType(filename, content)
+	// Detect content type (sniffs the head and rewinds the handle)
+	contentType, err := detectContentType(filename, file)
+	if err != nil {
+		return uploadResult{}, fmt.Errorf("failed to detect content type: %w", err)
+	}
 
 	// Upload using two-step process
-	err = api.UploadReleaseAssetByTag(client, owner, repo, tag, filename, content, contentType)
+	err = api.UploadReleaseAssetByTag(client, owner, repo, tag, filename, file, info.Size(), contentType)
 	if err != nil {
 		return uploadResult{}, fmt.Errorf("failed to upload %s: %w", filename, err)
 	}
@@ -164,67 +200,78 @@ func uploadFile(client *api.Client, owner, repo, tag, filePath, label string, cs
 	result := uploadResult{
 		Name:        filename,
 		Path:        filePath,
-		Size:        len(content),
+		Size:        int(info.Size()),
 		ContentType: contentType,
 	}
 
 	if writeText {
-		fmt.Fprintf(out, "%s Uploaded %s (%s)\n", cs.Green("✓"), filename, formatSize(len(content)))
+		fmt.Fprintf(out, "%s Uploaded %s (%s)\n", cs.Green("✓"), filename, formatSize(int(info.Size())))
 	}
 
 	return result, nil
 }
 
-func detectContentType(filename string, content []byte) string {
+// detectContentType resolves the asset content type: the extension table
+// first, then a 512-byte sniff via http.DetectContentType. The reader is a
+// ReadSeeker and is rewound after the sniff so the upload streams from the
+// start.
+func detectContentType(filename string, content io.ReadSeeker) (string, error) {
 	// Try to detect from file extension
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
 	case ".zip":
-		return "application/zip"
+		return "application/zip", nil
 	case ".tar":
-		return "application/x-tar"
+		return "application/x-tar", nil
 	case ".gz", ".tgz":
-		return "application/gzip"
+		return "application/gzip", nil
 	case ".bz2":
-		return "application/x-bzip2"
+		return "application/x-bzip2", nil
 	case ".xz":
-		return "application/x-xz"
+		return "application/x-xz", nil
 	case ".deb":
-		return "application/vnd.debian.binary-package"
+		return "application/vnd.debian.binary-package", nil
 	case ".rpm":
-		return "application/x-rpm"
+		return "application/x-rpm", nil
 	case ".dmg":
-		return "application/x-apple-diskimage"
+		return "application/x-apple-diskimage", nil
 	case ".exe":
-		return "application/vnd.microsoft.portable-executable"
+		return "application/vnd.microsoft.portable-executable", nil
 	case ".msi":
-		return "application/x-msi"
+		return "application/x-msi", nil
 	case ".apk":
-		return "application/vnd.android.package-archive"
+		return "application/vnd.android.package-archive", nil
 	case ".pdf":
-		return "application/pdf"
+		return "application/pdf", nil
 	case ".txt", ".md":
-		return "text/plain"
+		return "text/plain", nil
 	case ".json":
-		return "application/json"
+		return "application/json", nil
 	case ".yaml", ".yml":
-		return "application/x-yaml"
+		return "application/x-yaml", nil
 	case ".xml":
-		return "application/xml"
+		return "application/xml", nil
 	}
 
-	// Try to detect from content
-	ct := http.DetectContentType(content)
-	if ct != "application/octet-stream" {
-		return ct
+	// Try to detect from content: read the head, sniff, rewind.
+	head := make([]byte, 512)
+	n, err := content.Read(head)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if _, err := content.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	if ct := http.DetectContentType(head[:n]); ct != "application/octet-stream" {
+		return ct, nil
 	}
 
 	// Use mime.TypeByExtension
 	if ct := mime.TypeByExtension(ext); ct != "" {
-		return ct
+		return ct, nil
 	}
 
-	return "application/octet-stream"
+	return "application/octet-stream", nil
 }
 
 func formatSize(bytes int) string {

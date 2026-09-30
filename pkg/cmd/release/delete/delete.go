@@ -109,16 +109,11 @@ func deleteRun(opts *DeleteOptions) error {
 		return cmdutil.WrapNotFound(err, "release %s not found in %s/%s", opts.TagName, owner, repo)
 	}
 
-	title := release.TagName
-	if release.Name != "" {
-		title = release.Name
-	}
-
 	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: opts.TagName,
-		Prompt:   fmt.Sprintf("! This will delete release %s\nType the tag name to confirm: ", cs.Bold(title)),
+		Prompt:   fmt.Sprintf("! This will delete release %s\nType the tag name to confirm: ", cs.Bold(confirmTitle(release))),
 	}); err != nil {
 		return err
 	}
@@ -149,4 +144,15 @@ func deleteRun(opts *DeleteOptions) error {
 
 func parseRepo(repo string) (string, string, error) {
 	return cmdutil.ParseRepo(repo)
+}
+
+// confirmTitle shows the release identity in the confirmation prompt. The
+// expected input is the tag, so when Name and TagName differ both are shown
+// — displaying only the name invited typing the name and being rejected
+// (mirrors delete-asset, which shows exactly what it expects).
+func confirmTitle(release *api.Release) string {
+	if release.Name != "" && release.Name != release.TagName {
+		return fmt.Sprintf("%s (tag: %s)", release.Name, release.TagName)
+	}
+	return release.TagName
 }

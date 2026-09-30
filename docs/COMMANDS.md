@@ -2110,6 +2110,9 @@ gc release upload v1.0.0 app.zip -R infra-test/gctest1 --json
 
 说明：
 - `--label` 参数当前不受 GitCode release upload API 支持；CLI 现在会直接报错，不再静默忽略。
+- 上传前检查同名资产：release 中已存在同名资产时整批拒绝（错误信息提示先 `gc release delete-asset` 删除或改名再传），不会部分上传。
+- 多文件上传时任一文件失败即中止，错误信息附带本次已成功上传的文件清单。
+- 文件以流式上传（不整文件读入内存）；`--json` 仍只在全部文件上传完成后输出。
 - `--json` 只在所有文件上传完成后输出上传结果数组；每项包含 `name`、`path`、`size` 和 `content_type`，不会混入文本提示。
 
 ### release download - 下载资产
@@ -2132,8 +2135,10 @@ gc release download v1.0.0 -R infra-test/gctest1 --all
 ```
 
 说明：
-- 默认过滤 source archive（`.zip`/`.tar.gz` 源码包），只下载二进制/ wheel 等发布资产。
+- 默认过滤 GitCode 自动生成的源码包：按下载 URL 含 `/archive/refs/heads/` 的特征识别，与文件扩展名无关；正常命名的 `.zip`/`.tar.gz` 发布资产不会被过滤。
 - 需要完整下载（包含 source archive）时显式传 `--all`。
+- 目标文件已存在时默认报错；`--clobber` 覆盖、`--skip-existing` 跳过已存在文件，两个参数互斥。
+- 显式点名资产时：任一名字不存在即报错并列出该 release 的全部可用资产名；点名的资产即使是源码包也会下载（不受默认过滤与 `--all` 影响）。
 
 ### release edit - 编辑 Release
 
