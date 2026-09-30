@@ -113,6 +113,7 @@ field/type checks whenever a command supports `--json`.
 - 脚本不会读取真实 token，不会执行 `auth login --with-token`，也不会执行 `auth logout`。
 - 无认证错误路径会使用临时空 `GC_CONFIG_DIR` 和空环境变量执行单条命令，避免污染本地长期配置。
 - `release delete` 的 dry-run 默认使用 `GC_REGRESSION_RELEASE_TAG`，未显式设置时默认取 `v0.0.1-test`。
+- 真实删除请求当前被平台以 `405 Method Not Allowed` 拒绝，命令错误信息包含该 Release 的网页链接指引。回归集只覆盖 `--dry-run`，不执行真实删除（平台将来启用删除 API 后也应如此，避免删除 infra-test 资源）。
 
 ## 可选写路径
 

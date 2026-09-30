@@ -2165,6 +2165,7 @@ gc release delete v1.0.0 -R infra-test/gctest1 --dry-run
 
 说明：
 - GitCode 官方 OpenAPI 当前没有 Release 删除接口，实际删除请求会返回 `405 Method Not Allowed`。
+- 405 时命令错误信息包含该 Release 的网页链接（`html_url`），指引到仓库 Release 页面完成删除。
 - `--dry-run` 仅预览目标和参数，不执行删除；需要删除时请使用仓库 Release 页面。
 
 ### release delete-asset - 删除 Release 附件

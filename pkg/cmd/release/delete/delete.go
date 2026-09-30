@@ -2,6 +2,7 @@
 package delete
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -41,15 +42,20 @@ func NewCmdDelete(f *cmdutil.Factory, runF func(*DeleteOptions) error) *cobra.Co
 		Long: heredoc.Doc(`
 			Delete a release from a repository.
 
-			This will delete the release but not the associated git tag.
+			GitCode does not currently provide a release deletion API: the
+			deletion request fails with HTTP 405 Method Not Allowed. Use
+			--dry-run to preview the target, and delete the release from
+			the repository's Releases page in the web UI.
+
+			This would delete the release but not the associated git tag.
 
 				Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
-			# Delete a release
-			$ gc release delete v1.0.0 -R owner/repo
+			# Preview a deletion (the platform has no delete API)
+			$ gc release delete v1.0.0 -R owner/repo --dry-run
 
-			# Delete without confirmation
+			# Attempt a deletion without confirmation
 			$ gc release delete v1.0.0 -R owner/repo --yes
 		`),
 		Args: cobra.ExactArgs(1),
@@ -121,8 +127,18 @@ func deleteRun(opts *DeleteOptions) error {
 	// GetRelease call if the tag-based endpoint falls back to ID deletion.
 	err = api.DeleteReleaseByTagKnown(client, owner, repo, opts.TagName, release)
 	if err != nil {
-		if err == api.ErrNoReleaseID {
+		if errors.Is(err, api.ErrNoReleaseID) {
 			return fmt.Errorf("failed to delete release: %w; tag-based endpoint unavailable and GitCode omits release IDs in lookup responses", err)
+		}
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusMethodNotAllowed {
+			// GitCode has no release-deletion API (docs/COMMANDS.md,
+			// "release delete"); point the user at the web UI instead.
+			guide := "Delete the release from the web UI instead."
+			if release.HTMLURL != "" {
+				guide = fmt.Sprintf("Delete the release from the web UI instead:\n  %s", release.HTMLURL)
+			}
+			return fmt.Errorf("failed to delete release: %w\n\nGitCode does not support deleting releases through the API (HTTP 405). %s", err, guide)
 		}
 		return fmt.Errorf("failed to delete release: %w", err)
 	}
