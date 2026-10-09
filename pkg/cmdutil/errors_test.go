@@ -346,8 +346,15 @@ func TestFormatAPIID(t *testing.T) {
 	}{
 		"string":  {input: "123", want: "123"},
 		"float64": {input: 123.0, want: "123"},
+		"float32": {input: float32(456), want: "456"},
 		"int":     {input: 123, want: "123"},
+		"int64":   {input: int64(-42), want: "-42"},
+		"int32":   {input: int32(7), want: "7"},
+		"uint":    {input: uint(9), want: "9"},
+		"uint64":  {input: uint64(18446744073709551615), want: "18446744073709551615"},
+		"uint32":  {input: uint32(3000000000), want: "3000000000"},
 		"nil":     {input: nil, want: ""},
+		"other":   {input: true, want: "true"},
 	}
 
 	for name, tc := range cases {
