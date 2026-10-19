@@ -2,10 +2,14 @@ package login
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -367,15 +371,17 @@ func TestLoginSuccessWithEnvOverrideWarnsAndSaves(t *testing.T) {
 			if strings.Contains(out.String(), "Environment variables still take precedence") {
 				t.Fatalf("stdout still contains the old static env hint: %q", out.String())
 			}
-			for _, want := range []string{
-				"环境变量 " + tt.wantVar + " 已设置",
-				"sed -i 's/^\\(export \\)\\{0,1\\}" + tt.wantVar + "=/# &/' ~/.bashrc",
-				"unset " + tt.wantVar,
-				"gc auth status",
-			} {
-				if !strings.Contains(errOut.String(), want) {
-					t.Errorf("stderr missing %q, got:\n%s", want, errOut.String())
-				}
+			// The exact platform rendering is pinned by the envtoken unit
+			// tests; here we assert the wiring by comparing against the block
+			// rendered for this very runtime environment (shell + GOOS).
+			guidance := envtoken.Warning(envtoken.Options{
+				EnvVars:    []string{tt.wantVar},
+				Shell:      os.Getenv("SHELL"),
+				GOOS:       runtime.GOOS,
+				LoginSaved: true,
+			})
+			if !strings.Contains(errOut.String(), guidance) {
+				t.Errorf("stderr missing platform guidance block:\nwant:\n%s\ngot:\n%s", guidance, errOut.String())
 			}
 		})
 	}
@@ -477,5 +483,117 @@ func TestLoginInteractiveEnvOverrideGate(t *testing.T) {
 				t.Fatalf("accepted login must print the guidance plans:\n%s", errOut.String())
 			}
 		})
+	}
+}
+
+// TestLoginInteractivePasteTokenAndConfirmation guards the shared input
+// reader: pasting "token\ny\n" in one shot must reach the confirmation gate
+// instead of losing the buffered answer to a second, separate reader.
+func TestLoginInteractivePasteTokenAndConfirmation(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantSaved bool
+	}{
+		{name: "token and y pasted together", input: "test-token\ny\n", wantSaved: true},
+		{name: "token and n pasted together", input: "test-token\nn\n", wantSaved: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GC_TOKEN", "env-override")
+			t.Setenv("GITCODE_TOKEN", "")
+
+			io, _, out, errOut := iostreams.TestTTY()
+			io.In = bytes.NewBufferString(tt.input)
+			opts := newLoginTestOpts(t, io, "")
+
+			if err := loginInteractive(opts); err != nil {
+				t.Fatalf("loginInteractive() error = %v", err)
+			}
+			if !strings.Contains(errOut.String(), "仍要将本次登录保存到本地配置吗") {
+				t.Fatalf("stderr missing confirmation gate:\n%s", errOut.String())
+			}
+			token := storedTokenFor(t, "gitcode.com")
+			if tt.wantSaved && token != "test-token" {
+				t.Fatalf("stored token = %q, want test-token", token)
+			}
+			if !tt.wantSaved && token != "" {
+				t.Fatalf("stored token = %q, want empty (declined save)", token)
+			}
+			if !tt.wantSaved && strings.Contains(out.String(), "Logged in as tester") {
+				t.Fatalf("declined login must not report success, stdout = %q", out.String())
+			}
+		})
+	}
+}
+
+// TestLoginEnvOverrideTokenVerifyFailsBeforeGate covers the "env set + invalid
+// token" matrix cell: verification fails first, so the gate never triggers,
+// nothing is saved, and no guidance is printed.
+func TestLoginEnvOverrideTokenVerifyFailsBeforeGate(t *testing.T) {
+	t.Setenv("GC_TOKEN", "env-override")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, _, errOut := iostreams.TestTTY()
+	io.In = bytes.NewBufferString("y\n")
+	opts := newLoginTestOpts(t, io, "gitcode.com")
+	opts.HttpClient = func() (*http.Client, error) {
+		return &http.Client{
+			Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Header:     make(http.Header),
+					Body:       ioNopCloser(`{"message":"unauthorized"}`),
+				}, nil
+			}),
+		}, nil
+	}
+
+	err := loginWithTokenFlag(opts)
+	if err == nil {
+		t.Fatal("loginWithTokenFlag() error = nil, want verify failure")
+	}
+	if !strings.Contains(err.Error(), "failed to verify token") {
+		t.Fatalf("error = %q, want verify failure", err.Error())
+	}
+	if strings.Contains(errOut.String(), "仍要将本次登录保存到本地配置吗") {
+		t.Fatalf("confirmation gate must not trigger on verify failure, stderr:\n%s", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "方案") {
+		t.Fatalf("no guidance may be printed on verify failure, stderr:\n%s", errOut.String())
+	}
+	if token := storedTokenFor(t, "gitcode.com"); token != "" {
+		t.Fatalf("stored token = %q, want empty (nothing saved)", token)
+	}
+}
+
+// erroringReader simulates a broken stdin for the confirmation gate.
+type erroringReader struct{}
+
+func (erroringReader) Read(p []byte) (int, error) { return 0, errors.New("boom") }
+
+// TestLoginEnvOverrideGateReadErrorPropagates covers the gate's non-EOF read
+// error path: it must surface as a usage CLIError without saving anything.
+func TestLoginEnvOverrideGateReadErrorPropagates(t *testing.T) {
+	t.Setenv("GC_TOKEN", "env-override")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, _, _ := iostreams.TestTTY()
+	io.In = erroringReader{}
+	opts := newLoginTestOpts(t, io, "gitcode.com")
+
+	err := loginWithTokenFlag(opts)
+	if err == nil {
+		t.Fatal("loginWithTokenFlag() error = nil, want read error")
+	}
+	if !strings.Contains(err.Error(), "failed to read confirmation") {
+		t.Fatalf("error = %q, want read confirmation failure", err.Error())
+	}
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitUsage)
+	}
+	if token := storedTokenFor(t, "gitcode.com"); token != "" {
+		t.Fatalf("stored token = %q, want empty (nothing saved)", token)
 	}
 }

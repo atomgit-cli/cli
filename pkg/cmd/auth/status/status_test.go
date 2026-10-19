@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -631,16 +634,25 @@ func TestStatusAuthFailureWithEnvSourceShowsOverrideGuidance(t *testing.T) {
 			}
 			for _, want := range []string{
 				"Token is invalid or expired",
-				"环境变量 " + tt.wantVar,
 				"仅重新登录不会生效",
 				"gc auth login",
-				"sed -i 's/^\\(export \\)\\{0,1\\}" + tt.wantVar + "=/# &/' ~/.bashrc",
-				"unset " + tt.wantVar,
 				"gc auth status",
 			} {
 				if !strings.Contains(errOut.String(), want) {
 					t.Errorf("stderr missing %q, got:\n%s", want, errOut.String())
 				}
+			}
+			// The exact platform rendering is pinned by the envtoken unit
+			// tests; here we assert the wiring by comparing against the block
+			// rendered for this very runtime environment (shell + GOOS).
+			guidance := envtoken.Warning(envtoken.Options{
+				EnvVars:    []string{tt.wantVar},
+				Shell:      os.Getenv("SHELL"),
+				GOOS:       runtime.GOOS,
+				LoginSaved: false,
+			})
+			if !strings.Contains(errOut.String(), guidance) {
+				t.Errorf("stderr missing platform guidance block:\nwant:\n%s\ngot:\n%s", guidance, errOut.String())
 			}
 			if strings.Contains(errOut.String(), "To re-authenticate, run: gc auth login") {
 				t.Errorf("stderr must not suggest plain re-login for env source:\n%s", errOut.String())

@@ -46,8 +46,11 @@ type Options struct {
 }
 
 // Warning renders the full guidance block for the given options. It returns
-// an empty string when no token environment variable is set.
+// an empty string when no token environment variable is set. EnvVars are
+// filtered to the known token variables so no caller can smuggle arbitrary
+// text into the rendered commands.
 func Warning(opts Options) string {
+	opts.EnvVars = sanitizeEnvVars(opts.EnvVars)
 	if len(opts.EnvVars) == 0 {
 		return ""
 	}
@@ -55,6 +58,21 @@ func Warning(opts Options) string {
 		return windowsWarning(opts)
 	}
 	return unixWarning(opts)
+}
+
+// sanitizeEnvVars keeps only the known token environment variables, in
+// priority order, dropping anything else a caller might pass in.
+func sanitizeEnvVars(envVars []string) []string {
+	var kept []string
+	for _, name := range tokenEnvVars {
+		for _, v := range envVars {
+			if v == name {
+				kept = append(kept, v)
+				break
+			}
+		}
+	}
+	return kept
 }
 
 // shellKind classifies $SHELL into "bash", "zsh", or "other".
@@ -132,7 +150,11 @@ func writeUnixPlanA(b *strings.Builder, opts Options, profile string) {
 	for _, envVar := range opts.EnvVars {
 		fmt.Fprintf(b, "       unset %s\n", envVar)
 	}
-	fmt.Fprintf(b, "    %d. 验证：\n       gc auth status\n\n", step+2)
+	// The unset step makes the current terminal pass even when the sed above
+	// matched nothing, so verification must run in a fresh terminal to prove
+	// the persistent definition is really gone.
+	fmt.Fprintf(b, "    %d. 验证（新开一个终端执行）：\n       gc auth status\n", step+2)
+	fmt.Fprintf(b, "       （若新终端仍显示环境变量生效，请检索其他 shell 配置文件——如 .bash_profile、.zshenv、/etc/environment——以及带缩进或空格的变体定义）\n\n")
 }
 
 // writeUnixPlanB prints the keep-using-the-environment-variable plan. The
@@ -185,7 +207,7 @@ func writeWindowsPlanA(b *strings.Builder, opts Options) {
 		fmt.Fprintf(b, "    1. 登录（在 PowerShell 中执行）：\n       gc auth login\n")
 		step = 2
 	}
-	fmt.Fprintf(b, "    %d. 停用用户级环境变量（若定义在 $PROFILE 中请注释该行）：\n", step)
+	fmt.Fprintf(b, "    %d. 停用用户级环境变量（不可逆；若定义在 $PROFILE 中请注释该行）：\n", step)
 	for _, envVar := range opts.EnvVars {
 		fmt.Fprintf(b, "       [Environment]::SetEnvironmentVariable('%s', $null, 'User')\n", envVar)
 	}
@@ -193,7 +215,8 @@ func writeWindowsPlanA(b *strings.Builder, opts Options) {
 	for _, envVar := range opts.EnvVars {
 		fmt.Fprintf(b, "       Remove-Item Env:%s\n", envVar)
 	}
-	fmt.Fprintf(b, "    %d. 验证：\n       gc auth status\n\n", step+2)
+	fmt.Fprintf(b, "    %d. 验证（新开一个终端执行）：\n       gc auth status\n", step+2)
+	fmt.Fprintf(b, "       （若新终端仍显示环境变量生效，请检查 $PROFILE 与系统级环境变量）\n\n")
 }
 
 // writeWindowsPlanB prints the PowerShell variant of plan B. Read-Host keeps
@@ -203,7 +226,7 @@ func writeWindowsPlanB(b *strings.Builder, opts Options) {
 	effective := opts.EnvVars[0]
 	fmt.Fprintf(b, "  方案 B · 继续使用环境变量认证：\n")
 	fmt.Fprintf(b, "    1. 在「系统属性 → 环境变量」或 $PROFILE 中更新 %s 的值（GitCode「访问令牌」页生成）\n", effective)
-	fmt.Fprintf(b, "    2. 当前终端立即生效（PowerShell）：\n")
+	fmt.Fprintf(b, "    2. 当前终端立即生效（PowerShell，输入会回显，请在私密终端执行）：\n")
 	fmt.Fprintf(b, "       $env:%s = Read-Host \"New token\"\n", effective)
 	fmt.Fprintf(b, "    3. 验证：\n       gc auth status\n")
 }

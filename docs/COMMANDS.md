@@ -271,7 +271,8 @@ gc auth login --web
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
-- 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含 `unset`/更新值/`gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
+- 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见认证模型文档）。
+- 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆停用定义/`unset`/新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
 - 未设置环境变量时，登录成功输出保持安静（不再打印环境变量优先级提示）。
 - 未显式传 `--with-token` 时需要交互式 TTY；非交互环境会直接报错，避免命令挂起等待输入。
 
@@ -299,7 +300,7 @@ gitcode.com
 
 未认证或 token 无效/过期时，诊断信息输出到 stderr，退出码为 `4`（`ExitAuth`）。`--json` 模式下 JSON 仍写入 stdout（`logged_in:false` 或 `token_valid:false`），退出码同样为 `4`，便于 AI 代理仅凭退出码判断认证状态。
 
-token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾。来源为本地配置时维持 re-login 提示不变。
+token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾。来源为本地配置时维持 re-login 提示不变。该指引仅在文本输出模式出现；`--json` 模式不输出指引文本，stdout 保持纯 JSON，退出码仍为 `4`。
 
 ### auth token - 显示 Token
 

@@ -35,6 +35,11 @@ type LoginOptions struct {
 
 	// Internal state populated from stdin or interactive input.
 	Token string
+
+	// inputReader caches a single buffered reader over IO.In so the token
+	// prompt and the save-confirmation gate share one buffer; separate
+	// readers would lose pasted-ahead input between them.
+	inputReader *bufio.Reader
 }
 
 // NewCmdLogin creates the login command
@@ -168,7 +173,7 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 	envVars := envtoken.SetEnvVars(os.LookupEnv)
 	envOverrides := opts.Hostname == "gitcode.com" && len(envVars) > 0
 	if envOverrides && opts.IO.CanPrompt() {
-		keep, err := confirmSaveUnderEnvOverride(opts.IO, envVars)
+		keep, err := confirmSaveUnderEnvOverride(opts, envVars)
 		if err != nil {
 			return err
 		}
@@ -178,16 +183,22 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 		}
 	}
 
+	return persistLogin(opts, user.Login, envVars, envOverrides)
+}
+
+// persistLogin stores the verified login and prints the success summary plus,
+// when an environment variable overrides it, the remediation guidance.
+func persistLogin(opts *LoginOptions, username string, envVars []string, envOverrides bool) error {
 	cfg, err := opts.Config()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
-	_, err = cfg.Authentication().Login(opts.Hostname, user.Login, opts.Token, opts.GitProtocol, false)
+	_, err = cfg.Authentication().Login(opts.Hostname, username, opts.Token, opts.GitProtocol, false)
 	if err != nil {
 		return fmt.Errorf("failed to store authentication: %w", err)
 	}
 
-	fmt.Fprintf(opts.IO.Out, "%s Logged in as %s\n", opts.IO.ColorScheme().Green("✓"), user.Login)
+	fmt.Fprintf(opts.IO.Out, "%s Logged in as %s\n", opts.IO.ColorScheme().Green("✓"), username)
 	fmt.Fprintf(opts.IO.Out, "  Host: %s\n", opts.Hostname)
 	fmt.Fprintf(opts.IO.Out, "  Git protocol: %s\n", opts.GitProtocol)
 
@@ -207,11 +218,11 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 // when a token environment variable will keep overriding it. It returns false
 // when the user declines or when stdin is exhausted, so the safe default is
 // not to persist a login that would not take effect.
-func confirmSaveUnderEnvOverride(streams *iostreams.IOStreams, envVars []string) (bool, error) {
-	fmt.Fprintf(streams.ErrOut, "⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n", strings.Join(envVars, "、"))
-	fmt.Fprintf(streams.ErrOut, "仍要将本次登录保存到本地配置吗？(y/N): ")
+func confirmSaveUnderEnvOverride(opts *LoginOptions, envVars []string) (bool, error) {
+	fmt.Fprintf(opts.IO.ErrOut, "⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n", strings.Join(envVars, "、"))
+	fmt.Fprintf(opts.IO.ErrOut, "仍要将本次登录保存到本地配置吗？(y/N): ")
 
-	input, err := bufio.NewReader(streams.In).ReadString('\n')
+	input, err := newInputReader(opts).ReadString('\n')
 	if err != nil {
 		if err == io.EOF && strings.TrimSpace(input) == "" {
 			return false, nil
@@ -285,9 +296,16 @@ func loginInteractive(opts *LoginOptions) error {
 	return loginWithTokenFlag(opts)
 }
 
+// newInputReader returns the shared buffered reader over the login input,
+// created once per LoginOptions so consecutive prompts do not lose buffered
+// input to each other.
 func newInputReader(opts *LoginOptions) *bufio.Reader {
-	if opts.IO != nil && opts.IO.In != nil {
-		return bufio.NewReader(opts.IO.In)
+	if opts.inputReader == nil {
+		if opts.IO != nil && opts.IO.In != nil {
+			opts.inputReader = bufio.NewReader(opts.IO.In)
+		} else {
+			opts.inputReader = bufio.NewReader(os.Stdin)
+		}
 	}
-	return bufio.NewReader(os.Stdin)
+	return opts.inputReader
 }

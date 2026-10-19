@@ -160,6 +160,50 @@ func TestWarning(t *testing.T) {
 			notSub: []string{`read -rsp "New token: " GITCODE_TOKEN`},
 		},
 		{
+			name: "unknown env vars are filtered out of the rendered commands",
+			opts: Options{
+				EnvVars:    []string{"GC_TOKEN", "USER_CONTROLLED; rm -rf ~"},
+				Shell:      "/bin/bash",
+				GOOS:       "linux",
+				LoginSaved: true,
+			},
+			wantSub: []string{
+				"GC_TOKEN",
+				"sed -i 's/^\\(export \\)\\{0,1\\}GC_TOKEN=/# &/' ~/.bashrc",
+			},
+			notSub: []string{"USER_CONTROLLED", "rm -rf"},
+		},
+		{
+			name: "windows status failure context includes a full login step",
+			opts: Options{
+				EnvVars:    []string{"GC_TOKEN"},
+				Shell:      "pwsh.exe",
+				GOOS:       "windows",
+				LoginSaved: false,
+			},
+			wantSub: []string{
+				"仅重新登录不会生效",
+				"gc auth login",
+				"[Environment]::SetEnvironmentVariable('GC_TOKEN', $null, 'User')",
+				"gc auth status",
+			},
+			notSub: []string{"本次登录已保存"},
+		},
+		{
+			name: "linux zsh uses the zsh rc file and prompt form",
+			opts: Options{
+				EnvVars:    []string{"GC_TOKEN"},
+				Shell:      "/usr/bin/zsh",
+				GOOS:       "linux",
+				LoginSaved: true,
+			},
+			wantSub: []string{
+				"sed -i 's/^\\(export \\)\\{0,1\\}GC_TOKEN=/# &/' ~/.zshrc",
+				`read -rs "GC_TOKEN?New token: " && export GC_TOKEN && echo`,
+			},
+			notSub: []string{"~/.bashrc"},
+		},
+		{
 			name: "unrecognized shell falls back to ~/.profile with an adjust note",
 			opts: Options{
 				EnvVars:    []string{"GC_TOKEN"},
@@ -213,5 +257,25 @@ func TestWarningEndsEveryPlanWithStatusVerify(t *testing.T) {
 		if !strings.Contains(plan, "gc auth status") {
 			t.Errorf("plan does not end with a verification command:\n%s", plan)
 		}
+	}
+}
+
+// TestWarningEmptyEnvVarsReturnsEmpty pins the documented empty contract:
+// no known token variable means no guidance at all.
+func TestWarningEmptyEnvVarsReturnsEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVars []string
+	}{
+		{name: "nil env vars", envVars: nil},
+		{name: "empty env vars", envVars: []string{}},
+		{name: "only unknown env vars", envVars: []string{"HOME", "PATH"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Warning(Options{EnvVars: tt.envVars, Shell: "/bin/bash", GOOS: "linux", LoginSaved: true}); got != "" {
+				t.Fatalf("Warning() = %q, want empty string", got)
+			}
+		})
 	}
 }
