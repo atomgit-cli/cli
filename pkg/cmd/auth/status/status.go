@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/api"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -165,7 +168,19 @@ func statusRun(opts *StatusOptions) error {
 		if isAuthError {
 			fmt.Fprintf(opts.IO.ErrOut, "  %s Token is invalid or expired\n", cs.Red("✗"))
 			fmt.Fprintf(opts.IO.ErrOut, "\n")
-			fmt.Fprintf(opts.IO.ErrOut, "To re-authenticate, run: gc auth login\n")
+			// A token coming from the environment keeps overriding any local
+			// login, so suggesting a plain re-login would be a dead end. Point
+			// at the copy-paste remediation plans instead (issue 613).
+			if tokenSource == "GC_TOKEN" || tokenSource == "GITCODE_TOKEN" {
+				fmt.Fprint(opts.IO.ErrOut, envtoken.Warning(envtoken.Options{
+					EnvVars:    envtoken.SetEnvVars(os.LookupEnv),
+					Shell:      os.Getenv("SHELL"),
+					GOOS:       runtime.GOOS,
+					LoginSaved: false,
+				}))
+			} else {
+				fmt.Fprintf(opts.IO.ErrOut, "To re-authenticate, run: gc auth login\n")
+			}
 			return cmdutil.NewAuthError(fmt.Sprintf("token for %s is invalid or expired", opts.Hostname))
 		}
 		fmt.Fprintf(opts.IO.ErrOut, "  %s Token verification failed: %v\n", cs.Red("✗"), err)

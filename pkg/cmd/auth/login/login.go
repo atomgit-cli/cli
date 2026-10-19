@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -14,6 +15,7 @@ import (
 
 	"gitcode.com/gitcode-cli/cli/api"
 	"gitcode.com/gitcode-cli/cli/pkg/browser"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -161,6 +163,21 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 		return fmt.Errorf("failed to verify token: %w", err)
 	}
 
+	// Environment tokens only override the default host, so the gate and the
+	// guidance below apply exclusively to gitcode.com logins (issue 613).
+	envVars := envtoken.SetEnvVars(os.LookupEnv)
+	envOverrides := opts.Hostname == "gitcode.com" && len(envVars) > 0
+	if envOverrides && opts.IO.CanPrompt() {
+		keep, err := confirmSaveUnderEnvOverride(opts.IO, envVars)
+		if err != nil {
+			return err
+		}
+		if !keep {
+			fmt.Fprintf(opts.IO.ErrOut, "已跳过保存登录配置；如需改用本地登录，请先处理环境变量后重新运行 gc auth login。\n")
+			return nil
+		}
+	}
+
 	cfg, err := opts.Config()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
@@ -173,10 +190,40 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 	fmt.Fprintf(opts.IO.Out, "%s Logged in as %s\n", opts.IO.ColorScheme().Green("✓"), user.Login)
 	fmt.Fprintf(opts.IO.Out, "  Host: %s\n", opts.Hostname)
 	fmt.Fprintf(opts.IO.Out, "  Git protocol: %s\n", opts.GitProtocol)
-	fmt.Fprintf(opts.IO.Out, "\n")
-	fmt.Fprintf(opts.IO.Out, "Token stored in local config. Environment variables still take precedence.\n")
+
+	if envOverrides {
+		fmt.Fprintf(opts.IO.ErrOut, "\n%s", envtoken.Warning(envtoken.Options{
+			EnvVars:    envVars,
+			Shell:      os.Getenv("SHELL"),
+			GOOS:       runtime.GOOS,
+			LoginSaved: true,
+		}))
+	}
 
 	return nil
+}
+
+// confirmSaveUnderEnvOverride asks whether to still store a verified login
+// when a token environment variable will keep overriding it. It returns false
+// when the user declines or when stdin is exhausted, so the safe default is
+// not to persist a login that would not take effect.
+func confirmSaveUnderEnvOverride(streams *iostreams.IOStreams, envVars []string) (bool, error) {
+	fmt.Fprintf(streams.ErrOut, "⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n", strings.Join(envVars, "、"))
+	fmt.Fprintf(streams.ErrOut, "仍要将本次登录保存到本地配置吗？(y/N): ")
+
+	input, err := bufio.NewReader(streams.In).ReadString('\n')
+	if err != nil {
+		if err == io.EOF && strings.TrimSpace(input) == "" {
+			return false, nil
+		}
+		return false, cmdutil.NewCLIError(cmdutil.ExitUsage, "failed to read confirmation", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func loginWithWeb(opts *LoginOptions) error {

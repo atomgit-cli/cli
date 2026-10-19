@@ -74,6 +74,12 @@
 - 校验 token 有效性
 - 成功后写入本地配置（主机名、用户名、token、Git protocol）
 - 若同时存在环境变量，后续命令仍优先使用环境变量
+- 登录目标为默认主机 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时（仅检测存在性，不读取值）：
+  - 交互模式：保存前会先提示"本次登录在该环境不会生效"并询问是否仍保存（默认否，直接回车即跳过保存）
+  - 非交互模式：保存后向 stderr 输出根治指引——两条可直接复制执行的方案（停用配置文件中的旧定义 + 当前终端 unset 后验证；或更新环境变量的值后验证），命令按 `$SHELL` 推断配置文件路径、按平台适配 `sed`（GNU/BSD）或 PowerShell 语法
+  - 修改配置文件的命令为可逆形式（注释而非删除），会话级命令避免 token 进入 shell history
+- 未设置环境变量时，登录成功不再输出环境变量相关提示
+- 自定义主机登录不受通用环境变量影响，不输出上述警告
 - 未显式传 `--with-token` 时，需要交互式 TTY；非交互环境会直接报错
 - `--web` (`-w`): 仅支持默认主机 `gitcode.com`，打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，再继续在终端中完成登录
 - `--web` 与 `--with-token` 是互斥的认证模式，不能同时使用
@@ -84,6 +90,8 @@
 
 - 按统一优先级解析当前活动 token
 - 显示 token 来源：`GC_TOKEN`、`GITCODE_TOKEN` 或 `config`
+- token 失效或过期且来源为环境变量时，不再建议单纯 re-login（环境变量会继续覆盖新登录），改为向 stderr 输出与 `auth login` 同风格的可复制处理方案：方案 A 含完整登录步骤并停用环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾
+- token 来源为本地配置时，维持 "To re-authenticate, run: gc auth login" 提示不变
 - 显式传 `--hostname` 时，按目标主机读取本地已存储 token，不再被通用环境变量覆盖
 - 传 `--show-token` 时会输出完整 token，仅建议由人工在受控终端中临时使用，禁止作为脚本取 token 入口
 - `--show-token` 必须在交互式 TTY 中按提示输入 hostname 确认；非交互环境一律拒绝输出完整 token，没有 `--yes` 绕过

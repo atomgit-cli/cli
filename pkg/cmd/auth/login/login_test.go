@@ -288,3 +288,194 @@ type readCloser struct {
 }
 
 func (r *readCloser) Close() error { return nil }
+
+// --- issue 613: environment variable override guidance on login success ---
+
+// newLoginTestOpts builds LoginOptions whose token verifies as "tester"
+// against a mocked API and whose config is isolated to a temp dir.
+func newLoginTestOpts(t *testing.T, io *iostreams.IOStreams, hostname string) *LoginOptions {
+	t.Helper()
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	return &LoginOptions{
+		IO:       io,
+		Hostname: hostname,
+		Token:    "test-token",
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"login":"tester"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+}
+
+// storedTokenFor reads the persisted token from the isolated config dir.
+func storedTokenFor(t *testing.T, hostname string) string {
+	t.Helper()
+	cfg := config.New()
+	token, _ := cfg.Authentication().StoredToken(hostname)
+	return token
+}
+
+func TestLoginSuccessWithEnvOverrideWarnsAndSaves(t *testing.T) {
+	tests := []struct {
+		name    string
+		envVars map[string]string
+		wantVar string
+	}{
+		{
+			name:    "GC_TOKEN set",
+			envVars: map[string]string{"GC_TOKEN": "env-override"},
+			wantVar: "GC_TOKEN",
+		},
+		{
+			name:    "GITCODE_TOKEN set",
+			envVars: map[string]string{"GITCODE_TOKEN": "env-override"},
+			wantVar: "GITCODE_TOKEN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GC_TOKEN", "")
+			t.Setenv("GITCODE_TOKEN", "")
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+			t.Setenv("SHELL", "/bin/bash")
+
+			io, _, out, errOut := iostreams.Test()
+			opts := newLoginTestOpts(t, io, "gitcode.com")
+
+			if err := loginWithTokenFlag(opts); err != nil {
+				t.Fatalf("loginWithTokenFlag() error = %v", err)
+			}
+			if token := storedTokenFor(t, "gitcode.com"); token != "test-token" {
+				t.Fatalf("stored token = %q, want test-token (login must still save)", token)
+			}
+			if !strings.Contains(out.String(), "Logged in as tester") {
+				t.Fatalf("stdout = %q", out.String())
+			}
+			if strings.Contains(out.String(), "Environment variables still take precedence") {
+				t.Fatalf("stdout still contains the old static env hint: %q", out.String())
+			}
+			for _, want := range []string{
+				"环境变量 " + tt.wantVar + " 已设置",
+				"sed -i 's/^\\(export \\)\\{0,1\\}" + tt.wantVar + "=/# &/' ~/.bashrc",
+				"unset " + tt.wantVar,
+				"gc auth status",
+			} {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("stderr missing %q, got:\n%s", want, errOut.String())
+				}
+			}
+		})
+	}
+}
+
+func TestLoginSuccessWithoutEnvStaysQuiet(t *testing.T) {
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, errOut := iostreams.Test()
+	opts := newLoginTestOpts(t, io, "gitcode.com")
+
+	if err := loginWithTokenFlag(opts); err != nil {
+		t.Fatalf("loginWithTokenFlag() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Logged in as tester") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	if strings.Contains(out.String(), "Environment variables") {
+		t.Fatalf("stdout contains env-related output: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "环境变量") || strings.Contains(errOut.String(), "方案") {
+		t.Fatalf("stderr contains env guidance: %q", errOut.String())
+	}
+}
+
+func TestLoginSuccessWithEnvOnCustomHostDoesNotWarn(t *testing.T) {
+	t.Setenv("GC_TOKEN", "env-override")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, errOut := iostreams.Test()
+	opts := newLoginTestOpts(t, io, "enterprise.example.com")
+
+	if err := loginWithTokenFlag(opts); err != nil {
+		t.Fatalf("loginWithTokenFlag() error = %v", err)
+	}
+	if token := storedTokenFor(t, "enterprise.example.com"); token != "test-token" {
+		t.Fatalf("stored token = %q, want test-token", token)
+	}
+	if !strings.Contains(out.String(), "Logged in as tester") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "环境变量") || strings.Contains(out.String(), "环境变量") {
+		t.Fatalf("custom host login must not warn about env override, stderr:\n%s\nstdout:\n%s", errOut.String(), out.String())
+	}
+	if strings.Contains(out.String(), "Environment variables still take precedence") {
+		t.Fatalf("misleading static env hint must be gone for custom hosts: %q", out.String())
+	}
+}
+
+func TestLoginInteractiveEnvOverrideGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		answer     string
+		wantSaved  bool
+		wantLogged bool
+	}{
+		{name: "decline with n", answer: "n\n", wantSaved: false, wantLogged: false},
+		{name: "decline with empty line (default N)", answer: "\n", wantSaved: false, wantLogged: false},
+		{name: "decline on EOF", answer: "", wantSaved: false, wantLogged: false},
+		{name: "accept with y", answer: "y\n", wantSaved: true, wantLogged: true},
+		{name: "accept with yes", answer: "YES\n", wantSaved: true, wantLogged: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GC_TOKEN", "env-override")
+			t.Setenv("GITCODE_TOKEN", "")
+
+			io, _, out, errOut := iostreams.TestTTY()
+			io.In = bytes.NewBufferString(tt.answer)
+			opts := newLoginTestOpts(t, io, "gitcode.com")
+
+			if err := loginWithTokenFlag(opts); err != nil {
+				t.Fatalf("loginWithTokenFlag() error = %v", err)
+			}
+			if !strings.Contains(errOut.String(), "仍要将本次登录保存到本地配置吗") {
+				t.Fatalf("stderr missing confirmation gate:\n%s", errOut.String())
+			}
+			token := storedTokenFor(t, "gitcode.com")
+			if tt.wantSaved && token != "test-token" {
+				t.Fatalf("stored token = %q, want test-token", token)
+			}
+			if !tt.wantSaved && token != "" {
+				t.Fatalf("stored token = %q, want empty (declined save)", token)
+			}
+			if tt.wantLogged && !strings.Contains(out.String(), "Logged in as tester") {
+				t.Fatalf("stdout = %q", out.String())
+			}
+			if !tt.wantLogged {
+				if strings.Contains(out.String(), "Logged in as tester") {
+					t.Fatalf("declined login must not report success, stdout = %q", out.String())
+				}
+				if !strings.Contains(errOut.String(), "已跳过保存登录配置") {
+					t.Fatalf("stderr missing skip notice:\n%s", errOut.String())
+				}
+			}
+			if tt.wantLogged && !strings.Contains(errOut.String(), "方案 A") {
+				t.Fatalf("accepted login must print the guidance plans:\n%s", errOut.String())
+			}
+		})
+	}
+}
