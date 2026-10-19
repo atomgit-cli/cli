@@ -90,7 +90,7 @@
 
 - 按统一优先级解析当前活动 token
 - 显示 token 来源：`GC_TOKEN`、`GITCODE_TOKEN` 或 `config`
-- token 失效或过期且来源为环境变量时，不再建议单纯 re-login（环境变量会继续覆盖新登录），改为向 stderr 输出与 `auth login` 同风格的可复制处理方案：方案 A 含完整登录步骤并停用环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾（仅文本输出模式；`--json` 模式不输出该指引，stdout 保持纯 JSON，退出码仍为 `4`）
+- token 失效或过期且来源为环境变量时，不再建议单纯 re-login（环境变量会继续覆盖新登录），改为向 stderr 输出与 `auth login` 同风格的可复制处理方案：方案 A 含完整登录步骤并停用环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾，方案 A 的验证在新开终端执行（仅文本输出模式；`--json` 模式不输出该指引，stdout 保持纯 JSON，退出码仍为 `4`）
 - token 来源为本地配置时，维持 "To re-authenticate, run: gc auth login" 提示不变
 - 显式传 `--hostname` 时，按目标主机读取本地已存储 token，不再被通用环境变量覆盖
 - 传 `--show-token` 时会输出完整 token，仅建议由人工在受控终端中临时使用，禁止作为脚本取 token 入口
