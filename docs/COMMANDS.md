@@ -271,8 +271,8 @@ gc auth login --web
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
-- 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见认证模型文档）。
-- 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆停用定义/`unset`/新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
+- 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见[认证模型](./AUTH.md)）。
+- 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆（Unix）/删除式（Windows 用户级）停用定义、`unset`、新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
 - 未设置环境变量时，登录成功输出保持安静（不再打印环境变量优先级提示）。
 - 未显式传 `--with-token` 时需要交互式 TTY；非交互环境会直接报错，避免命令挂起等待输入。
 

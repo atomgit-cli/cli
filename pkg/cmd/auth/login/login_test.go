@@ -374,6 +374,12 @@ func TestLoginSuccessWithEnvOverrideWarnsAndSaves(t *testing.T) {
 			// The exact platform rendering is pinned by the envtoken unit
 			// tests; here we assert the wiring by comparing against the block
 			// rendered for this very runtime environment (shell + GOOS).
+			// Stable-string floor: if the wiring ever regresses to an empty
+			// EnvVars list, guidance becomes "" and Contains("") is vacuously
+			// true, so pin the warning header independently of the block.
+			if !strings.Contains(errOut.String(), "环境变量 "+tt.wantVar+" 已设置") {
+				t.Errorf("stderr missing warning header for %s, got:\n%s", tt.wantVar, errOut.String())
+			}
 			guidance := envtoken.Warning(envtoken.Options{
 				EnvVars:    []string{tt.wantVar},
 				Shell:      os.Getenv("SHELL"),

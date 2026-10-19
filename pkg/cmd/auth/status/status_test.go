@@ -654,6 +654,10 @@ func TestStatusAuthFailureWithEnvSourceShowsOverrideGuidance(t *testing.T) {
 			if !strings.Contains(errOut.String(), guidance) {
 				t.Errorf("stderr missing platform guidance block:\nwant:\n%s\ngot:\n%s", guidance, errOut.String())
 			}
+			// The guidance must never embed the token value itself.
+			if strings.Contains(errOut.String(), "env-token") {
+				t.Errorf("stderr must not contain the environment token value")
+			}
 			if strings.Contains(errOut.String(), "To re-authenticate, run: gc auth login") {
 				t.Errorf("stderr must not suggest plain re-login for env source:\n%s", errOut.String())
 			}
