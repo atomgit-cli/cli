@@ -52,16 +52,33 @@ func TestNewFactoryBaseRepoInsideGitRepo(t *testing.T) {
 }
 
 // TestNewFactoryBranchInsideGitRepo verifies Branch resolves the current
-// branch when the working directory is inside a git repository.
+// branch inside a git repository with a concrete branch checked out. It uses
+// a temporary repository because CI checkouts run from a detached HEAD, where
+// no current branch exists.
 func TestNewFactoryBranchInsideGitRepo(t *testing.T) {
+	dir := initBranchGitRepo(t)
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir temp repo: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
 	f := NewFactory()
 
 	branch, err := f.Branch()
 	if err != nil {
 		t.Fatalf("Branch() error = %v, want nil inside git repository", err)
 	}
-	if branch == "" || branch == "HEAD" {
-		t.Fatalf("Branch() = %q, want a concrete branch name", branch)
+	if branch != "ci-test-branch" {
+		t.Fatalf("Branch() = %q, want %q", branch, "ci-test-branch")
 	}
 }
 
@@ -236,6 +253,26 @@ func initDetachedGitRepo(t *testing.T) string {
 		{"git", "-C", dir, "-c", "user.email=dev@example.invalid", "-c", "user.name=dev",
 			"commit", "-q", "--allow-empty", "-m", "init"},
 		{"git", "-C", dir, "checkout", "-q", "--detach"},
+	}
+	for _, args := range steps {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v: %s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// initBranchGitRepo creates a git repository with one commit checked out on a
+// fixed branch name, so `git branch --show-current` resolves deterministically
+// regardless of the runner's checkout state or git default branch.
+func initBranchGitRepo(t *testing.T) string {
+	t.Helper()
+
+	dir := initBareGitRepo(t)
+	steps := [][]string{
+		{"git", "-C", dir, "-c", "user.email=dev@example.invalid", "-c", "user.name=dev",
+			"commit", "-q", "--allow-empty", "-m", "init"},
+		{"git", "-C", dir, "checkout", "-q", "-b", "ci-test-branch"},
 	}
 	for _, args := range steps {
 		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
