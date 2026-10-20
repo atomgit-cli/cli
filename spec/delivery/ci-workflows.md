@@ -17,8 +17,8 @@
 
 ## 必须
 
-- GitCode 原生 CI 在 GitCode PR 提交到 `main` 时自动触发，AI 通过 `gc actions` 查看结果
-- GitHub 镜像 CI 在 GitHub PR 提交到 `main` 时自动触发，AI 通过 `gh` 查看结果
+- GitCode 原生 CI 在 GitCode PR 提交到 `main`、或 `main` 收到合并/直推时自动触发，AI 通过 `gc actions` 查看结果
+- GitHub 镜像 CI 在 GitHub PR 提交到 `main`、或镜像 `main` 收到同步推送时自动触发，AI 通过 `gh` 查看结果
 - CI 结果必须纳入 PR 自检证据
 - CI 失败时不得进入 `status/self-checked`
 - CI Job 定义变更时同步本文件
@@ -52,12 +52,13 @@
 ```
 本地开发门禁（必须，不可跳过）
   → 推送分支 + 创建 PR
-  → 远端 CI 验证（PR 自动触发，AI 通过 gc / gh CLI 查看结果）
+  → 远端 CI 验证（PR 与 main 推送自动触发，AI 通过 gc / gh CLI 查看结果）
   → PR 门禁（自检证据 + CI 结果）
   → 合并门禁（独立评审 + 人工确认）
 ```
 
-CI 不替代任何现有门禁层，只在 PR 提交时自动运行跨平台验证。
+CI 不替代任何现有门禁层，在 PR 提交与 `main` 合并/直推时自动运行跨平台验证，
+使主干时点拥有独立的单测与构建证据，不再仅依赖 PR 时点。
 
 ### 1.2 运行平台
 
@@ -151,11 +152,12 @@ CI **不覆盖**的质量门禁（仍需本地或人工执行）：
 
 1. 对应平台的 PR 提交到 `main` 分支
 2. 对应 PR 的源分支推送新 commit
+3. `main` 分支收到合并提交或直推（push 触发，为合入尖端的每次变更留下独立 CI 证据）
 
 触发配置：
 
-- GitCode：`.gitcode/workflows/ci.yml` 的 `on.pull_request.branches: [main]`
-- GitHub：`.github/workflows/ci.yml` 的 `on.pull_request.branches: [main]`
+- GitCode：`.gitcode/workflows/ci.yml` 的 `on.pull_request.branches: [main]` 与 `on.push.branches: [main]`
+- GitHub：`.github/workflows/ci.yml` 的 `on.pull_request.branches: [main]` 与 `on.push.branches: [main]`
 
 GitCode 日常 CI 使用最小仓库只读权限 `permissions: repository: read`；GitHub 日常 CI 使用
 `permissions: contents: read`。发布权限仍由 `.github/workflows/release.yml` 单独管理。
@@ -286,6 +288,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 `.github/workflows/release.yml` 用于版本发布构建，不属于日常开发 CI。
 
 触发方式：AI 在发布流程中通过 `gh workflow run release.yml -f version=vX.Y.Z` 触发。
+preflight 阶段执行 `go test ./...`，使发布在 main CI 缺失或失败时仍有单测门禁。
 
 Release CI 规范详见 `spec/delivery/release-process.md`。
 

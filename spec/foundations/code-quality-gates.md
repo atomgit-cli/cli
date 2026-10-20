@@ -136,7 +136,8 @@ gofmt -w <files>
 ### 3.7 远端 CI 验证
 
 本地门禁通过后，分支推送到 GitCode 并创建 PR 时，GitCode Actions 原生 CI 自动触发
-（`on: pull_request`）。有对应 GitHub 镜像 PR 时，GitHub Actions 跨平台 CI 同时作为补充证据。
+（`on: pull_request`）；`main` 合并/直推同样触发（`on: push`），主干时点拥有独立 CI 证据。
+有对应 GitHub 镜像 PR 时，GitHub Actions 跨平台 CI 同时作为补充证据。
 
 CI 通过的判定标准：
 
