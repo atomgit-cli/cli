@@ -18,12 +18,11 @@ assert_contains "$unauth_out" "not authenticated"
 
 # Mirrors the regression-core.sh "Auth Env Override Guidance" section: with a
 # stub env token, auth status must print the remediation plans instead of the
-# dead-end re-login advice. Empty config dir + cleared GC_HOST pin the default
-# host to gitcode.com so the stub token is always in effect.
+# dead-end re-login advice. Reuses the empty config dir above (read-only, so
+# sharing is safe) and keeps the file's single RETURN trap intact — bash
+# replaces same-signal traps, so a second trap would leak the first dir.
 log "auth: env override guidance"
-tmp_empty_config_guidance="$(mktemp -d)"
-trap 'rm -rf "$tmp_empty_config_guidance"' RETURN
-run_expect_status env_guidance_out 4 env GC_CONFIG_DIR="$tmp_empty_config_guidance" GC_HOST= GC_TOKEN="regression-stub-not-a-real-token" GITCODE_TOKEN= "$GC_BIN" auth status
+run_expect_status env_guidance_out 4 env GC_CONFIG_DIR="$tmp_empty_config" GC_HOST= GC_TOKEN="regression-stub-not-a-real-token" GITCODE_TOKEN= "$GC_BIN" auth status
 assert_contains "$env_guidance_out" "仅重新登录不会生效"
 assert_contains "$env_guidance_out" "gc auth login"
 assert_contains "$env_guidance_out" "gc auth status"
