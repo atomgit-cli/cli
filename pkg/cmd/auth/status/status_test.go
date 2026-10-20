@@ -469,6 +469,9 @@ func TestStatusRunNotLoggedInJSONReturnsAuthError(t *testing.T) {
 	if !strings.Contains(out.String(), `"logged_in": false`) {
 		t.Fatalf("stdout = %q, want logged_in: false JSON", out.String())
 	}
+	if !strings.Contains(out.String(), `"token_valid": false`) {
+		t.Fatalf("stdout = %q, want token_valid: false JSON (state fields must serialize false)", out.String())
+	}
 }
 
 func TestStatusRunInvalidTokenJSONReturnsAuthError(t *testing.T) {
@@ -504,10 +507,13 @@ func TestStatusRunInvalidTokenJSONReturnsAuthError(t *testing.T) {
 	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
 		t.Fatalf("ExitCode() = %d, want %d (ExitAuth)", got, cmdutil.ExitAuth)
 	}
-	// token exists but is invalid: LoggedIn stays true; TokenValid has omitempty
-	// so false is not serialized (separate follow-up issue).
+	// token exists but is invalid: LoggedIn stays true and TokenValid must
+	// serialize as false - state booleans carry information in both values.
 	if !strings.Contains(out.String(), `"logged_in": true`) {
 		t.Fatalf("stdout = %q, want logged_in: true JSON", out.String())
+	}
+	if !strings.Contains(out.String(), `"token_valid": false`) {
+		t.Fatalf("stdout = %q, want token_valid: false JSON", out.String())
 	}
 }
 
@@ -754,12 +760,14 @@ func TestStatusAuthFailureJSONModeWithEnvSourceStaysPureJSON(t *testing.T) {
 	if code := cmdutil.ExitCode(err); code != cmdutil.ExitAuth {
 		t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitAuth)
 	}
-	// The exact pre-change payload: pretty-printed, token_valid omitted by
-	// omitempty. This pins the JSON contract as unchanged by the guidance work.
+	// The exact payload after the token_valid contract fix (issue 624): the
+	// state boolean serializes false instead of being dropped by omitempty,
+	// matching what docs/COMMANDS.md has always promised.
 	want := `{
   "hostname": "gitcode.com",
   "logged_in": true,
-  "token_source": "GC_TOKEN"
+  "token_source": "GC_TOKEN",
+  "token_valid": false
 }`
 	if got := strings.TrimSpace(out.String()); got != want {
 		t.Fatalf("stdout JSON = %q, want %q", got, want)

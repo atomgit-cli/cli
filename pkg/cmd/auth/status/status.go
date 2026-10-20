@@ -36,7 +36,10 @@ type AuthStatus struct {
 	LoggedIn    bool   `json:"logged_in"`
 	Username    string `json:"username,omitempty"`
 	TokenSource string `json:"token_source,omitempty"`
-	TokenValid  bool   `json:"token_valid,omitempty"`
+	// TokenValid has no omitempty: it is a state field whose false is
+	// information (invalid/expired token), not an absence to be dropped, and
+	// docs/COMMANDS.md promises token_valid:false in the failure JSON.
+	TokenValid  bool   `json:"token_valid"`
 	GitProtocol string `json:"git_protocol,omitempty"`
 	Token       string `json:"token,omitempty"`
 }
