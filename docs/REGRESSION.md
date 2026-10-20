@@ -94,20 +94,21 @@ field/type checks whenever a command supports `--json`.
 1. `auth status`
 2. `auth token` 非交互保护（仅使用 fake token）
 3. 无认证 `pr review --approve` 错误路径，期望退出码 `4`
-4. `repo view`
-5. `repo view --json`
-6. `issue list --limit 1`
-7. `issue list --json`
-8. `issue view <list 返回的首个 issue>`
-9. `issue view --json`
-10. `pr list --json`
-11. `pr list --paginate --per-page 1 --limit 1 --json`
-12. `repo log --limit 1 --json`
-13. `gc api repos/<repo>`
-14. `release list --json`
-15. `release delete <tag> --dry-run`
-16. 非 Git 目录下的 `repo view` 错误路径，期望退出码 `2`
-17. 不存在 commit 的 `commit view` 错误路径，期望退出码 `3`
+4. 环境变量 token 覆盖时 `auth status` 的根治指引（桩 `GC_TOKEN`，期望退出码 `4`，校验指引关键串而非单纯 re-login 建议；断言为跨平台中立串，Unix/Windows 渲染均命中）
+5. `repo view`
+6. `repo view --json`
+7. `issue list --limit 1`
+8. `issue list --json`
+9. `issue view <list 返回的首个 issue>`
+10. `issue view --json`
+11. `pr list --json`
+12. `pr list --paginate --per-page 1 --limit 1 --json`
+13. `repo log --limit 1 --json`
+14. `gc api repos/<repo>`
+15. `release list --json`
+16. `release delete <tag> --dry-run`
+17. 非 Git 目录下的 `repo view` 错误路径，期望退出码 `2`
+18. 不存在 commit 的 `commit view` 错误路径，期望退出码 `3`
 
 说明：
 - 脚本不会读取真实 token，不会执行 `auth login --with-token`，也不会执行 `auth logout`。
