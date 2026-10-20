@@ -27,6 +27,22 @@ func TestReleaseWorkflowOrdersTagBeforeGoReleaser(t *testing.T) {
 	}
 }
 
+// TestReleaseWorkflowPreflightRunsGoTests pins the release-time unit test
+// gate: preflight must run go test before the tag is created, so a release
+// cut while main CI is missing or red still hits the unit tests.
+func TestReleaseWorkflowPreflightRunsGoTests(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		"- name: Preflight Go tests",
+		"run: go test ./...",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow preflight missing %q", required)
+		}
+	}
+	assertOrdered(t, workflow, "- name: Preflight Go tests", "- name: Create and push tag")
+}
+
 func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 	workflow := readReleaseWorkflow(t)
 	for _, required := range []string{

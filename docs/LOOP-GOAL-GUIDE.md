@@ -601,7 +601,7 @@ Agent(subagent_type="general-purpose", description="文档审查")
 不会有问题，它们是独立的 CLI 工具操作不同平台。但注意：
 - `gc pr create` 在 GitCode 创建 PR，会自动触发 `.gitcode/workflows/ci.yml` 的原生 Linux CI
 - `gc actions` 查询 GitCode 原生 CI；`gh` 查询 GitHub 镜像 CI
-- GitHub Actions 仍依赖 GitHub 镜像仓的 PR，只有存在镜像 PR 时才会自动触发
+- GitHub Actions 在镜像 PR 提交/更新、以及镜像 `main` 收到同步推送时自动触发（`on: pull_request, push`）
 
 ---
 

@@ -176,7 +176,7 @@ CI 同时运行在 **GitCode Actions**（主仓 `gitcode.com/atomgit-cli/cli`）
 对齐 GitHub CI 的 Linux 路径；GitHub 工作流定义在 `.github/workflows/ci.yml`，继续承担
 Linux/macOS/Windows 跨平台验证。正式规范见 [spec/delivery/ci-workflows.md](./spec/delivery/ci-workflows.md)。
 
-**触发**：PR 提交或更新到 `main` 时自动触发（`on: pull_request: branches: [main]`），无需手动操作。
+**触发**：PR 提交或更新到 `main` 时自动触发（`on: pull_request: branches: [main]`）；`main` 收到合并提交或直推时同样自动触发（`on: push: branches: [main]`），使主干时点拥有独立 CI 证据，无需手动操作。
 
 **Job 映射**：
 

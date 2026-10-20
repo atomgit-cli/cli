@@ -141,8 +141,8 @@ go test -tags=system ./tests/system
 
 ### 5bis. 远端 CI 验证
 
-本地验证通过后，推送分支到 GitCode 并创建 PR。GitCode 原生 CI 在 PR 提交时自动触发
-（`on: pull_request`），AI 通过 `gc actions` 核验结果：
+本地验证通过后，推送分支到 GitCode 并创建 PR。GitCode 原生 CI 在 PR 提交与 main 合并/直推时自动触发
+（`on: pull_request, push`），AI 通过 `gc actions` 核验结果：
 
 ```bash
 # 查看 GitCode PR 的 CI 运行、详情和 Jobs

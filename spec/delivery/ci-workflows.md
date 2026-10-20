@@ -17,8 +17,8 @@
 
 ## 必须
 
-- GitCode 原生 CI 在 GitCode PR 提交到 `main` 时自动触发，AI 通过 `gc actions` 查看结果
-- GitHub 镜像 CI 在 GitHub PR 提交到 `main` 时自动触发，AI 通过 `gh` 查看结果
+- GitCode 原生 CI 在 GitCode PR 提交到 `main`、或 `main` 收到合并/直推时自动触发，AI 通过 `gc actions` 查看结果
+- GitHub 镜像 CI 在 GitHub PR 提交到 `main`、或镜像 `main` 收到同步推送时自动触发，AI 通过 `gh` 查看结果
 - CI 结果必须纳入 PR 自检证据
 - CI 失败时不得进入 `status/self-checked`
 - CI Job 定义变更时同步本文件
@@ -52,12 +52,13 @@
 ```
 本地开发门禁（必须，不可跳过）
   → 推送分支 + 创建 PR
-  → 远端 CI 验证（PR 自动触发，AI 通过 gc / gh CLI 查看结果）
+  → 远端 CI 验证（PR 与 main 推送自动触发，AI 通过 gc / gh CLI 查看结果）
   → PR 门禁（自检证据 + CI 结果）
   → 合并门禁（独立评审 + 人工确认）
 ```
 
-CI 不替代任何现有门禁层，只在 PR 提交时自动运行跨平台验证。
+CI 不替代任何现有门禁层，在 PR 提交与 `main` 合并/直推时自动运行跨平台验证，
+使主干时点拥有独立的单测与构建证据，不再仅依赖 PR 时点。
 
 ### 1.2 运行平台
 
@@ -72,8 +73,8 @@ GitCode 原生 CI 当前只覆盖 Linux；macOS 和 Windows 兼容性仍以 GitH
 
 | 平台 | 自动触发 | 查看运行 | 查看 Job / 日志 |
 |------|---------|---------|-----------------|
-| GitCode Actions | GitCode PR 提交/更新到 `main` | `gc actions run list -R atomgit-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
-| GitHub Actions | GitHub PR 提交/更新到 `main` | `gh run list --workflow=ci.yml` | `gh run view --log` |
+| GitCode Actions | GitCode PR 提交/更新到 `main`；`main` 合并/直推 | `gc actions run list -R atomgit-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
+| GitHub Actions | GitHub PR 提交/更新到 `main`；镜像 `main` 同步推送 | `gh run list --workflow=ci.yml` | `gh run view --log` |
 
 GitCode 平台操作固定使用 `gc`，GitHub 镜像仓操作使用 `gh`。
 
@@ -151,11 +152,12 @@ CI **不覆盖**的质量门禁（仍需本地或人工执行）：
 
 1. 对应平台的 PR 提交到 `main` 分支
 2. 对应 PR 的源分支推送新 commit
+3. `main` 分支收到合并提交或直推（push 触发，为合入尖端的每次变更留下独立 CI 证据）
 
 触发配置：
 
-- GitCode：`.gitcode/workflows/ci.yml` 的 `on.pull_request.branches: [main]`
-- GitHub：`.github/workflows/ci.yml` 的 `on.pull_request.branches: [main]`
+- GitCode：`.gitcode/workflows/ci.yml` 的 `on.pull_request.branches: [main]` 与 `on.push.branches: [main]`
+- GitHub：`.github/workflows/ci.yml` 的 `on.pull_request.branches: [main]` 与 `on.push.branches: [main]`
 
 GitCode 日常 CI 使用最小仓库只读权限 `permissions: repository: read`；GitHub 日常 CI 使用
 `permissions: contents: read`。发布权限仍由 `.github/workflows/release.yml` 单独管理。
@@ -176,6 +178,12 @@ gh run watch $(gh run list --workflow=ci.yml --branch <pr-branch> --limit 1 --js
 
 # GitHub：查看 CI 结论
 gh run view <run-id> --json conclusion --jq '.conclusion'
+
+# GitCode：查看 main 分支 push 触发的运行记录（issue 618 验收口径）
+gc actions run list -R atomgit-cli/cli --branch main --event Push --json
+
+# GitHub：查看 main 分支 push 触发的运行记录
+gh run list --workflow=ci.yml --branch main --limit 5
 ```
 
 `gc actions run list --json` 返回的 `workflow_run_id` 是后续 `run view` 和 `job list` 的 `<run-id>`。
@@ -266,17 +274,18 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 - 在 PR 中说明变更理由
 - 变更后至少在对应平台成功运行一次 CI 作为自验证
 
-### 5.4 GitCode 工作流契约回归
+### 5.4 CI 工作流契约回归
 
-`tests/contracts/ci_workflow_test.go` 使用 YAML 解析器校验 GitCode 日常 CI 的语义契约，包括：
+`tests/contracts/ci_workflow_test.go` 使用 YAML 解析器校验日常 CI 的语义契约，包括：
 
-- 只包含 `lint`、`security`、`test`、`build`、`package` 五个 Job
+- 只包含 `lint`、`security`、`test`、`build`、`package` 五个 Job（GitCode 侧）
 - `build` 和 `package` 依赖 `test`，且不依赖 Docker daemon
 - `package` 使用官方 `setup-python` 并覆盖 wheel 三入口冒烟
 - `test` 使用官方 `setup-node` 并执行 dependency-free npm wrapper 单测；GitHub 三平台额外安装已发布旧版本到隔离 prefix，再用本地 tarball 升级，不得污染 runner 全局 prefix
 - coverage、binary、wheel 制品通过运行时 `ATOMGIT_RUN_ID` 和 step output 唯一化
+- 双端 CI 的 `main` 触发面（`pull_request` 与 `push` 均限 `main`）被钉扎，任一侧静默丢失触发器即契约失败（`TestMirrorWorkflowPinsMainTriggers` 对 `.github/workflows/ci.yml` 校验同一触发契约）
 
-该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改 `.gitcode/workflows/ci.yml` 时必须同步更新契约测试；
+该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改 `.gitcode/workflows/ci.yml` 或 `.github/workflows/ci.yml` 触发面时必须同步更新契约测试；
 不得通过删除或放宽断言绕过已记录的托管 runner 约束。
 
 ---
@@ -286,6 +295,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 `.github/workflows/release.yml` 用于版本发布构建，不属于日常开发 CI。
 
 触发方式：AI 在发布流程中通过 `gh workflow run release.yml -f version=vX.Y.Z` 触发。
+preflight 阶段执行 `go test ./...`，使发布在 main CI 缺失或失败时仍有单测门禁。
 
 Release CI 规范详见 `spec/delivery/release-process.md`。
 

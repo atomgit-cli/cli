@@ -13,6 +13,18 @@ import (
 
 type workflowDocument struct {
 	Jobs map[string]workflowJob `yaml:"jobs"`
+	On   workflowTriggers       `yaml:"on"`
+}
+
+// workflowTriggers captures the trigger block. yaml.v3 decodes the "on" key
+// as a plain string key, unlike YAML 1.1 parsers that coerce it to boolean.
+type workflowTriggers struct {
+	PullRequest workflowTriggerEvent `yaml:"pull_request"`
+	Push        workflowTriggerEvent `yaml:"push"`
+}
+
+type workflowTriggerEvent struct {
+	Branches []string `yaml:"branches"`
 }
 
 type workflowJob struct {
@@ -74,6 +86,17 @@ func TestGitCodeWorkflowContract(t *testing.T) {
 	}
 }
 
+// TestMirrorWorkflowPinsMainTriggers runs the trigger contract against the
+// GitHub mirror workflow so one side cannot silently lose its main-branch
+// triggers. Only the trigger surface is shared; the two files have
+// different job sets, so the job contracts stay GitCode-side.
+func TestMirrorWorkflowPinsMainTriggers(t *testing.T) {
+	doc := readWorkflowAt(t, filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if problems := validateTriggers(doc); len(problems) > 0 {
+		t.Fatalf("GitHub mirror workflow trigger contract violations:\n- %s", strings.Join(problems, "\n- "))
+	}
+}
+
 func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -93,6 +116,9 @@ func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "missing wheel install", mutate: removeWheelInstall, want: "wheel entrypoints"},
 		{name: "echo-only entrypoints", mutate: removeEntrypointExecutions, want: "wheel entrypoints"},
 		{name: "late setup-python", mutate: movePythonSetupAfterSmoke, want: "before wheel smoke test"},
+		{name: "missing push trigger", mutate: removePushTrigger, want: "push trigger"},
+		{name: "push trigger off main", mutate: pointPushTriggerAwayFromMain, want: "push trigger"},
+		{name: "missing pull_request trigger", mutate: removePullRequestTrigger, want: "pull_request trigger"},
 	}
 
 	for _, tt := range tests {
@@ -128,7 +154,11 @@ func TestDockerDisabledMessageIsAllowed(t *testing.T) {
 
 func readWorkflow(t *testing.T) workflowDocument {
 	t.Helper()
-	path := filepath.Join("..", "..", ".gitcode", "workflows", "ci.yml")
+	return readWorkflowAt(t, filepath.Join("..", "..", ".gitcode", "workflows", "ci.yml"))
+}
+
+func readWorkflowAt(t *testing.T, path string) workflowDocument {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -143,11 +173,32 @@ func readWorkflow(t *testing.T) workflowDocument {
 
 func validateWorkflow(doc workflowDocument) []string {
 	var problems []string
+	problems = append(problems, validateTriggers(doc)...)
 	problems = append(problems, validateJobs(doc)...)
 	problems = append(problems, validateDependencies(doc)...)
 	problems = append(problems, validatePackage(doc)...)
 	for _, contract := range artifactContracts {
 		problems = append(problems, validateArtifact(doc, contract)...)
+	}
+	return problems
+}
+
+// validateTriggers pins the spec-level trigger surface (ci-workflows.md
+// must-list and trigger configuration): both pull_request and push must
+// cover the main branch. Containment, not deep equality, so adding
+// release/* branches later does not break the pin.
+func validateTriggers(doc workflowDocument) []string {
+	var problems []string
+	for _, trigger := range []struct {
+		name  string
+		event workflowTriggerEvent
+	}{
+		{"pull_request", doc.On.PullRequest},
+		{"push", doc.On.Push},
+	} {
+		if !contains(trigger.event.Branches, "main") {
+			problems = append(problems, fmt.Sprintf("%s trigger must cover branch %q", trigger.name, "main"))
+		}
 	}
 	return problems
 }
@@ -408,6 +459,18 @@ func stringValue(value any) string {
 		return ""
 	}
 	return fmt.Sprint(value)
+}
+
+func removePushTrigger(doc *workflowDocument) {
+	doc.On.Push = workflowTriggerEvent{}
+}
+
+func pointPushTriggerAwayFromMain(doc *workflowDocument) {
+	doc.On.Push = workflowTriggerEvent{Branches: []string{"dev"}}
+}
+
+func removePullRequestTrigger(doc *workflowDocument) {
+	doc.On.PullRequest = workflowTriggerEvent{}
 }
 
 func removePackageJob(doc *workflowDocument) {
