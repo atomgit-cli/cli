@@ -8,7 +8,7 @@ go test -tags=system ./tests/system
 ./tests/system/run.sh --read
 ```
 
-`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`。
+`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`；冒烟矩阵仅接受对既有关键契约的单命令低成本断言，多步骤场景一律进 `tests/system/`。
 
 ## 目标
 
@@ -94,12 +94,12 @@ field/type checks whenever a command supports `--json`.
 1. `auth status`
 2. `auth token` 非交互保护（仅使用 fake token）
 3. 无认证 `pr review --approve` 错误路径，期望退出码 `4`
-4. 环境变量 token 覆盖时 `auth status` 的根治指引（桩 `GC_TOKEN`，期望退出码 `4`，校验指引关键串而非单纯 re-login 建议；断言为跨平台中立串，Unix/Windows 渲染均命中）
+4. 环境变量 token 覆盖时 `auth status` 的根治指引（桩 `GC_TOKEN` + 临时空 `GC_CONFIG_DIR` + 清空 `GC_HOST` 固定默认主机，期望退出码 `4`；校验指引关键串并断言不再出现单纯 re-login 建议；断言为跨平台中立串，Unix/Windows 渲染均命中；`tests/system` 的 read 套件含同款镜像段）
 5. `repo view`
 6. `repo view --json`
 7. `issue list --limit 1`
-8. `issue list --json`
-9. `issue view <list 返回的首个 issue>`
+8. `issue view <list 返回的首个 issue>`
+9. `issue list --json`
 10. `issue view --json`
 11. `pr list --json`
 12. `pr list --paginate --per-page 1 --limit 1 --json`
