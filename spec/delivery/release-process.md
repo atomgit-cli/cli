@@ -114,7 +114,7 @@ go build -o ./gc ./cmd/gc
 ./gc version
 ```
 
-上述单测与构建同样由 release workflow 的 preflight 自动执行（含 `go test ./...` 步骤），本地与远端双重把关。
+上述单测与构建同样由 release workflow 的 preflight 自动执行（含 `go test ./...` 步骤，由 `tests/contracts/release_workflow_test.go` 契约钉扎），本地与远端双重把关。
 
 如发布涉及命令行为变更，还必须执行真实命令验证。
 
