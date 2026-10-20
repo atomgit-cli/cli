@@ -73,8 +73,8 @@ GitCode 原生 CI 当前只覆盖 Linux；macOS 和 Windows 兼容性仍以 GitH
 
 | 平台 | 自动触发 | 查看运行 | 查看 Job / 日志 |
 |------|---------|---------|-----------------|
-| GitCode Actions | GitCode PR 提交/更新到 `main` | `gc actions run list -R atomgit-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
-| GitHub Actions | GitHub PR 提交/更新到 `main` | `gh run list --workflow=ci.yml` | `gh run view --log` |
+| GitCode Actions | GitCode PR 提交/更新到 `main`；`main` 合并/直推 | `gc actions run list -R atomgit-cli/cli --pr <pr> --json` | `gc actions job list/view/log` |
+| GitHub Actions | GitHub PR 提交/更新到 `main`；镜像 `main` 同步推送 | `gh run list --workflow=ci.yml` | `gh run view --log` |
 
 GitCode 平台操作固定使用 `gc`，GitHub 镜像仓操作使用 `gh`。
 
@@ -178,6 +178,12 @@ gh run watch $(gh run list --workflow=ci.yml --branch <pr-branch> --limit 1 --js
 
 # GitHub：查看 CI 结论
 gh run view <run-id> --json conclusion --jq '.conclusion'
+
+# GitCode：查看 main 分支 push 触发的运行记录（issue 618 验收口径）
+gc actions run list -R atomgit-cli/cli --branch main --event Push --json
+
+# GitHub：查看 main 分支 push 触发的运行记录
+gh run list --workflow=ci.yml --branch main --limit 5
 ```
 
 `gc actions run list --json` 返回的 `workflow_run_id` 是后续 `run view` 和 `job list` 的 `<run-id>`。
