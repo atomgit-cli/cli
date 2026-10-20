@@ -443,6 +443,54 @@ func TestStatusRunNetworkErrorReturnsGenericErrorNotAuthError(t *testing.T) {
 	}
 }
 
+// TestStatusRunSuccessJSONIncludesTokenValidTrue pins the success state of
+// the --json contract: token_valid serializes true, and the identity fields
+// (username, token_source, git_protocol) are present. Together with the
+// failure and not-logged-in assertions this closes the three-state coverage
+// of the always-serialized state booleans (issue 624).
+func TestStatusRunSuccessJSONIncludesTokenValidTrue(t *testing.T) {
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, _ := iostreams.Test()
+	opts := newStatusTestOpts(t, io, http.StatusOK)
+	opts.JSON = true
+	// The helper's canned body carries no login field; the success state
+	// needs one so Username serializes.
+	opts.HttpClient = func() (*http.Client, error) {
+		return &http.Client{
+			Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       ioNopCloser(`{"login":"tester"}`),
+				}, nil
+			}),
+		}, nil
+	}
+
+	cfg := config.New()
+	if _, err := cfg.Authentication().Login("gitcode.com", "tester", "stored-token", "ssh", false); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	if err := statusRun(opts); err != nil {
+		t.Fatalf("statusRun() error = %v", err)
+	}
+	for _, want := range []string{
+		`"logged_in": true`,
+		`"username": "tester"`,
+		`"token_source": "config"`,
+		`"token_valid": true`,
+		`"git_protocol": "ssh"`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout JSON missing %q, got: %s", want, out.String())
+		}
+	}
+}
+
 func TestStatusRunNotLoggedInJSONReturnsAuthError(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_TOKEN", "")
