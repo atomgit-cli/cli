@@ -8,7 +8,7 @@ go test -tags=system ./tests/system
 ./tests/system/run.sh --read
 ```
 
-`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`。
+`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`；冒烟矩阵仅接受对既有关键契约的单命令低成本断言，多步骤场景一律进 `tests/system/`。
 
 ## 目标
 
@@ -94,20 +94,21 @@ field/type checks whenever a command supports `--json`.
 1. `auth status`
 2. `auth token` 非交互保护（仅使用 fake token）
 3. 无认证 `pr review --approve` 错误路径，期望退出码 `4`
-4. `repo view`
-5. `repo view --json`
-6. `issue list --limit 1`
-7. `issue list --json`
+4. 环境变量 token 覆盖时 `auth status` 的根治指引（桩 `GC_TOKEN` + 临时空 `GC_CONFIG_DIR` + 清空 `GC_HOST` 固定默认主机，期望退出码 `4`；校验指引关键串并断言不再出现单纯 re-login 建议；断言为跨平台中立串，Unix/Windows 渲染均命中；`tests/system` 的 read 套件含同款镜像段）
+5. `repo view`
+6. `repo view --json`
+7. `issue list --limit 1`
 8. `issue view <list 返回的首个 issue>`
-9. `issue view --json`
-10. `pr list --json`
-11. `pr list --paginate --per-page 1 --limit 1 --json`
-12. `repo log --limit 1 --json`
-13. `gc api repos/<repo>`
-14. `release list --json`
-15. `release delete <tag> --dry-run`
-16. 非 Git 目录下的 `repo view` 错误路径，期望退出码 `2`
-17. 不存在 commit 的 `commit view` 错误路径，期望退出码 `3`
+9. `issue list --json`
+10. `issue view --json`
+11. `pr list --json`
+12. `pr list --paginate --per-page 1 --limit 1 --json`
+13. `repo log --limit 1 --json`
+14. `gc api repos/<repo>`
+15. `release list --json`
+16. `release delete <tag> --dry-run`
+17. 非 Git 目录下的 `repo view` 错误路径，期望退出码 `2`
+18. 不存在 commit 的 `commit view` 错误路径，期望退出码 `3`
 
 说明：
 - 脚本不会读取真实 token，不会执行 `auth login --with-token`，也不会执行 `auth logout`。

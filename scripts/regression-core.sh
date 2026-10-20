@@ -85,6 +85,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "expected output to NOT contain: $needle" >&2
+    exit 1
+  fi
+}
+
 run_expect_fail() {
   local __var_name="$1"
   shift
@@ -144,6 +153,20 @@ assert_contains "$token_out" "interactive confirmation"
 log "Auth Exit Code"
 run_expect_status auth_exit_out 4 env GC_CONFIG_DIR="$TMP_EMPTY_CONFIG_DIR" GC_TOKEN= GITCODE_TOKEN= "$GC_BIN" pr review 1 -R "$READONLY_REPO" --approve
 assert_contains "$auth_exit_out" "not authenticated"
+
+# Env-token override guidance (issue 613): a failing token from GC_TOKEN must
+# not suggest a plain re-login (the env var would keep overriding it) but the
+# copy-paste remediation plans. Assertions are platform-neutral on purpose:
+# the renderer emits sed/unset on Unix and PowerShell on Windows.
+# The empty config dir and cleared GC_HOST pin the default-host resolution
+# to gitcode.com regardless of the runner's real config, so the stub env
+# token is always the one in effect (mirrors the Auth Exit Code isolation).
+log "Auth Env Override Guidance"
+run_expect_status env_guidance_out 4 env GC_CONFIG_DIR="$TMP_EMPTY_CONFIG_DIR" GC_HOST= GC_TOKEN="regression-stub-not-a-real-token" GITCODE_TOKEN= "$GC_BIN" auth status
+assert_contains "$env_guidance_out" "仅重新登录不会生效"
+assert_contains "$env_guidance_out" "gc auth login"
+assert_contains "$env_guidance_out" "gc auth status"
+assert_not_contains "$env_guidance_out" "To re-authenticate, run: gc auth login"
 
 log "Repo View"
 run_capture repo_view_out "$GC_BIN" repo view "$READONLY_REPO"
