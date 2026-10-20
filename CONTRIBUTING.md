@@ -255,6 +255,24 @@ trigger large unrelated formatting or EOF-only diffs in a full sweep.
 If `pre-commit` is not installed on your machine, install it with your preferred package manager
 or Python tooling first.
 
+#### Network prerequisite for the first run
+
+The config pins remote hooks from `https://github.com/pre-commit/pre-commit-hooks`
+(rev `v5.0.0`), so the first `pre-commit run` — or the first commit after
+installing the hooks — clones that repository and initializes its environment
+from GitHub. Later runs reuse the local cache and do not need network access.
+
+On a restricted network that clone fails with git-level TLS or timeout errors
+(for example `GnuTLS recv error` or `i/o timeout`) that do not point at the
+root cause. If you need a proxy, scope it to `github.com` only:
+
+```bash
+git config --global http.https://github.com.proxy http://127.0.0.1:<port>
+```
+
+The address and port above are placeholders; use whatever your environment
+provides.
+
 ### Workspace Hygiene
 
 Do not commit local build outputs, package artifacts, evaluation workspaces, or statistics files.
