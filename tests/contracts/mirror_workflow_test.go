@@ -61,6 +61,7 @@ func TestMirrorWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "unpinned action", mutate: mutateMirrorUnpinAction, want: "pinned"},
 		{name: "fail-fast enabled on test matrix", mutate: mutateMirrorEnableFailFast, want: "fail-fast"},
 		{name: "gitleaks loses redaction", mutate: mutateMirrorStripRedact, want: "--redact"},
+		{name: "gitleaks redaction zeroed", mutate: mutateMirrorZeroRedact, want: "--redact"},
 		{name: "job-level permission escalation", mutate: mutateMirrorElevateJobPermissions, want: "must not exceed"},
 	}
 
@@ -162,8 +163,10 @@ func validateMirrorSecretScan(doc workflowDocument) []string {
 		if strings.Contains(step.Uses, "checkout") && stringValue(step.With["fetch-depth"]) == "0" {
 			fullHistory = true
 		}
-		if strings.Contains(step.Run, "gitleaks") && strings.Contains(step.Run, "--redact") {
-			// Findings must stay out of the public CI logs.
+		if strings.Contains(step.Run, "gitleaks") && strings.Contains(step.Run, "--redact=100") {
+			// Findings must stay out of the public CI logs. The flag is a
+			// percentage: --redact=0 disables redaction entirely while still
+			// satisfying a bare --redact substring, so pin the full value.
 			redacted = true
 		}
 	}
@@ -171,7 +174,7 @@ func validateMirrorSecretScan(doc workflowDocument) []string {
 		problems = append(problems, "secret-scan checkout must use fetch-depth 0 for full history scanning")
 	}
 	if !redacted {
-		problems = append(problems, "secret-scan gitleaks must run with --redact so findings stay out of public logs")
+		problems = append(problems, "secret-scan gitleaks must run with --redact=100 so findings stay out of public logs")
 	}
 	return problems
 }
@@ -283,6 +286,16 @@ func mutateMirrorStripRedact(doc *workflowDocument) {
 	for i := range job.Steps {
 		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100 ", "")
 		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " --redact=100", "")
+	}
+	doc.Jobs["secret-scan"] = job
+}
+
+// mutateMirrorZeroRedact keeps a --redact flag but disables redaction: the
+// value is a percentage, so 0 means findings print verbatim.
+func mutateMirrorZeroRedact(doc *workflowDocument) {
+	job := doc.Jobs["secret-scan"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100", "--redact=0")
 	}
 	doc.Jobs["secret-scan"] = job
 }

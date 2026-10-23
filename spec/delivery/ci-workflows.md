@@ -291,7 +291,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 - test 与 build 的三平台矩阵（ubuntu/macOS/Windows——镜像仓是后两者兼容性的唯一证据源），且 test 矩阵须 `fail-fast: false`（失败平台不得静默取消其余平台运行）
 - build/docker 依赖 test
 - test 的 `-race` 标志
-- secret-scan 的 `fetch-depth: 0` 全历史扫描与 gitleaks `--redact` 脱敏输出（命中内容不得进入公开 CI 日志）
+- secret-scan 的 `fetch-depth: 0` 全历史扫描与 gitleaks `--redact=100` 全量脱敏输出（命中内容不得进入公开 CI 日志）
 - workflow 级 `contents: read` 权限，且任何 job 级权限不得超过 `contents: read`
 - 全部 action SHA 固定
 
