@@ -443,6 +443,54 @@ func TestStatusRunNetworkErrorReturnsGenericErrorNotAuthError(t *testing.T) {
 	}
 }
 
+// TestStatusRunSuccessJSONIncludesTokenValidTrue pins the success state of
+// the --json contract: token_valid serializes true, and the identity fields
+// (username, token_source, git_protocol) are present. Together with the
+// failure and not-logged-in assertions this closes the three-state coverage
+// of the always-serialized state booleans (issue 624).
+func TestStatusRunSuccessJSONIncludesTokenValidTrue(t *testing.T) {
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, _ := iostreams.Test()
+	opts := newStatusTestOpts(t, io, http.StatusOK)
+	opts.JSON = true
+	// The helper's canned body carries no login field; the success state
+	// needs one so Username serializes.
+	opts.HttpClient = func() (*http.Client, error) {
+		return &http.Client{
+			Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       ioNopCloser(`{"login":"tester"}`),
+				}, nil
+			}),
+		}, nil
+	}
+
+	cfg := config.New()
+	if _, err := cfg.Authentication().Login("gitcode.com", "tester", "stored-token", "ssh", false); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	if err := statusRun(opts); err != nil {
+		t.Fatalf("statusRun() error = %v", err)
+	}
+	for _, want := range []string{
+		`"logged_in": true`,
+		`"username": "tester"`,
+		`"token_source": "config"`,
+		`"token_valid": true`,
+		`"git_protocol": "ssh"`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout JSON missing %q, got: %s", want, out.String())
+		}
+	}
+}
+
 func TestStatusRunNotLoggedInJSONReturnsAuthError(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_TOKEN", "")
@@ -468,6 +516,9 @@ func TestStatusRunNotLoggedInJSONReturnsAuthError(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"logged_in": false`) {
 		t.Fatalf("stdout = %q, want logged_in: false JSON", out.String())
+	}
+	if !strings.Contains(out.String(), `"token_valid": false`) {
+		t.Fatalf("stdout = %q, want token_valid: false JSON (state fields must serialize false)", out.String())
 	}
 }
 
@@ -504,10 +555,13 @@ func TestStatusRunInvalidTokenJSONReturnsAuthError(t *testing.T) {
 	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
 		t.Fatalf("ExitCode() = %d, want %d (ExitAuth)", got, cmdutil.ExitAuth)
 	}
-	// token exists but is invalid: LoggedIn stays true; TokenValid has omitempty
-	// so false is not serialized (separate follow-up issue).
+	// token exists but is invalid: LoggedIn stays true and TokenValid must
+	// serialize as false - state booleans carry information in both values.
 	if !strings.Contains(out.String(), `"logged_in": true`) {
 		t.Fatalf("stdout = %q, want logged_in: true JSON", out.String())
+	}
+	if !strings.Contains(out.String(), `"token_valid": false`) {
+		t.Fatalf("stdout = %q, want token_valid: false JSON", out.String())
 	}
 }
 
@@ -754,12 +808,14 @@ func TestStatusAuthFailureJSONModeWithEnvSourceStaysPureJSON(t *testing.T) {
 	if code := cmdutil.ExitCode(err); code != cmdutil.ExitAuth {
 		t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitAuth)
 	}
-	// The exact pre-change payload: pretty-printed, token_valid omitted by
-	// omitempty. This pins the JSON contract as unchanged by the guidance work.
+	// The exact payload after the token_valid contract fix (issue 624): the
+	// state boolean serializes false instead of being dropped by omitempty,
+	// matching what docs/COMMANDS.md has always promised.
 	want := `{
   "hostname": "gitcode.com",
   "logged_in": true,
-  "token_source": "GC_TOKEN"
+  "token_source": "GC_TOKEN",
+  "token_valid": false
 }`
 	if got := strings.TrimSpace(out.String()); got != want {
 		t.Fatalf("stdout JSON = %q, want %q", got, want)
