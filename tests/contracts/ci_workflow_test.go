@@ -12,8 +12,9 @@ import (
 )
 
 type workflowDocument struct {
-	Jobs map[string]workflowJob `yaml:"jobs"`
-	On   workflowTriggers       `yaml:"on"`
+	Jobs        map[string]workflowJob `yaml:"jobs"`
+	On          workflowTriggers       `yaml:"on"`
+	Permissions map[string]string      `yaml:"permissions"`
 }
 
 // workflowTriggers captures the trigger block. yaml.v3 decodes the "on" key
@@ -28,11 +29,20 @@ type workflowTriggerEvent struct {
 }
 
 type workflowJob struct {
-	Needs     stringList     `yaml:"needs"`
-	Steps     []workflowStep `yaml:"steps"`
-	Env       map[string]any `yaml:"env"`
-	Services  map[string]any `yaml:"services"`
-	Container any            `yaml:"container"`
+	Needs     stringList       `yaml:"needs"`
+	Steps     []workflowStep   `yaml:"steps"`
+	Env       map[string]any   `yaml:"env"`
+	Services  map[string]any   `yaml:"services"`
+	Container any              `yaml:"container"`
+	Strategy  workflowStrategy `yaml:"strategy"`
+}
+
+type workflowStrategy struct {
+	Matrix workflowMatrix `yaml:"matrix"`
+}
+
+type workflowMatrix struct {
+	OS []string `yaml:"os"`
 }
 
 type stringList []string

@@ -285,7 +285,9 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 - coverage、binary、wheel 制品通过运行时 `ATOMGIT_RUN_ID` 和 step output 唯一化
 - 双端 CI 的 `main` 触发面（`pull_request` 与 `push` 均限 `main`）被钉扎，任一侧静默丢失触发器即契约失败（`TestMirrorWorkflowPinsMainTriggers` 对 `.github/workflows/ci.yml` 校验同一触发契约）
 
-该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改 `.gitcode/workflows/ci.yml` 或 `.github/workflows/ci.yml` 触发面时必须同步更新契约测试；
+`tests/contracts/mirror_workflow_test.go` 另对 GitHub 镜像工作流钉结构不变量：五 Job 集合（lint/secret-scan/test/build/docker）、test 与 build 的三平台矩阵（ubuntu/macOS/Windows——镜像仓是后两者兼容性的唯一证据源）、build/docker 依赖 test、test 的 `-race` 标志、secret-scan 的 `fetch-depth: 0` 全历史扫描、workflow 级 `contents: read` 权限、全部 action SHA 固定。Job 内步骤序列、env 细节、codecov/npm 冒烟内部与 docker 构建参数为显式声明的未覆盖维度（行为细节由 CI 运行本身覆盖）。
+
+该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改 `.gitcode/workflows/ci.yml` 或 `.github/workflows/ci.yml` 触发面时必须同步更新契约测试；修改镜像工作流的结构不变量（Job 集合、矩阵、依赖、race、secret-scan 深度、权限、action 钉扎）时同样必须同步；
 不得通过删除或放宽断言绕过已记录的托管 runner 约束。
 
 ---
