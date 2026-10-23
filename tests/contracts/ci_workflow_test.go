@@ -29,16 +29,18 @@ type workflowTriggerEvent struct {
 }
 
 type workflowJob struct {
-	Needs     stringList       `yaml:"needs"`
-	Steps     []workflowStep   `yaml:"steps"`
-	Env       map[string]any   `yaml:"env"`
-	Services  map[string]any   `yaml:"services"`
-	Container any              `yaml:"container"`
-	Strategy  workflowStrategy `yaml:"strategy"`
+	Needs       stringList        `yaml:"needs"`
+	Steps       []workflowStep    `yaml:"steps"`
+	Env         map[string]any    `yaml:"env"`
+	Services    map[string]any    `yaml:"services"`
+	Container   any               `yaml:"container"`
+	Strategy    workflowStrategy  `yaml:"strategy"`
+	Permissions map[string]string `yaml:"permissions"`
 }
 
 type workflowStrategy struct {
-	Matrix workflowMatrix `yaml:"matrix"`
+	Matrix   workflowMatrix `yaml:"matrix"`
+	FailFast *bool          `yaml:"fail-fast"`
 }
 
 type workflowMatrix struct {

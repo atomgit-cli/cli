@@ -59,6 +59,9 @@ func TestMirrorWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "secret scan loses full history", mutate: mutateMirrorShallowSecretScan, want: "fetch-depth"},
 		{name: "permissions dropped", mutate: mutateMirrorDropPermissions, want: "permissions"},
 		{name: "unpinned action", mutate: mutateMirrorUnpinAction, want: "pinned"},
+		{name: "fail-fast enabled on test matrix", mutate: mutateMirrorEnableFailFast, want: "fail-fast"},
+		{name: "gitleaks loses redaction", mutate: mutateMirrorStripRedact, want: "--redact"},
+		{name: "job-level permission escalation", mutate: mutateMirrorElevateJobPermissions, want: "must not exceed"},
 	}
 
 	for _, tt := range tests {
@@ -81,6 +84,7 @@ func validateMirrorWorkflow(doc workflowDocument) []string {
 	problems = append(problems, validateMirrorSecretScan(doc)...)
 	problems = append(problems, validateMirrorPermissions(doc)...)
 	problems = append(problems, validateMirrorActionPinning(doc)...)
+	problems = append(problems, validateMirrorJobPermissions(doc)...)
 	return problems
 }
 
@@ -110,6 +114,14 @@ func validateMirrorMatrices(doc workflowDocument) []string {
 			if !contains(job.Strategy.Matrix.OS, os) {
 				problems = append(problems, fmt.Sprintf("job %q matrix must cover %q", jobID, os))
 			}
+		}
+	}
+	// The mirror is the only macOS/Windows evidence source, so a failing
+	// platform must not silently cancel the remaining runs: GitHub's default
+	// fail-fast would.
+	if job, ok := doc.Jobs["test"]; ok {
+		if job.Strategy.FailFast == nil || *job.Strategy.FailFast {
+			problems = append(problems, "test job must set fail-fast: false so a failing platform does not cancel the others")
 		}
 	}
 	return problems
@@ -143,12 +155,25 @@ func validateMirrorSecretScan(doc workflowDocument) []string {
 	if !ok {
 		return nil
 	}
+	var problems []string
+	fullHistory := false
+	redacted := false
 	for _, step := range job.Steps {
 		if strings.Contains(step.Uses, "checkout") && stringValue(step.With["fetch-depth"]) == "0" {
-			return nil
+			fullHistory = true
+		}
+		if strings.Contains(step.Run, "gitleaks") && strings.Contains(step.Run, "--redact") {
+			// Findings must stay out of the public CI logs.
+			redacted = true
 		}
 	}
-	return []string{"secret-scan checkout must use fetch-depth 0 for full history scanning"}
+	if !fullHistory {
+		problems = append(problems, "secret-scan checkout must use fetch-depth 0 for full history scanning")
+	}
+	if !redacted {
+		problems = append(problems, "secret-scan gitleaks must run with --redact so findings stay out of public logs")
+	}
+	return problems
 }
 
 func validateMirrorPermissions(doc workflowDocument) []string {
@@ -167,6 +192,20 @@ func validateMirrorActionPinning(doc workflowDocument) []string {
 			}
 			if !pinnedActionValuePattern.MatchString(step.Uses) {
 				problems = append(problems, fmt.Sprintf("job %q action %q must be pinned to a commit SHA", jobID, step.Uses))
+			}
+		}
+	}
+	return problems
+}
+
+// validateMirrorJobPermissions keeps the least-privilege story airtight: no
+// job may carry a permissions block beyond contents: read.
+func validateMirrorJobPermissions(doc workflowDocument) []string {
+	var problems []string
+	for jobID, job := range doc.Jobs {
+		for scope, value := range job.Permissions {
+			if scope != "contents" || value != "read" {
+				problems = append(problems, fmt.Sprintf("job %q permissions must not exceed contents: read (has %s: %s)", jobID, scope, value))
 			}
 		}
 	}
@@ -230,6 +269,28 @@ func mutateMirrorShallowSecretScan(doc *workflowDocument) {
 
 func mutateMirrorDropPermissions(doc *workflowDocument) {
 	doc.Permissions = nil
+}
+
+func mutateMirrorEnableFailFast(doc *workflowDocument) {
+	job := doc.Jobs["test"]
+	enabled := true
+	job.Strategy.FailFast = &enabled
+	doc.Jobs["test"] = job
+}
+
+func mutateMirrorStripRedact(doc *workflowDocument) {
+	job := doc.Jobs["secret-scan"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100 ", "")
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " --redact=100", "")
+	}
+	doc.Jobs["secret-scan"] = job
+}
+
+func mutateMirrorElevateJobPermissions(doc *workflowDocument) {
+	job := doc.Jobs["lint"]
+	job.Permissions = map[string]string{"contents": "write"}
+	doc.Jobs["lint"] = job
 }
 
 func mutateMirrorUnpinAction(doc *workflowDocument) {
