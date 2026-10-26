@@ -134,6 +134,8 @@ func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "race flag dropped", mutate: stripGitCodeRace, want: "race"},
 		{name: "security redaction stripped", mutate: stripGitCodeRedact, want: "--redact"},
 		{name: "security redaction zeroed", mutate: zeroGitCodeRedact, want: "--redact"},
+		{name: "unshallow step removed", mutate: removeGitCodeUnshallow, want: "unshallow"},
+		{name: "unshallow failure no longer fails the job", mutate: softenGitCodeUnshallow, want: "fail"},
 	}
 
 	for _, tt := range tests {
@@ -192,6 +194,7 @@ func validateWorkflow(doc workflowDocument) []string {
 	problems = append(problems, validateJobs(doc)...)
 	problems = append(problems, validateRace(doc)...)
 	problems = append(problems, validateSecurityRedact(doc)...)
+	problems = append(problems, validateSecurityUnshallow(doc)...)
 	problems = append(problems, validateDependencies(doc)...)
 	problems = append(problems, validatePackage(doc)...)
 	for _, contract := range artifactContracts {
@@ -230,6 +233,24 @@ func validateSecurityRedact(doc workflowDocument) []string {
 		}
 	}
 	return []string{"security job gitleaks must run with --redact=100 so findings stay out of public logs"}
+}
+
+// validateSecurityUnshallow pins the full-history guarantee on the GitCode
+// security job, mirroring the mirror-side fetch-depth pin: the job must run
+// git fetch --unshallow for shallow checkouts, and a failed unshallow must
+// fail the job (fail-closed) instead of silently scanning partial history.
+func validateSecurityUnshallow(doc workflowDocument) []string {
+	job, ok := doc.Jobs["security"]
+	if !ok {
+		return nil
+	}
+	for _, step := range job.Steps {
+		run := step.Run
+		if strings.Contains(run, "git fetch --unshallow") && strings.Contains(run, "exit 1") {
+			return nil
+		}
+	}
+	return []string{"security job must unshallow shallow checkouts and fail the job when unshallow fails"}
 }
 
 // validateTriggers pins the spec-level trigger surface (ci-workflows.md
@@ -545,6 +566,30 @@ func zeroGitCodeRedact(doc *workflowDocument) {
 	job := doc.Jobs["security"]
 	for i := range job.Steps {
 		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100", "--redact=0")
+	}
+	doc.Jobs["security"] = job
+}
+
+func removeGitCodeUnshallow(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	filtered := make([]workflowStep, 0, len(job.Steps))
+	for _, step := range job.Steps {
+		if !strings.Contains(step.Run, "git fetch --unshallow") {
+			filtered = append(filtered, step)
+		}
+	}
+	job.Steps = filtered
+	doc.Jobs["security"] = job
+}
+
+// softenGitCodeUnshallow drops the fail-closed exit so a failed unshallow
+// would let the scan continue on partial history.
+func softenGitCodeUnshallow(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	for i := range job.Steps {
+		if strings.Contains(job.Steps[i].Run, "git fetch --unshallow") {
+			job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " || { echo \"::error::failed to unshallow\"; exit 1; }", "")
+		}
 	}
 	doc.Jobs["security"] = job
 }
