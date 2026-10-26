@@ -63,6 +63,7 @@ make validate-ai-record FILE=/path/to/pr-self-check.md KIND=pr-self-check
 以下文件可直接作为 `--body-file` 或 `--comment-file` 的起点：
 
 - [task-start-checklist.md](./ai-templates/task-start-checklist.md)
+- [issue-create.md](./ai-templates/issue-create.md)
 - [issue-verification.md](./ai-templates/issue-verification.md)
 - [issue-progress.md](./ai-templates/issue-progress.md)
 - [issue-blocked.md](./ai-templates/issue-blocked.md)
@@ -71,6 +72,28 @@ make validate-ai-record FILE=/path/to/pr-self-check.md KIND=pr-self-check
 - [pr-self-check.md](./ai-templates/pr-self-check.md)
 - [pr-review-outcome.md](./ai-templates/pr-review-outcome.md)
 - [docs-only-self-check.md](./ai-templates/docs-only-self-check.md)
+
+## 0. Issue 创建（四段结构）
+
+适用场景：
+
+- 起草新 issue（bug、feature、test、docs 均适用）
+- 模板含起草前查证清单（HTML 注释形态，对平台不可见、对 AI 可见）与验收锚点指引
+
+结构为四段标题式字段（区别于其余模板的列表式字段）：
+
+- `## 背景与证据`（含 `### 问题` 与 `### 证据`，证据须 file:line 或命令输出，不写推测）
+- `## 改动建议`（含设计取舍时标注"评审定夺"）
+- `## 验收标准`（可测试的判定条件；UX/输出类附示例输出块作为锚点）
+- `## 影响范围`
+
+示例命令：
+
+```bash
+# 起草后校验结构与章节完整性（record 模式会抓空章节）
+python3 scripts/validate-ai-record.py --mode record --kind issue-create /path/to/draft.md
+gc issue create -R owner/repo --title "..." --body-file /path/to/draft.md
+```
 
 ## 1. Issue 验证记录
 
