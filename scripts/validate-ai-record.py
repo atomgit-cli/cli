@@ -140,6 +140,10 @@ SCHEMAS = {
 
 FIELD_RE = re.compile(r"^- ([^:]+):(.*)$")
 HEADING_RE = re.compile(r"^(#{2,6} .+)$")
+# Whole-line full-width parentheticals are template placeholders (e.g.
+# "（问题描述）"): they must not count as section content, so a template
+# submitted as-is fails record mode just like the list-style kinds.
+PLACEHOLDER_RE = re.compile(r"^（.*）$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,7 +218,7 @@ def section_content(lines: list[str], heading: str) -> str:
                 break
             inside = stripped == heading
             continue
-        if inside and stripped and not stripped.startswith("<!--"):
+        if inside and stripped and not stripped.startswith("<!--") and not PLACEHOLDER_RE.match(stripped):
             body.append(stripped)
     return "\n".join(body)
 

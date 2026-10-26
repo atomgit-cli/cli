@@ -2,10 +2,12 @@
 
 <!-- 四段结构之一：说明问题是什么，用可核对的证据支撑（代码 file:line、命令输出、既有 issue/PR 引用），不写推测。 -->
 
+<!-- 占位符约定：整行全角括号（如"（问题描述）"）为占位符，record 校验视为空——起草时必须替换为真实内容；模板原样提交会被校验拒绝。 -->
+
 <!-- 起草前查证清单（全部满足再写正文）：
      1. grep spec/ 与 docs/ 确认无既有覆盖（spec/ 是规则唯一来源，避免与规范冲突或重复）
      2. 代码相关问题须读源码取 file:line 证据，不凭印象
-     3. 检查 open issue 列表确认无重复项（含本 issue 依赖的跟踪关系）
+     3. 检查 open issue 列表确认无重复项；判断"是否已修复"以 merged PR 与 `origin/main`（必要时含最近 release）为准——"已修未发"不应重复立项（含本 issue 依赖的跟踪关系）
      4. 标签按 spec/workflows/issue-workflow.md 与 spec/governance/sigs/*.yaml 选取
      5. 确认不破坏既有契约（CI 契约测试、docs/COMMANDS.md 文档化行为）；改变契约须在验收标准显式声明或另走 RFC
      6. 敏感信息脱敏：token、机器特定配置、内部地址不入 issue

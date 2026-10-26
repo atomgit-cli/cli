@@ -287,4 +287,4 @@ gc pr review <number> --comment-file /path/to/self-check.md -R owner/repo
 
 ---
 
-**最后更新**: 2026-04-03
+**最后更新**: 2026-10-26
