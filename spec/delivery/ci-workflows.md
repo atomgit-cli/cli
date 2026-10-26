@@ -90,7 +90,7 @@ GitCode 原生工作流 `.gitcode/workflows/ci.yml` 对齐 GitHub CI 的 Linux �
 |-----|---------|------|-------------|
 | `lint` | codearts-hosted / ubuntu-latest / x64 / small | golangci-lint v2.12.2 | 代码规范检查（`coding-standards.md`） |
 | `security` | codearts-hosted / ubuntu-latest / x64 / small | 浅克隆检测 + unshallow 后 gitleaks 全历史密钥扫描（`--redact=100` 脱敏输出） | 凭证泄漏扫描（`security.md`） |
-| `test` | codearts-hosted / ubuntu-latest / x64 / small | release / package 版本校验 + `go test -v -race -coverprofile` + npm wrapper 单测 + 覆盖率制品 | 发布输入脚本回归 + Go/Node 单元测试 + 竞态检测 + 覆盖率（`testing-guide.md`） |
+| `test` | codearts-hosted / ubuntu-latest / x64 / small | release / package 版本校验 + `go test -v -race -coverprofile` + npm wrapper 单测 + Python 单测（wrapper、AI 记录校验器、远端事实核验）+ 覆盖率制品 | 发布输入脚本回归 + Go/Node/Python 单元测试 + 竞态检测 + 覆盖率（`testing-guide.md`） |
 | `build` | codearts-hosted / ubuntu-latest / x64 / small | Linux `go build` + `gc version` + 二进制制品 | Linux 构建验证（`build-and-package.md`） |
 | `package` | codearts-hosted / ubuntu-latest / x64 / small | 补全生成 + Linux 二进制 + wheel 构建、三入口冒烟与制品上传 | 打包与 wheel 入口验证 |
 

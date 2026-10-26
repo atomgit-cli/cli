@@ -97,6 +97,9 @@ jobs:
       - name: Run npm wrapper tests
         run: npm test --prefix npm
 
+      - name: Run Python unit tests
+        run: python3 -m unittest tests.test_wrapper tests.test_verify_remote_facts tests.test_validate_ai_record -v
+
       - name: Resolve coverage artifact name
         id: coverage-artifact
         run: echo "name=coverage-linux-${ATOMGIT_RUN_ID:?}" >> "$ATOMGIT_OUTPUT"
