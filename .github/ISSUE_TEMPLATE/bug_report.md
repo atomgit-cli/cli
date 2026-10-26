@@ -14,7 +14,7 @@ labels: 'type/bug'
 - 复现命令与输出（代码相关请附 file:line；输出中的 token / 密钥 / 内部地址请先脱敏后再粘贴）
 - 版本 / 分支 / 平台
 
-> 安全漏洞请勿在公开 issue 中披露细节：请使用 `gc issue create --security-hole` 提交私密 issue（详见 [spec/foundations/security.md](../../spec/foundations/security.md)）。
+> 安全漏洞请勿在公开 issue 中披露细节：请使用 `gc issue create --security-hole` 提交私密 issue（规则详见仓库内 spec/foundations/security.md）。
 
 ## 改动建议
 

@@ -143,7 +143,7 @@ HEADING_RE = re.compile(r"^(#{2,6} .+)$")
 # Whole-line full-width parentheticals are template placeholders (e.g.
 # "（问题描述）"): they must not count as section content, so a template
 # submitted as-is fails record mode just like the list-style kinds.
-PLACEHOLDER_RE = re.compile(r"^（.*）$")
+PLACEHOLDER_RE = re.compile(r"^(?:- )?（.*）$")
 
 
 def parse_args() -> argparse.Namespace:
