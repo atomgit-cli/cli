@@ -279,6 +279,8 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 `tests/contracts/ci_workflow_test.go` 使用 YAML 解析器校验日常 CI 的语义契约，包括：
 
 - 只包含 `lint`、`security`、`test`、`build`、`package` 五个 Job（GitCode 侧）
+- test 的 `-race` 标志（与镜像侧对等）
+- security 的 gitleaks `--redact=100` 全量脱敏输出（与镜像侧对等，命中内容不得进入公开 CI 日志）
 - `build` 和 `package` 依赖 `test`，且不依赖 Docker daemon
 - `package` 使用官方 `setup-python` 并覆盖 wheel 三入口冒烟
 - `test` 使用官方 `setup-node` 并执行 dependency-free npm wrapper 单测；GitHub 三平台额外安装已发布旧版本到隔离 prefix，再用本地 tarball 升级，不得污染 runner 全局 prefix
@@ -297,7 +299,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 
 Job 内步骤序列、env 细节、codecov/npm 冒烟内部与 docker 构建参数为显式声明的未覆盖维度（行为细节由 CI 运行本身覆盖）。
 
-该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改 `.gitcode/workflows/ci.yml` 或 `.github/workflows/ci.yml` 触发面时必须同步更新契约测试；修改镜像工作流的结构不变量（Job 集合、矩阵与 fail-fast、依赖、race、secret-scan 深度与脱敏、权限、action 钉扎）时同样必须同步；
+该契约测试随 `go test ./...` 在本地和两个 CI 平台执行。修改任一 CI 工作流（`.gitcode/workflows/ci.yml` 或 `.github/workflows/ci.yml`）的触发面或结构不变量时，必须同步更新契约测试；
 不得通过删除或放宽断言绕过已记录的托管 runner 约束。
 
 ---
