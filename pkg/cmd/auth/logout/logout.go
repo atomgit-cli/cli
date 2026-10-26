@@ -99,12 +99,14 @@ func logoutRun(opts *LogoutOptions) error {
 	}
 
 	fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
-	envVars := envtoken.SetEnvVars(os.LookupEnv)
-	if len(envVars) > 0 {
-		fmt.Fprintf(opts.IO.ErrOut, "\n")
-		fmt.Fprintf(opts.IO.ErrOut, "Environment token is still active. Unset it manually to fully log out:\n")
-		for _, envVar := range envVars {
-			fmt.Fprintf(opts.IO.ErrOut, "  unset %s\n", envVar)
+	if opts.Hostname == "gitcode.com" {
+		envVars := envtoken.SetEnvVars(os.LookupEnv)
+		if len(envVars) > 0 {
+			fmt.Fprintf(opts.IO.ErrOut, "\n")
+			fmt.Fprintf(opts.IO.ErrOut, "Environment token is still active. Unset it manually to fully log out:\n")
+			for _, envVar := range envVars {
+				fmt.Fprintf(opts.IO.ErrOut, "  unset %s\n", envVar)
+			}
 		}
 	}
 

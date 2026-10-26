@@ -267,7 +267,7 @@ gc auth login --web
 ```
 
 说明：
-- 认证优先级：交互式登录或 `--web`（私有终端）> `GC_TOKEN` 环境变量（CI 从平台 Secret 注入）> 本地配置。禁止把 token 字面量放命令行（写入 shell history/进程列表）或明文文件；`--with-token` 须从 secret manager 管道读入。
+- 推荐人工使用交互式登录或 `--web`（私有终端）；CI/脚本可从平台 Secret 注入 `GC_TOKEN`。默认主机运行时 token 优先级：`GC_TOKEN` > `GITCODE_TOKEN` > 本地配置。禁止把 token 字面量放命令行（写入 shell history/进程列表）或明文文件；`--with-token` 须从 secret manager 管道读入。
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
@@ -331,7 +331,7 @@ gc auth logout --yes
 
 说明：
 - `auth logout` 会清理本地持久化认证信息。
-- 若当前认证来自 `GC_TOKEN` 或 `GITCODE_TOKEN`，命令会把提示写入 stderr，并仅列出当前已设置且非空的环境变量；stdout 只保留成功信息。
+- 默认主机下，若任一 `GC_TOKEN` / `GITCODE_TOKEN` 已设置且非空，命令会把提示写入 stderr，并仅列出这些实际生效的变量；stdout 只保留成功信息。自定义主机登出不受通用环境变量影响，不输出该提示。
 - 非交互场景中显式传 `--yes`。
 
 ### auth setup-git - 配置 git credential helper

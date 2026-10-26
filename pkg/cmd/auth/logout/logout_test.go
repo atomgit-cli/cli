@@ -79,31 +79,52 @@ func TestLogoutRequiresConfirmation(t *testing.T) {
 
 func TestLogoutEnvHintGoesToStderrAndListsOnlySetVars(t *testing.T) {
 	tests := []struct {
-		name    string
-		set     map[string]string
-		wantSub []string
-		notSub  []string
+		name       string
+		hostname   string
+		set        map[string]string
+		wantStdout []string
+		wantStderr []string
+		notStdout  []string
+		notStderr  []string
 	}{
 		{
-			name:    "no token environment variable",
-			set:     map[string]string{},
-			wantSub: []string{"Cleared stored authentication for gitcode.com"},
-			notSub:  []string{"Environment token", "unset GC_TOKEN", "unset GITCODE_TOKEN"},
+			name:       "no token environment variable",
+			hostname:   "gitcode.com",
+			set:        map[string]string{},
+			wantStdout: []string{"Cleared stored authentication for gitcode.com"},
+			wantStderr: nil,
+			notStdout:  []string{"Environment token", "unset "},
+			notStderr:  []string{"Environment token", "unset GC_TOKEN", "unset GITCODE_TOKEN"},
 		},
 		{
-			name:    "GC_TOKEN only",
-			set:     map[string]string{"GC_TOKEN": "env-token"},
-			wantSub: []string{"Environment token is still active", "unset GC_TOKEN"},
-			notSub:  []string{"unset GITCODE_TOKEN"},
+			name:       "GC_TOKEN only",
+			hostname:   "gitcode.com",
+			set:        map[string]string{"GC_TOKEN": "env-token"},
+			wantStdout: []string{"Cleared stored authentication for gitcode.com"},
+			wantStderr: []string{"Environment token is still active", "unset GC_TOKEN"},
+			notStdout:  []string{"Environment token", "unset "},
+			notStderr:  []string{"unset GITCODE_TOKEN"},
 		},
 		{
-			name: "both token variables",
+			name:     "both token variables",
+			hostname: "gitcode.com",
 			set: map[string]string{
 				"GC_TOKEN":      "env-token",
 				"GITCODE_TOKEN": "backup-token",
 			},
-			wantSub: []string{"unset GC_TOKEN", "unset GITCODE_TOKEN"},
-			notSub:  nil,
+			wantStdout: []string{"Cleared stored authentication for gitcode.com"},
+			wantStderr: []string{"Environment token is still active", "unset GC_TOKEN", "unset GITCODE_TOKEN"},
+			notStdout:  []string{"Environment token", "unset "},
+			notStderr:  nil,
+		},
+		{
+			name:       "custom host ignores token environment variables",
+			hostname:   "enterprise.example.com",
+			set:        map[string]string{"GC_TOKEN": "env-token"},
+			wantStdout: []string{"Cleared stored authentication for enterprise.example.com"},
+			wantStderr: nil,
+			notStdout:  []string{"Environment token", "unset "},
+			notStderr:  []string{"Environment token", "unset GC_TOKEN", "unset GITCODE_TOKEN"},
 		},
 	}
 
@@ -122,27 +143,31 @@ func TestLogoutEnvHintGoesToStderrAndListsOnlySetVars(t *testing.T) {
 				Config: func() (config.Config, error) {
 					return config.New(), nil
 				},
-				Hostname: "gitcode.com",
+				Hostname: tt.hostname,
 				Yes:      true,
 			}
 
 			if err := logoutRun(opts); err != nil {
 				t.Fatalf("logoutRun() error = %v, want nil", err)
 			}
-			if strings.Contains(out.String(), "Environment token") {
-				t.Fatalf("stdout contains environment hint: %q", out.String())
-			}
-			if strings.Contains(out.String(), "unset ") {
-				t.Fatalf("stdout contains unset guidance: %q", out.String())
-			}
-			for _, sub := range tt.wantSub {
-				if !strings.Contains(errOut.String(), sub) && !strings.Contains(out.String(), sub) {
-					t.Errorf("output missing %q; stdout:\n%s\nstderr:\n%s", sub, out.String(), errOut.String())
+			for _, sub := range tt.wantStdout {
+				if !strings.Contains(out.String(), sub) {
+					t.Errorf("stdout missing %q; stdout:\n%s", sub, out.String())
 				}
 			}
-			for _, sub := range tt.notSub {
-				if strings.Contains(errOut.String(), sub) || strings.Contains(out.String(), sub) {
-					t.Errorf("output unexpectedly contains %q; stdout:\n%s\nstderr:\n%s", sub, out.String(), errOut.String())
+			for _, sub := range tt.wantStderr {
+				if !strings.Contains(errOut.String(), sub) {
+					t.Errorf("stderr missing %q; stderr:\n%s", sub, errOut.String())
+				}
+			}
+			for _, sub := range tt.notStdout {
+				if strings.Contains(out.String(), sub) {
+					t.Errorf("stdout unexpectedly contains %q; stdout:\n%s", sub, out.String())
+				}
+			}
+			for _, sub := range tt.notStderr {
+				if strings.Contains(errOut.String(), sub) {
+					t.Errorf("stderr unexpectedly contains %q; stderr:\n%s", sub, errOut.String())
 				}
 			}
 		})
