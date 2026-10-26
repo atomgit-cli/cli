@@ -24,3 +24,5 @@ labels: 'type/feature'
 ## 影响范围
 
 （涉及的命令 / 文件 / 模块；是否触碰既有契约）
+
+> 若建议涉及安全漏洞细节，请勿在公开 issue 中披露：使用 `gc issue create --security-hole` 提交私密 issue。
