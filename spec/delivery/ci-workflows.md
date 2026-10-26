@@ -280,7 +280,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 
 - 只包含 `lint`、`security`、`test`、`build`、`package` 五个 Job（GitCode 侧）
 - test 的 `-race` 标志（与镜像侧对等）
-- security 的 gitleaks `--redact=100` 全量脱敏输出（与镜像侧对等，命中内容不得进入公开 CI 日志）
+- security 的 gitleaks `--redact=100` 全量脱敏输出（与镜像侧对等，命中内容不得进入公开 CI 日志）与浅克隆 unshallow 补全（失败须令 job 失败，等价于镜像侧 `fetch-depth: 0` 的全历史保证）
 - `build` 和 `package` 依赖 `test`，且不依赖 Docker daemon
 - `package` 使用官方 `setup-python` 并覆盖 wheel 三入口冒烟
 - `test` 使用官方 `setup-node` 并执行 dependency-free npm wrapper 单测；GitHub 三平台额外安装已发布旧版本到隔离 prefix，再用本地 tarball 升级，不得污染 runner 全局 prefix
