@@ -173,7 +173,15 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 	envVars := envtoken.SetEnvVars(os.LookupEnv)
 	envOverrides := opts.Hostname == "gitcode.com" && len(envVars) > 0
 	if envOverrides && opts.IO.CanPrompt() {
-		keep, err := confirmSaveUnderEnvOverride(opts, envVars)
+		prompt := fmt.Sprintf(
+			"⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n仍要将本次登录保存到本地配置吗？(y/N): ",
+			strings.Join(envVars, "、"),
+		)
+		keep, err := cmdutil.ConfirmYesNo(cmdutil.ConfirmYesNoOptions{
+			IO:     opts.IO,
+			Reader: newInputReader(opts),
+			Prompt: prompt,
+		})
 		if err != nil {
 			return err
 		}
@@ -212,29 +220,6 @@ func persistLogin(opts *LoginOptions, username string, envVars []string, envOver
 	}
 
 	return nil
-}
-
-// confirmSaveUnderEnvOverride asks whether to still store a verified login
-// when a token environment variable will keep overriding it. It returns false
-// when the user declines or when stdin is exhausted, so the safe default is
-// not to persist a login that would not take effect.
-func confirmSaveUnderEnvOverride(opts *LoginOptions, envVars []string) (bool, error) {
-	fmt.Fprintf(opts.IO.ErrOut, "⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n", strings.Join(envVars, "、"))
-	fmt.Fprintf(opts.IO.ErrOut, "仍要将本次登录保存到本地配置吗？(y/N): ")
-
-	input, err := newInputReader(opts).ReadString('\n')
-	if err != nil {
-		if err == io.EOF && strings.TrimSpace(input) == "" {
-			return false, nil
-		}
-		return false, cmdutil.NewCLIError(cmdutil.ExitUsage, "failed to read confirmation", err)
-	}
-	switch strings.ToLower(strings.TrimSpace(input)) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
 }
 
 func loginWithWeb(opts *LoginOptions) error {

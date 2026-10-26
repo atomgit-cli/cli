@@ -48,3 +48,35 @@ func ConfirmOrAbort(opts ConfirmOptions) error {
 	}
 	return nil
 }
+
+// ConfirmYesNoOptions controls a shared y/N confirmation prompt.
+type ConfirmYesNoOptions struct {
+	IO     *iostreams.IOStreams
+	Reader *bufio.Reader
+	Prompt string
+}
+
+// ConfirmYesNo asks a y/N question and returns true only for y or yes.
+func ConfirmYesNo(opts ConfirmYesNoOptions) (bool, error) {
+	if opts.IO == nil || opts.Reader == nil || !opts.IO.CanPrompt() {
+		return false, NewUsageError("yes/no confirmation requires an interactive terminal")
+	}
+	if opts.Prompt != "" {
+		fmt.Fprint(opts.IO.ErrOut, opts.Prompt)
+	}
+
+	input, err := opts.Reader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF && strings.TrimSpace(input) == "" {
+			return false, nil
+		}
+		return false, NewCLIError(ExitUsage, "failed to read confirmation", err)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}

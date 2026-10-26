@@ -107,7 +107,7 @@
 ### auth logout
 
 - 清理本地配置中的认证信息
-- 如果当前活动 token 来自环境变量，会明确提示用户手动 `unset`
+- 如果当前活动 token 来自环境变量，会把提示写入 stderr，并仅列出当前已设置且非空的 `GC_TOKEN` / `GITCODE_TOKEN`
 
 ## 代理配置
 

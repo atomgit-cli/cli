@@ -1,6 +1,7 @@
 package cmdutil
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"strings"
@@ -185,5 +186,84 @@ func TestConfirmTokenDisclosure_PartialInputWithReadErrorSurfacesReadError(t *te
 	}
 	if !strings.Contains(err.Error(), "failed to read confirmation") {
 		t.Fatalf("error = %q, want 'failed to read confirmation'", err.Error())
+	}
+}
+
+func TestConfirmYesNo(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "accept with y", input: "y\n", want: true},
+		{name: "accept with yes", input: "YES\n", want: true},
+		{name: "decline with n", input: "n\n", want: false},
+		{name: "decline with empty line", input: "\n", want: false},
+		{name: "decline on EOF", input: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			io, _, _, errOut := iostreams.TestTTY()
+			reader := bufio.NewReader(strings.NewReader(tt.input))
+
+			got, err := ConfirmYesNo(ConfirmYesNoOptions{
+				IO:     io,
+				Reader: reader,
+				Prompt: "Continue? (y/N): ",
+			})
+			if err != nil {
+				t.Fatalf("ConfirmYesNo() error = %v, want nil", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ConfirmYesNo() = %v, want %v", got, tt.want)
+			}
+			if !strings.Contains(errOut.String(), "Continue? (y/N): ") {
+				t.Fatalf("stderr missing prompt: %q", errOut.String())
+			}
+		})
+	}
+}
+
+func TestConfirmYesNoSharesBufferedReader(t *testing.T) {
+	io, _, _, _ := iostreams.TestTTY()
+	reader := bufio.NewReader(strings.NewReader("y\nn\n"))
+
+	first, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io, Reader: reader})
+	if err != nil {
+		t.Fatalf("first ConfirmYesNo() error = %v, want nil", err)
+	}
+	second, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io, Reader: reader})
+	if err != nil {
+		t.Fatalf("second ConfirmYesNo() error = %v, want nil", err)
+	}
+	if !first || second {
+		t.Fatalf("ConfirmYesNo() results = %v, %v; want true, false", first, second)
+	}
+}
+
+func TestConfirmYesNoReadErrorPropagates(t *testing.T) {
+	io, _, _, _ := iostreams.TestTTY()
+	reader := bufio.NewReader(&failingReader{data: "y", err: errors.New("corrupt terminal")})
+
+	_, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io, Reader: reader})
+	if err == nil {
+		t.Fatal("ConfirmYesNo() error = nil, want read error")
+	}
+	if !strings.Contains(err.Error(), "failed to read confirmation") {
+		t.Fatalf("error = %q, want read confirmation failure", err.Error())
+	}
+}
+
+func TestConfirmYesNoRequiresInteractiveTerminal(t *testing.T) {
+	io, _, _, _ := iostreams.Test()
+	reader := bufio.NewReader(strings.NewReader("y\n"))
+
+	_, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io, Reader: reader})
+	if err == nil {
+		t.Fatal("ConfirmYesNo() error = nil, want non-interactive usage error")
+	}
+	if !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("error = %q, want interactive terminal requirement", err.Error())
 	}
 }

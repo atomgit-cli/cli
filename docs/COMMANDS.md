@@ -331,7 +331,7 @@ gc auth logout --yes
 
 说明：
 - `auth logout` 会清理本地持久化认证信息。
-- 若当前认证来自 `GC_TOKEN` 或 `GITCODE_TOKEN`，命令会提示你手动 `unset` 环境变量。
+- 若当前认证来自 `GC_TOKEN` 或 `GITCODE_TOKEN`，命令会把提示写入 stderr，并仅列出当前已设置且非空的环境变量；stdout 只保留成功信息。
 - 非交互场景中显式传 `--yes`。
 
 ### auth setup-git - 配置 git credential helper

@@ -4,10 +4,12 @@ package logout
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -82,9 +84,6 @@ func logoutRun(opts *LogoutOptions) error {
 
 	cs := opts.IO.ColorScheme()
 
-	// Check if there's an active token before prompting
-	_, source := authCfg.ActiveToken(opts.Hostname)
-
 	// Require confirmation before logout
 	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
@@ -100,11 +99,13 @@ func logoutRun(opts *LogoutOptions) error {
 	}
 
 	fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
-	if source == "GC_TOKEN" || source == "GITCODE_TOKEN" {
-		fmt.Fprintf(opts.IO.Out, "\n")
-		fmt.Fprintf(opts.IO.Out, "Environment token is still active. Unset it manually to fully log out:\n")
-		fmt.Fprintf(opts.IO.Out, "  unset GC_TOKEN\n")
-		fmt.Fprintf(opts.IO.Out, "  unset GITCODE_TOKEN\n")
+	envVars := envtoken.SetEnvVars(os.LookupEnv)
+	if len(envVars) > 0 {
+		fmt.Fprintf(opts.IO.ErrOut, "\n")
+		fmt.Fprintf(opts.IO.ErrOut, "Environment token is still active. Unset it manually to fully log out:\n")
+		for _, envVar := range envVars {
+			fmt.Fprintf(opts.IO.ErrOut, "  unset %s\n", envVar)
+		}
 	}
 
 	return nil
