@@ -110,7 +110,7 @@ jobs:
         # is otherwise only covered by the wheel smoke test.
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: python3 -m unittest tests.test_wrapper -v
+        run: python3 -m unittest tests.test_wrapper tests.test_verify_remote_facts tests.test_validate_ai_record -v
 
       - name: Check completions and generated package assets for drift
         # build/ holds generated copies (gitcode completions, deb/rpm
