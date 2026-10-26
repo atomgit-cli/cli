@@ -279,6 +279,7 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 `tests/contracts/ci_workflow_test.go` 使用 YAML 解析器校验日常 CI 的语义契约，包括：
 
 - 只包含 `lint`、`security`、`test`、`build`、`package` 五个 Job（GitCode 侧）
+- test 的 `-race` 标志（与镜像侧对等）
 - `build` 和 `package` 依赖 `test`，且不依赖 Docker daemon
 - `package` 使用官方 `setup-python` 并覆盖 wheel 三入口冒烟
 - `test` 使用官方 `setup-node` 并执行 dependency-free npm wrapper 单测；GitHub 三平台额外安装已发布旧版本到隔离 prefix，再用本地 tarball 升级，不得污染 runner 全局 prefix

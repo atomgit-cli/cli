@@ -131,6 +131,7 @@ func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "missing push trigger", mutate: removePushTrigger, want: "push trigger"},
 		{name: "push trigger off main", mutate: pointPushTriggerAwayFromMain, want: "push trigger"},
 		{name: "missing pull_request trigger", mutate: removePullRequestTrigger, want: "pull_request trigger"},
+		{name: "race flag dropped", mutate: stripGitCodeRace, want: "race"},
 	}
 
 	for _, tt := range tests {
@@ -187,12 +188,29 @@ func validateWorkflow(doc workflowDocument) []string {
 	var problems []string
 	problems = append(problems, validateTriggers(doc)...)
 	problems = append(problems, validateJobs(doc)...)
+	problems = append(problems, validateRace(doc)...)
 	problems = append(problems, validateDependencies(doc)...)
 	problems = append(problems, validatePackage(doc)...)
 	for _, contract := range artifactContracts {
 		problems = append(problems, validateArtifact(doc, contract)...)
 	}
 	return problems
+}
+
+// validateRace pins the race detector on the GitCode test job, mirroring
+// validateMirrorRace on the GitHub side: dropping -race must fail loudly on
+// both platforms.
+func validateRace(doc workflowDocument) []string {
+	job, ok := doc.Jobs["test"]
+	if !ok {
+		return nil
+	}
+	for _, step := range job.Steps {
+		if strings.Contains(step.Run, "go test") && strings.Contains(step.Run, "-race") {
+			return nil
+		}
+	}
+	return []string{"test job must run go test with the -race flag"}
 }
 
 // validateTriggers pins the spec-level trigger surface (ci-workflows.md
@@ -483,6 +501,14 @@ func pointPushTriggerAwayFromMain(doc *workflowDocument) {
 
 func removePullRequestTrigger(doc *workflowDocument) {
 	doc.On.PullRequest = workflowTriggerEvent{}
+}
+
+func stripGitCodeRace(doc *workflowDocument) {
+	job := doc.Jobs["test"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " -race", "")
+	}
+	doc.Jobs["test"] = job
 }
 
 func removePackageJob(doc *workflowDocument) {
