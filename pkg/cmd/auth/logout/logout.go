@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
@@ -41,14 +42,19 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			Log out of a GitCode account.
 
 			This removes the stored authentication token.
+			Hostnames are normalized and validated before logout.
+
+			On the default host, token environment variables are not removed.
+			The command prints current-session cleanup guidance on stderr.
 
 				Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
 			# Interactive logout with confirmation
 			$ gc auth logout
-			? Confirm logout of gitcode.com? Yes
-			✓ Logged out of gitcode.com
+			! This will log out of gitcode.com
+			Type the hostname to confirm: gitcode.com
+			✓ Cleared stored authentication for gitcode.com
 
 			# Logout from a specific hostname
 			$ gc auth logout --hostname gitcode.com
@@ -64,7 +70,7 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.Hostname, "hostname", "H", "", "The hostname of the GitCode instance to log out of")
+	cmd.Flags().StringVarP(&opts.Hostname, "hostname", "H", "", "Hostname of the GitCode instance to log out of (hostname only; normalized and validated)")
 	cmd.Flags().StringVarP(&opts.Username, "username", "u", "", "The username to log out of")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation prompt")
 
@@ -80,6 +86,10 @@ func logoutRun(opts *LogoutOptions) error {
 	authCfg := cfg.Authentication()
 	if opts.Hostname == "" {
 		opts.Hostname, _ = authCfg.DefaultHost()
+	}
+	opts.Hostname, err = config.NormalizeTrustedHost(opts.Hostname)
+	if err != nil {
+		return cmdutil.NewUsageError(err.Error())
 	}
 
 	cs := opts.IO.ColorScheme()
@@ -102,11 +112,10 @@ func logoutRun(opts *LogoutOptions) error {
 	if opts.Hostname == "gitcode.com" {
 		envVars := envtoken.SetEnvVars(os.LookupEnv)
 		if len(envVars) > 0 {
-			fmt.Fprintf(opts.IO.ErrOut, "\n")
-			fmt.Fprintf(opts.IO.ErrOut, "Environment token is still active. Unset it manually to fully log out:\n")
-			for _, envVar := range envVars {
-				fmt.Fprintf(opts.IO.ErrOut, "  unset %s\n", envVar)
-			}
+			fmt.Fprint(opts.IO.ErrOut, "\n"+envtoken.ShortWarning(envtoken.Options{
+				EnvVars: envVars,
+				GOOS:    runtime.GOOS,
+			}))
 		}
 	}
 

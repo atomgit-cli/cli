@@ -255,6 +255,35 @@ func TestConfirmYesNoReadErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestConfirmYesNoNonEmptyEOFWithoutNewlineFailsClosed(t *testing.T) {
+	for _, input := range []string{"y", "n"} {
+		t.Run("input="+input, func(t *testing.T) {
+			io, _, _, _ := iostreams.TestTTY()
+			reader := bufio.NewReader(strings.NewReader(input))
+
+			_, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io, Reader: reader})
+			if err == nil {
+				t.Fatal("ConfirmYesNo() error = nil, want read error")
+			}
+			if !strings.Contains(err.Error(), "failed to read confirmation") {
+				t.Fatalf("error = %q, want read confirmation failure", err.Error())
+			}
+		})
+	}
+}
+
+func TestConfirmYesNoNilReaderRequiresInteractiveTerminal(t *testing.T) {
+	io, _, _, _ := iostreams.TestTTY()
+
+	_, err := ConfirmYesNo(ConfirmYesNoOptions{IO: io})
+	if err == nil {
+		t.Fatal("ConfirmYesNo() error = nil, want usage error")
+	}
+	if !strings.Contains(err.Error(), "interactive terminal") {
+		t.Fatalf("error = %q, want interactive terminal requirement", err.Error())
+	}
+}
+
 func TestConfirmYesNoRequiresInteractiveTerminal(t *testing.T) {
 	io, _, _, _ := iostreams.Test()
 	reader := bufio.NewReader(strings.NewReader("y\n"))

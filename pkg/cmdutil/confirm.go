@@ -51,6 +51,8 @@ func ConfirmOrAbort(opts ConfirmOptions) error {
 
 // ConfirmYesNoOptions controls a shared y/N confirmation prompt.
 type ConfirmYesNoOptions struct {
+	// Reader must wrap IO.In. Callers that issue consecutive prompts must
+	// reuse the same buffered reader so buffered input is not discarded.
 	IO     *iostreams.IOStreams
 	Reader *bufio.Reader
 	Prompt string
