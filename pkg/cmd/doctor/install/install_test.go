@@ -25,7 +25,7 @@ func TestInspectUsesWrapperMetadataAndFindsCandidates(t *testing.T) {
 	}
 	environ := []string{
 		"PATH=" + dir,
-		distributionEnv + "=pypi",
+		"GITCODE_CLI_DISTRIBUTION=pypi",
 		entrypointEnv + "=" + commandPath,
 		binaryEnv + "=" + filepath.Join(dir, "gc-binary"),
 	}
@@ -87,6 +87,200 @@ func TestInspectReportsMultipleProviderDirectories(t *testing.T) {
 	}
 }
 
+func TestInspectScansBinaryDirectoryForLeftovers(t *testing.T) {
+	root := t.TempDir()
+	installDir := filepath.Join(root, "gitcode-cli", "bin")
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "gc.backup-123-abc"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The install directory is not on PATH: only the binary env points there,
+	// so its leftovers are invisible to the candidate scan alone.
+	environ := []string{
+		"PATH=" + t.TempDir(),
+		binaryEnv + "=" + filepath.Join(installDir, "gc"),
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, leftover := range report.Leftovers {
+		if strings.HasSuffix(leftover, "gc.backup-123-abc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("leftover in the non-PATH install dir must be reported, got %#v", report.Leftovers)
+	}
+}
+
+func TestInspectNpmLocalSkipsGlobalPrefixConflict(t *testing.T) {
+	dir := t.TempDir()
+	packageRoot := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A stale global prefix in the metadata must not produce the npm-global
+	// conflict for a project-local install.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"npm-local","prefix":"/nowhere"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + dir,
+		"GITCODE_CLI_DISTRIBUTION=npm-local",
+		packageRootEnv + "=" + packageRoot,
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	if report.Distribution != "npm-local" {
+		t.Fatalf("Distribution = %q, want npm-local", report.Distribution)
+	}
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "npm global bin") {
+			t.Fatalf("npm-local must not produce the npm-global conflict: %q", conflict)
+		}
+	}
+	found := false
+	for _, rec := range report.Recommendations {
+		if strings.Contains(rec, "project-local npm dependency") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a project-local recommendation, got %#v", report.Recommendations)
+	}
+}
+
+func TestInspectReportsBootstrapInstallNotOnPath(t *testing.T) {
+	installDir := t.TempDir()
+	otherDir := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(installDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{"distribution":"npm-bootstrap","targetDir":"` + strings.ReplaceAll(installDir, `\`, `\\`) + `"}`
+	if err := os.WriteFile(filepath.Join(installDir, ".gitcode-install.json"), []byte(manifestJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + otherDir,
+		binaryEnv + "=" + filepath.Join(installDir, name),
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an off-PATH bootstrap install must be reported, got %#v", report.Conflicts)
+	}
+
+	// With the install directory on PATH the shadowing is covered by the
+	// multiple-provider check instead; no "not on PATH" conflict.
+	onPath := Inspect([]string{
+		"PATH=" + otherDir + string(os.PathListSeparator) + installDir,
+		binaryEnv + "=" + filepath.Join(installDir, name),
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range onPath.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			t.Fatalf("an on-PATH bootstrap install must not report off-PATH: %q", conflict)
+		}
+	}
+}
+
+func TestInspectPnpmProjectDependencyIsNotAChannelConflict(t *testing.T) {
+	projBin := t.TempDir()
+	home := t.TempDir()
+	packageRoot := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(projBin, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A project-level pnpm dependency: the recorded metadata says
+	// global:false, and PATH resolving through the project's
+	// node_modules/.bin is pnpm's designed behavior.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"pnpm","global":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := Inspect([]string{
+		"PATH=" + projBin,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
+		"PNPM_HOME=" + home,
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			t.Fatalf("a project-level pnpm dependency must not report a channel conflict: %q", conflict)
+		}
+	}
+}
+
+func TestInspectPnpmComparesAgainstPnpmHome(t *testing.T) {
+	oldDir := t.TempDir()
+	home := t.TempDir()
+	packageRoot := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A global pnpm install records {distribution: "pnpm", global: true}.
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"),
+		[]byte(`{"distribution":"pnpm","global":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"PATH=" + oldDir,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
+		"PNPM_HOME=" + home,
+	}
+	report := Inspect(environ, runtime.GOOS, "", "", "")
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a PNPM_HOME conflict, got %#v", report.Conflicts)
+	}
+
+	// The selected entry inside PNPM_HOME must not conflict.
+	if err := os.WriteFile(filepath.Join(home, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	clean := Inspect([]string{
+		"PATH=" + home + string(os.PathListSeparator) + oldDir,
+		"GITCODE_CLI_DISTRIBUTION=pnpm",
+		"GITCODE_CLI_PACKAGE_ROOT=" + packageRoot,
+		"PNPM_HOME=" + home,
+	}, runtime.GOOS, "", "", "")
+	for _, conflict := range clean.Conflicts {
+		if strings.Contains(conflict, "PNPM_HOME") {
+			t.Fatalf("selected inside PNPM_HOME must not conflict: %q", conflict)
+		}
+	}
+}
+
 func TestDoctorInstallJSON(t *testing.T) {
 	t.Parallel()
 	cmd := NewCmdInstall(cmdutil.TestFactory(), "1.2.3", "abc", "today")
@@ -102,5 +296,328 @@ func TestDoctorInstallJSON(t *testing.T) {
 	}
 	if report.Version != "1.2.3" {
 		t.Fatalf("Version = %q, want 1.2.3", report.Version)
+	}
+}
+
+func TestInspectReportsInterruptedInstallLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	name := "gitcode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leftovers := []string{
+		"gc.backup-123-abc",
+		"gitcode.tmp-456-def",
+		"gitcode-update-helper.js.backup-123-abc",
+		".gc-install-probe-789",
+		".gc-write-probe",
+		"gc.exe.backup-123-abc",
+		"gitcode.exe.tmp-456-def",
+		".gitcode-install.json.tmp-789-xyz",
+	}
+	for _, leftover := range leftovers {
+		if err := os.WriteFile(filepath.Join(dir, leftover), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A suffixed ".gc-write-probe-x" is not an installer artifact (JS matches
+	// the exact name only) and must not be reported.
+	if err := os.WriteFile(filepath.Join(dir, ".gc-write-probe-x9"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "unrelated.backup-x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink backup (an interrupted alias migration renames the link
+	// itself) must be reported with manual-deletion guidance: the sweep
+	// never removes symlinks, so the rerun-install advice would loop.
+	createdSymlink := true
+	if err := os.Symlink(filepath.Join(dir, "gc"), filepath.Join(dir, "gitcode.backup-sym-789")); err != nil {
+		createdSymlink = false
+	}
+	wantLeftovers := len(leftovers)
+	if createdSymlink {
+		wantLeftovers++
+	}
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	if len(report.Leftovers) != wantLeftovers {
+		t.Fatalf("Leftovers = %#v, want %d entries", report.Leftovers, wantLeftovers)
+	}
+	for _, leftover := range leftovers {
+		found := false
+		for _, entry := range report.Leftovers {
+			if strings.HasSuffix(entry, leftover) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected leftover %q in %#v", leftover, report.Leftovers)
+		}
+	}
+	conflict := false
+	recommendation := false
+	for _, line := range report.Conflicts {
+		if strings.Contains(line, "interrupted-install leftovers detected") {
+			conflict = true
+		}
+	}
+	for _, line := range report.Recommendations {
+		if strings.Contains(line, "rerun the npm bootstrap install") {
+			recommendation = true
+		}
+	}
+	if !conflict || !recommendation {
+		t.Fatalf("expected leftover conflict and recommendation, got conflicts=%#v recommendations=%#v",
+			report.Conflicts, report.Recommendations)
+	}
+	if createdSymlink {
+		symlinkRecommendation := false
+		for _, line := range report.Recommendations {
+			if strings.Contains(line, "symlink leftovers") && strings.Contains(line, "manually") {
+				symlinkRecommendation = true
+			}
+		}
+		if !symlinkRecommendation {
+			t.Fatalf("expected manual-deletion recommendation for symlink leftovers, got %#v", report.Recommendations)
+		}
+	}
+}
+
+func TestInspectScansAllPathDirectoriesForLeftovers(t *testing.T) {
+	// A PATH directory holding only an interrupted install's temp file (no
+	// gc/gitcode entry ever landed) is invisible to the candidate-based
+	// scan; the full-PATH scan must report it.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gc.tmp-123-abc"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	found := false
+	for _, leftover := range report.Leftovers {
+		if strings.HasSuffix(leftover, "gc.tmp-123-abc") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a leftover in a gc-less PATH directory must be reported, got %#v", report.Leftovers)
+	}
+}
+
+func TestInspectCandidatesJSONIsNullArray(t *testing.T) {
+	// The not-on-PATH case is doctor's main diagnostic path: candidates must
+	// serialize as [], never null (stable JSON contract).
+	dir := t.TempDir()
+	report := Inspect([]string{"PATH=" + dir}, runtime.GOOS, "", "", "")
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shaped struct {
+		Commands map[string]struct {
+			Candidates json.RawMessage `json:"candidates"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(data, &shaped); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"gc", "gitcode"} {
+		resolution, ok := shaped.Commands[name]
+		if !ok {
+			t.Fatalf("commands.%s missing from %s", name, data)
+		}
+		if got := strings.TrimSpace(string(resolution.Candidates)); got != "[]" {
+			t.Errorf("commands.%s.candidates = %s, want []", name, got)
+		}
+	}
+}
+
+func TestInspectNpmPrefixConflict(t *testing.T) {
+	root := t.TempDir()
+	prefix := filepath.Join(root, "npm-prefix")
+	packageRoot := filepath.Join(root, "pkg")
+	oldDir := filepath.Join(root, "old")
+	npmBin := prefix
+	if err := os.MkdirAll(npmBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{packageRoot, oldDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// json.Marshal: a Windows prefix contains backslashes, which are invalid
+	// JSON escape sequences when interpolated raw (the parse would fail and
+	// npmPrefix would silently return empty, skipping the conflict branch).
+	manifest, err := json.Marshal(map[string]string{"distribution": "npm", "prefix": prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, ".gitcode-install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		goos        string
+		command     string
+		pathValue   string
+		wantNominal bool
+	}{
+		// Single-entry PATHs on purpose: filepath.SplitList is host-aware,
+		// so a ";"-joined list would not split on a Linux host (and ":" not
+		// on Windows). The branch under test is the prefix comparison and
+		// the windows no-/bin expectation, both exercisable with one dir.
+		// POSIX: the npm prefix's bin/ is the expected directory.
+		{name: "posix conflict", goos: "linux", command: "gitcode", pathValue: oldDir, wantNominal: true},
+		{name: "posix clean", goos: "linux", command: "gitcode", pathValue: filepath.Join(prefix, "bin"), wantNominal: false},
+		// Windows: the prefix itself is the expected directory (no /bin).
+		{name: "windows conflict", goos: "windows", command: "gitcode.exe", pathValue: oldDir, wantNominal: true},
+		{name: "windows clean", goos: "windows", command: "gitcode.exe", pathValue: prefix, wantNominal: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, dir := range []string{oldDir, npmBin} {
+				// The candidate must exist in both the shadowing directory
+				// and the expected one (windows uses the prefix itself).
+				target := dir
+				if tt.goos != "windows" && dir == npmBin {
+					target = filepath.Join(prefix, "bin")
+				}
+				if err := os.MkdirAll(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(target, tt.command), []byte("x"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			environ := []string{
+				"PATH=" + tt.pathValue,
+				"GITCODE_CLI_DISTRIBUTION=npm",
+				packageRootEnv + "=" + packageRoot,
+			}
+			report := Inspect(environ, tt.goos, "", "", "")
+			found := false
+			for _, conflict := range report.Conflicts {
+				if strings.Contains(conflict, "another gitcode command appears before the npm global bin directory") {
+					found = true
+				}
+			}
+			if found != tt.wantNominal {
+				t.Fatalf("prefix conflict = %v, want %v (conflicts: %v)", found, tt.wantNominal, report.Conflicts)
+			}
+		})
+	}
+}
+
+func TestDoctorInstallHumanOutputLeadsWithVersion(t *testing.T) {
+	f := cmdutil.TestFactory()
+	cmd := NewCmdInstall(f, "1.2.3", "abc", "today")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	got := out.String()
+	// The fix moved these three lines to the TOP of the report: pin the
+	// order, not just presence (Contains alone stays green if they drift
+	// to the bottom).
+	if !strings.HasPrefix(got, "Version:      1.2.3\nCommit:       abc\nBuilt:        today\nDistribution: ") {
+		t.Errorf("output header = %q, want version metadata leading the report", got[:min(len(got), 120)])
+	}
+
+	// Empty build metadata degrades to the (not found) placeholder.
+	empty := NewCmdInstall(f, "", "", "")
+	var out2 bytes.Buffer
+	empty.SetOut(&out2)
+	empty.SetArgs([]string{})
+	if err := empty.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out2.String(), "Version:      (not found)\n") {
+		t.Errorf("empty version should print (not found):\n%s", out2.String())
+	}
+}
+
+func TestInspectSymlinkedBootstrapChecksOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "real")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(target, "gitcode")
+	if err := os.WriteFile(binary, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Same escaping rationale as the npm prefix manifest above.
+	manifest, err := json.Marshal(map[string]string{"distribution": "npm-bootstrap", "targetDir": target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, ".gitcode-install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(root, "links")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(linkDir, "gitcode")
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(root, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report := Inspect([]string{"PATH=" + elsewhere, binaryEnv + "=" + link}, runtime.GOOS, "", "", "")
+	if report.Distribution != "npm-bootstrap" {
+		t.Fatalf("Distribution = %q, want npm-bootstrap", report.Distribution)
+	}
+	// The manifest is only visible through the resolved path; reading it
+	// next to the symlink used to silently skip the on-PATH check.
+	found := false
+	for _, conflict := range report.Conflicts {
+		if strings.Contains(conflict, "not on PATH") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected not-on-PATH conflict for symlinked bootstrap, got %v", report.Conflicts)
+	}
+}
+
+func TestWindowsExecutableExtensions(t *testing.T) {
+	// Mirrors the JS-side cases in npm/test/postinstall.test.js: the two
+	// doctor implementations must keep the same PATHEXT semantics.
+	tests := []struct {
+		name    string
+		pathext string
+		want    []string
+	}{
+		{"default fallback", "", []string{".com", ".exe", ".bat", ".cmd", ".ps1", ""}},
+		{"custom order", ".XYZ;.FOO", []string{".xyz", ".foo", ".ps1", ""}},
+		{"pathtext order wins", ".COM;.EXE;.BAT;.CMD", []string{".com", ".exe", ".bat", ".cmd", ".ps1", ""}},
+		{"dedupe and dotless entries", ".exe;EXE;.foo;.foo", []string{".exe", ".foo", ".ps1", ""}},
+		{"ps1 already present is not duplicated", ".exe;.ps1", []string{".exe", ".ps1", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := windowsExecutableExtensions(tt.pathext)
+			if len(got) != len(tt.want) {
+				t.Fatalf("windowsExecutableExtensions(%q) = %v, want %v", tt.pathext, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("windowsExecutableExtensions(%q)[%d] = %q, want %q (full: %v)", tt.pathext, i, got[i], tt.want[i], got)
+				}
+			}
+		})
 	}
 }

@@ -37,6 +37,8 @@ gc issue create --title "Bug: 描述问题" --body "问题描述" -R owner/repo
 # https://gitcode.com/owner/repo/issues/new
 ```
 
+模板资产：Web 界面创建可用 `.github/ISSUE_TEMPLATE/` 平台模板（实验证实该路径在 GitCode 与 GitHub 双平台 web UI 生效）；AI 起草以 `docs/ai-templates/issue-create.md` 的四段结构为起点，提交前用 `make validate-ai-record FILE=<草稿> KIND=issue-create` 校验。
+
 ### 创建后立即补的最小标签
 
 - 类型标签：`type/bug`、`type/feature`、`type/docs`、`type/refactor`

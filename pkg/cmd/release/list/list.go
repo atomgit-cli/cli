@@ -13,6 +13,7 @@ import (
 	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
+	"gitcode.com/gitcode-cli/cli/pkg/output"
 )
 
 type ListOptions struct {
@@ -23,6 +24,7 @@ type ListOptions struct {
 	// Flags
 	Repository string
 	Limit      int
+	Page       int
 	JSON       bool
 }
 
@@ -44,11 +46,14 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 			# List releases
 			$ gc release list -R owner/repo
 
-			# List releases in a specific repository
-			$ gc release list -R owner/repo
-
 			# Limit the number of results
 			$ gc release list -R owner/repo --limit 10
+
+			# List 150 releases (fetched across API pages)
+			$ gc release list -R owner/repo --limit 150
+
+			# Fetch a single specific page
+			$ gc release list -R owner/repo --page 2
 
 			# Output as JSON
 			$ gc release list -R owner/repo --json
@@ -62,7 +67,8 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 	}
 
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum number of releases to list")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum number of releases to list (fetched across API pages when greater than 100)")
+	cmd.Flags().IntVar(&opts.Page, "page", 0, "Page number to fetch (single request; the API returns at most 100 per page)")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -90,19 +96,28 @@ func listRun(opts *ListOptions) error {
 	if opts.Limit <= 0 {
 		return cmdutil.NewUsageError("--limit must be greater than 0")
 	}
+	if opts.Page < 0 {
+		return cmdutil.NewUsageError("--page must be greater than or equal to 0")
+	}
+	if opts.Page > 0 && opts.Limit > 100 {
+		return cmdutil.NewUsageError("--page cannot be combined with --limit greater than 100 (the API returns at most 100 releases per page)")
+	}
 
 	// List releases
-	releases, err := api.ListReleases(client, owner, repo, &api.ReleaseListOptions{
-		PerPage:   opts.Limit,
-		Direction: "desc",
-	})
+	releases, err := fetchReleases(client, owner, repo, opts)
 	if err != nil {
 		return fmt.Errorf("failed to list releases: %w", err)
 	}
 
 	// Sort releases by published date descending (newest first).
-	// Falls back to created_at when published_at is nil.
+	// Falls back to created_at when published_at is nil. Sort before the
+	// limit trim: pages accumulate in created_at order, but the display
+	// order (and the (latest) marker) is published_at order, so trimming
+	// first could drop newer-published releases at a page boundary.
 	sortReleasesByDate(releases)
+	if len(releases) > opts.Limit {
+		releases = releases[:opts.Limit]
+	}
 
 	if len(releases) == 0 {
 		if opts.JSON {
@@ -143,7 +158,7 @@ func listRun(opts *ListOptions) error {
 			// Show first line of body
 			lines := strings.Split(r.Body, "\n")
 			if len(lines) > 0 && lines[0] != "" {
-				fmt.Fprintf(opts.IO.Out, "  %s\n", truncate(lines[0], 60))
+				fmt.Fprintf(opts.IO.Out, "  %s\n", output.Truncate(lines[0], 60))
 			}
 		}
 		fmt.Fprintf(opts.IO.Out, "  %s\n", r.HTMLURL)
@@ -151,6 +166,41 @@ func listRun(opts *ListOptions) error {
 	}
 
 	return nil
+}
+
+// fetchReleases returns the releases for the requested window. The API
+// caps a single page at 100 releases, so without an explicit --page the
+// list accumulates consecutive pages until the limit is satisfied or a
+// short page marks the end — a --limit above 100 must not silently
+// truncate. An explicit --page fetches exactly that page instead.
+func fetchReleases(client *api.Client, owner, repo string, opts *ListOptions) ([]api.Release, error) {
+	perPage := opts.Limit
+	if perPage > 100 {
+		perPage = 100
+	}
+	if opts.Page > 0 {
+		return api.ListReleases(client, owner, repo, &api.ReleaseListOptions{
+			PerPage:   perPage,
+			Page:      opts.Page,
+			Direction: "desc",
+		})
+	}
+	// Non-nil empty slice: an empty result must stay "[]" in JSON output.
+	all := []api.Release{}
+	for page := 1; ; page++ {
+		releases, err := api.ListReleases(client, owner, repo, &api.ReleaseListOptions{
+			PerPage:   perPage,
+			Page:      page,
+			Direction: "desc",
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, releases...)
+		if len(all) >= opts.Limit || len(releases) < perPage {
+			return all, nil
+		}
+	}
 }
 
 // sortReleasesByDate sorts releases by published date in descending order (newest first).
@@ -185,11 +235,4 @@ func sortReleasesByDate(releases []api.Release) {
 
 func parseRepo(repo string) (string, string, error) {
 	return cmdutil.ParseRepo(repo)
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

@@ -18,7 +18,7 @@
 
 7. **GitHub 代理阻断** — `HTTP_PROXY` 环境变量导致 `gh` 返回 EOF，需 `unset` 后使用
 8. **GitCode PR 405** — `gc pr merge --yes` 可能返回 405，fallback: `git merge` + `git push`
-9. **CI 触发方式** — 项目 CI 由 `pull_request` 事件触发，push 到 GitHub 镜像仓后用 `gh workflow run` 手动 dispatch
+9. **CI 触发方式** — 项目 CI 由 `pull_request` 与 `push`（限 `main`）事件触发；`main` 合并/镜像同步推送会自动跑 CI，非 main 分支推送仍需 `gh workflow run` 手动 dispatch
 
 ## 门禁
 

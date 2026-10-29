@@ -4,7 +4,7 @@
 
 const path = require("path");
 const pkg = require("../package.json");
-const { pathConflict, writeInstallMetadata } = require("./install-metadata");
+const { isPnpmEnvironment, pathConflict, writeInstallMetadata } = require("./install-metadata");
 
 function isGlobalInstall(env = process.env) {
   return env.npm_config_global === "true" || env.npm_config_global === true;
@@ -16,29 +16,46 @@ function globalInstallReport(env = process.env, isWin = process.platform === "wi
   return { prefix, ...pathConflict(prefix, env, isWin) };
 }
 
-function runPostinstall(env = process.env, stderr = process.stderr) {
+function runPostinstall(env = process.env, stderr = process.stderr, packageRoot = path.resolve(__dirname, "..")) {
   if (!isGlobalInstall(env)) return;
-
-  const packageRoot = path.resolve(__dirname, "..");
-  const report = globalInstallReport(env);
+  // pnpm global installs must never be recorded as npm installs: the npm
+  // updater would then run through pnpm with npm-only flags and fail.
+  if (isPnpmEnvironment(env, packageRoot, process.platform === "win32")) {
+    writeInstallMetadata(packageRoot, {
+      schema: 1,
+      distribution: "pnpm",
+      global: true,
+      version: pkg.version,
+      prefix: "",
+      npm: "",
+    });
+    // The PATH-shadowing report below speaks the npm-channel language
+    // (npm bin: <prefix>/bin, run "<npm bin>/gitcode.cmd" doctor install);
+    // for a pnpm install its paths and attribution are wrong and its
+    // suggested commands cannot work. Say nothing rather than misdirect.
+    return;
+  }
   writeInstallMetadata(packageRoot, {
     distribution: "npm",
     global: true,
     version: pkg.version,
-    prefix: report ? report.prefix : env.npm_config_prefix || "",
+    prefix: env.npm_config_prefix || "",
     npm: env.npm_execpath || "",
   });
 
+  const report = globalInstallReport(env);
   if (!report) return;
-  if (report.shadowed) {
+  for (const [name, result] of Object.entries(report.names)) {
+    if (!result.shadowed) continue;
     stderr.write(
       `\nGitCode CLI ${pkg.version} was installed by npm, but another command is first on PATH:\n` +
-        `  selected: ${report.selected}\n` +
+        `  command:  ${name}\n` +
+        `  selected: ${result.selected}\n` +
         `  npm bin:  ${report.expectedDir}\n` +
         `Run the npm entry directly, then inspect all installations:\n` +
         (process.platform === "win32"
-          ? `  & "${path.join(report.expectedDir, "gitcode.cmd")}" doctor install\n`
-          : `  "${path.join(report.expectedDir, "gitcode")}" doctor install\n`) +
+          ? `  & "${path.join(report.expectedDir, `${name}.cmd`)}" doctor install\n`
+          : `  "${path.join(report.expectedDir, name)}" doctor install\n`) +
         `No package was removed and PATH was not changed.\n\n`
     );
   }

@@ -45,6 +45,8 @@ Before contributing, please read the following documentation:
 | [docs/AI-GUIDE.md](./docs/AI-GUIDE.md) | External-project AI usage guide for `gc` |
 | [docs/AI-TEMPLATES.md](./docs/AI-TEMPLATES.md) | Internal gitcode-cli issue/PR comment templates |
 | [source-of-truth-matrix.md](./spec/governance/source-of-truth-matrix.md) | What can and cannot be used as a fact source |
+| [sig-governance.md](./spec/governance/sig-governance.md) | SIG governance: roles, lifecycle, decision rules |
+| [rfc-workflow.md](./spec/workflows/rfc-workflow.md) | RFC process for large design proposals |
 
 > **Important**: When modifying command-related code, you MUST sync updates to `docs/COMMANDS.md`.
 >
@@ -190,7 +192,7 @@ Real command verification still requires a valid token and must only target
 
 ```bash
 # Clone the repository
-git clone https://gitcode.com/gitcode-cli/cli.git
+git clone https://gitcode.com/atomgit-cli/cli.git
 cd gitcode-cli
 
 # Install dependencies
@@ -252,6 +254,27 @@ trigger large unrelated formatting or EOF-only diffs in a full sweep.
 
 If `pre-commit` is not installed on your machine, install it with your preferred package manager
 or Python tooling first.
+
+#### Network prerequisite for the first run
+
+The config pins remote hooks from `https://github.com/pre-commit/pre-commit-hooks`
+(rev `v5.0.0`), so the first `pre-commit run` — or the first commit after
+installing the hooks — clones that repository and initializes its environment
+from GitHub. Later runs reuse the local cache and do not need network access,
+unless the pinned `rev` changes — pulling in someone else's rev bump re-clones
+the new revision on your next run.
+
+On a restricted network that clone fails with git-level TLS or timeout errors
+(for example `GnuTLS recv error` or `Connection timed out`) that do not point
+at the root cause. If you need a proxy, scope it to `github.com` only:
+
+```bash
+git config --global http.https://github.com.proxy http://127.0.0.1:<port>
+```
+
+The address and port above are placeholders; use whatever your environment
+provides. To undo the setting, run
+`git config --global --unset http.https://github.com.proxy`.
 
 ### Workspace Hygiene
 

@@ -38,19 +38,19 @@
 
 ```bash
 # 发布前全量打包验证（构建 DEB + RPM + PyPI，推荐）
-./scripts/package.sh v0.12.0 release
+./scripts/package.sh v0.15.0 release
 
 # 构建所有包（DEB + RPM + PyPI）
-./scripts/package.sh v0.12.0
+./scripts/package.sh v0.15.0
 
 # 仅构建 Linux 包（DEB + RPM）
-./scripts/package.sh v0.12.0 linux
+./scripts/package.sh v0.15.0 linux
 
 # 仅构建 DEB 包
-./scripts/package.sh v0.12.0 deb
+./scripts/package.sh v0.15.0 deb
 
 # 仅构建 PyPI 包
-./scripts/package.sh v0.12.0 pypi
+./scripts/package.sh v0.15.0 pypi
 ```
 
 ### 构建目标
@@ -80,15 +80,17 @@
 
 ```bash
 dist/
-├── gc_0.12.0_amd64.deb              # DEB amd64
-├── gc_0.12.0_arm64.deb              # DEB arm64
-├── gc-0.12.0-1.x86_64.rpm           # RPM x86_64
-├── gc-0.12.0-1.aarch64.rpm          # RPM aarch64
+├── gc_0.15.0_amd64.deb              # DEB amd64
+├── gc_0.15.0_arm64.deb              # DEB arm64
+├── gc-0.15.0-1.x86_64.rpm           # RPM x86_64
+├── gc-0.15.0-1.aarch64.rpm          # RPM aarch64
 ├── gc_linux_amd64                  # Linux 二进制 amd64
 ├── gc_linux_arm64                  # Linux 二进制 arm64
-├── gitcode_cli-0.12.0-py3-none-any.whl  # PyPI wheel
-├── gitcode_cli-0.12.0.tar.gz        # PyPI sdist
-└── gitcode-cli-cli-0.12.0.tgz       # npm tarball（正式 release workflow）
+├── gitcode_cli-0.15.0-py3-none-any.whl  # PyPI wheel
+├── gitcode_cli-0.15.0.tar.gz        # PyPI sdist
+├── gitcode-cli-cli-0.15.0.tgz       # npm tarball @gitcode-cli/cli（正式 release workflow）
+├── atomgit-cli-cli-0.15.0.tgz       # npm tarball @atomgit-cli/cli
+└── atomgit-cli-0.15.0.tgz           # npm tarball atomgit-cli（推荐坐标）
 ```
 
 ---
@@ -125,44 +127,44 @@ export GC_TOKEN="your_gitcode_token"
 
 ```bash
 # 1. 本地验证所有包；这些制品不得用于正式发布
-./scripts/package.sh v0.12.0 release
+./scripts/package.sh v0.15.0 release
 
 # 2. 发布准备 PR 合入两个远端 main 后，触发正式 workflow
-gh workflow run release.yml -R gitcode-cli/cli -f version=v0.12.0
-gh run watch <run-id> -R gitcode-cli/cli
+gh workflow run release.yml -R atomgit-cli/cli -f version=v0.15.0
+gh run watch <run-id> -R atomgit-cli/cli
 
 # 3. workflow 全部成功后，同步同一 tag 到 GitCode（SSH）
-git fetch github tag v0.12.0
-git push origin refs/tags/v0.12.0
+git fetch github tag v0.15.0
+git push origin refs/tags/v0.15.0
 
 # 4. 下载 GitHub workflow 生成的正式制品
 mkdir -p dist/github-release
-gh release download v0.12.0 -R gitcode-cli/cli --dir dist/github-release
+gh release download v0.15.0 -R atomgit-cli/cli --dir dist/github-release
 
 # 5. 验证覆盖全部正式资产的 SHA-256 清单
 cd dist/github-release
-sha256sum -c gc_0.12.0_checksums.txt
+sha256sum -c gc_0.15.0_checksums.txt
 cd ../..
 
 # 6. 使用受跟踪的同一份说明创建 GitCode Release
-gc release create v0.12.0 -R gitcode-cli/cli \
-  --title "GitCode CLI v0.12.0" \
-  --notes-file docs/releases/v0.12.0.md \
+gc release create v0.15.0 -R atomgit-cli/cli \
+  --title "GitCode CLI v0.15.0" \
+  --notes-file docs/releases/v0.15.0.md \
   --target main \
   --json
 
 # 7. 将同一批正式制品上传到 GitCode，不得重新构建
-gc release upload v0.12.0 dist/github-release/* -R gitcode-cli/cli --json
+gc release upload v0.15.0 dist/github-release/* -R atomgit-cli/cli --json
 ```
 
-> **注意**：将示例中的版本号 `0.12.0` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
+> **注意**：将示例中的版本号 `0.15.0` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
 
 ### Release Notes 要求
 
 **重要**：所有下载链接必须使用完整路径：
 
 ```
-https://gitcode.com/gitcode-cli/cli/releases/download/v{VERSION}/{FILENAME}
+https://gitcode.com/atomgit-cli/cli/releases/download/v{VERSION}/{FILENAME}
 ```
 
 **禁止**只写 `pip install xxx.whl` 不提供下载地址！
@@ -215,7 +217,7 @@ GitCode 会错误渲染代码块内的 `#` 开头行为标题！
 
     python3 -m venv .venv
     source .venv/bin/activate
-    pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gitcode_cli-0.12.0-py3-none-any.whl
+    pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gitcode_cli-0.15.0-py3-none-any.whl
 
 Windows 用户激活虚拟环境：
 
@@ -229,77 +231,75 @@ Windows PowerShell 用户建议运行：
 
 ### DEB (Debian/Ubuntu)
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_0.12.0_amd64.deb
-    sudo dpkg -i gc_0.12.0_amd64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_0.15.0_amd64.deb
+    sudo dpkg -i gc_0.15.0_amd64.deb
 
 ARM64 设备：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_0.12.0_arm64.deb
-    sudo dpkg -i gc_0.12.0_arm64.deb
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_0.15.0_arm64.deb
+    sudo dpkg -i gc_0.15.0_arm64.deb
 
 ### RPM (RHEL/CentOS/Fedora)
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc-0.12.0-1.x86_64.rpm
-    sudo rpm -i gc-0.12.0-1.x86_64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc-0.15.0-1.x86_64.rpm
+    sudo rpm -i gc-0.15.0-1.x86_64.rpm
 
 ARM64 设备：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc-0.12.0-1.aarch64.rpm
-    sudo rpm -i gc-0.12.0-1.aarch64.rpm
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc-0.15.0-1.aarch64.rpm
+    sudo rpm -i gc-0.15.0-1.aarch64.rpm
 
 ### Linux 二进制
 
 AMD64：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_linux_amd64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_linux_amd64
     chmod +x gc_linux_amd64
     sudo mv gc_linux_amd64 /usr/local/bin/gc
 
 ARM64：
 
-    wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_linux_arm64
+    wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_linux_arm64
     chmod +x gc_linux_arm64
     sudo mv gc_linux_arm64 /usr/local/bin/gc
 
 ### Homebrew (macOS/Linux)
 
-    brew install gitcode-cli/homebrew-tap/gc
+    brew install atomgit-cli/homebrew-tap/gc
 
 更新到最新版本：
 
     brew upgrade gc
 
-shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [gitcode-cli/homebrew-tap](https://github.com/gitcode-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。
+shell 补全（bash/zsh/fish）随安装自动配置。formula 由 GoReleaser 在发布流程中生成并推送到 [atomgit-cli/homebrew-tap](https://github.com/atomgit-cli/homebrew-tap)（见 `.goreleaser.yaml` `brews:` 与 release workflow `brew` job）。渠道检测先解析软链再匹配 Homebrew 布局（Apple Silicon `/opt/homebrew`、Intel Mac `/usr/local`、Linuxbrew `/home/linuxbrew/.linuxbrew`），bin 目录软链与 Cellar 实路径均可识别。
 
 ### npm (跨平台)
 
-首选 bootstrap 安装二进制；Linux/macOS 同时配置补全，Windows 跳过补全：
+首选 bootstrap 安装二进制（推荐坐标 `atomgit-cli`；`@gitcode-cli/cli` / `@atomgit-cli/cli` 为并行等价坐标）；Linux/macOS 同时配置补全，Windows 跳过补全：
 
-    npx -y @gitcode-cli/cli@latest install
+    npx -y atomgit-cli@latest install
 
 CI、审计、不可信项目目录或自定义 npm registry 环境使用完整加固命令：
 
-    npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install
+    npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest install
 
 备选方式由 npm global prefix 管理入口：
 
-    npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest
+    npm install -g --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest
 
-`npm i @gitcode-cli/cli` 与 `npm install @gitcode-cli/cli` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
+`npm i` / `npm install` 只添加当前项目依赖，不会更新 PATH 中已有的 CLI，不得作为用户安装命令或 Release note 的推荐入口。
 
-npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件，因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖。
+npm 包 `@gitcode-cli/cli` 内置 Linux/macOS/Windows 多平台二进制（`npm/bin/platforms/`），Node wrapper 按平台选择并 exec。Windows bootstrap 同时安装 `gc.exe` 与 `gitcode.exe`，并在显式 `install` 后默认把目标目录置于持久 User PATH 前面；`--no-modify-path` 可退出。它不修改 Machine PATH、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。显式 `--target-dir` 会替换该目录内同名常规文件（识别为外来渠道入口的目标——如 pip console script——会被拒绝替换并给出卸载指引），因此不得指向 Python Scripts、npm prefix 等其他包管理器目录。当前 PowerShell 无法由 npx 子进程刷新，安装器会使用中文输出可复制的 `$env:Path` 命令、完全重开终端的替代方式和 `gitcode version` 验证步骤；若合并 PATH（System 在前）中存在先于安装目录的其他 `gc`/`gitcode` 提供者，会进一步区分"重开窗口可解决（提供者在用户 PATH）"与"重开窗口无法解决（提供者在系统 PATH 或 shell 配置，需卸载旧提供者或调整系统 PATH 顺序）"两种情形。Linux/macOS bootstrap 会自动把历史安装遗留的同目录 `gitcode -> gc` 别名安全迁移为当前二进制，无需用户先删除链接；指向其他位置的链接仍拒绝覆盖，pnpm 全局布局的软链（链接文本或解析路径含 `pnpm` 路径段）同样拒绝并给出 `pnpm remove -g <坐标>` 指引。
 
 正式 npm tarball 不再独立编译二进制：release workflow 的 `artifacts` job 调用 `scripts/prepare-npm-package.sh`，从同一批 GoReleaser 归档/裸二进制组装 npm 包，并将 `.tgz` 纳入 Release SHA-256 清单。`npm` job 只下载已验证的 Release artifact 并执行 OIDC Trusted Publishing；目标版本已存在时，必须下载 registry tarball 与 Release tarball 比对 SHA-256，内容一致才允许幂等跳过。
 
-npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享 24 小时 TTL，应用更新时使用跨进程锁、健康检查和回滚。安装/升级验证必须覆盖：
+npm global 与 bootstrap 默认 `notify` stable 新版本并提示显式运行 `gitcode update`；`auto` 仅在用户主动配置后自动应用，另提供 `off`。三种模式共享同一调度节奏（成功后 24 小时 TTL；失败后 1 小时起步指数退避、上限 24 小时，同一错误指纹的摘要只展示一次，manifest/npm 运行时类永久错误暂停后台检查并附修复动作），应用更新时使用跨进程锁、健康检查和回滚。npm-global 与 npm-bootstrap 渠道（及并行 npm 坐标）各自维护独立的状态文件（`<state>/gitcode-cli/<坐标>/<渠道>/update-state.json`），检查节奏与摘要互不干扰；显式设置 `GC_STATE_DIR` 时保留旧的共享单文件布局（**该覆盖仅限单渠道场景**——多渠道并存时状态会混写同一文件，如需并行渠道请使用默认分目录布局）。安装/升级验证必须覆盖：
 
 npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerelease 发布到 `next`。发布重跑必须同时校验既有 tarball 内容与对应 dist-tag，不得让 prerelease 污染 stable 更新通道。
 
     gitcode doctor install --json
     gitcode update --check --json
     gitcode config set update.mode off
-
-更新器只允许从官方 npm registry 操作 `@gitcode-cli/cli` 的精确 stable 版本，以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/gitcode-cli/cli.git`。
 
 ## 验证安装
 
@@ -308,24 +308,34 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
 
 #### 注意事项
 
-1. **版本号替换**：将模板中的 `0.12.0` 替换为实际版本号
+1. **版本号替换**：将模板中的 `0.15.0` 替换为实际版本号
 2. **避免 `#` 字符问题**：GitCode 会错误渲染代码块内的 `#`
    - Issue 引用使用 `Issue XX` 格式，不使用 `#XX`
    - PR 引用使用 `PR XX` 格式，不使用 `#XX`
    - 代码块注释单独成行，避免行内注释
 3. **完整下载路径**：所有安装命令必须包含完整下载 URL
 
+### npm 三坐标并行发布与更新策略
+
+三坐标（`atomgit-cli` 推荐 / `@atomgit-cli/cli` / `@gitcode-cli/cli`）为**长期并行承诺，不设弃用时间表**：每次正式发布必须以同一版本号发布全部坐标（内容一致，由 `scripts/prepare-npm-package.sh` 按坐标 allowlist 组装三份 tarball，各坐标副本以自身包名跑 wrapper 单测），发布流水线校验三坐标 dist-tag 版本一致后才能判定发布成功。
+
+更新器只允许从官方 npm registry 操作**用户所安装坐标**（坐标取自 package.json，不跨坐标安装），以 `--ignore-scripts` 安装并使用最小子进程环境；不得继承用户 registry/auth 配置，不得自动卸载 pip/Homebrew/DEB/RPM，不得提权或重写 PATH。
+
+发布鉴权使用 **OIDC Trusted Publishing**（`id-token: write`，无 `NPM_TOKEN`，三坐标逐一绑定 Trusted Publisher）；`npm/package.json` 的 `repository.url` 须保持为 `https://github.com/atomgit-cli/cli.git`（仓库 rename 后的规范路径，旧 `gitcode-cli` 路径仅靠重定向兼容，不得新引入）。
+
+npm 恢复清单 schema v2（`packages` 映射，每坐标一项 file + sha256，须列全量三坐标，已发布坐标幂等跳过）见 [release-process.md](../spec/delivery/release-process.md)。
+
 ### 发布命令参考
 
 ```bash
 # 查看 Release
-gc release view v0.12.0 -R gitcode-cli/cli
+gc release view v0.15.0 -R atomgit-cli/cli
 
 # 列出所有 Releases
-gc release list -R gitcode-cli/cli
+gc release list -R atomgit-cli/cli
 
 # 下载资产
-gc release download v0.12.0 -R gitcode-cli/cli
+gc release download v0.15.0 -R atomgit-cli/cli
 ```
 
 ---
@@ -340,7 +350,7 @@ gc release download v0.12.0 -R gitcode-cli/cli
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gitcode_cli-0.12.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gitcode_cli-0.15.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
@@ -351,8 +361,8 @@ gitcode version
 ### DEB (Debian/Ubuntu)
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_0.12.0_amd64.deb
-sudo dpkg -i gc_0.12.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_0.15.0_amd64.deb
+sudo dpkg -i gc_0.15.0_amd64.deb
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -360,15 +370,15 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 ### RPM (RHEL/CentOS/Fedora)
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc-0.12.0-1.x86_64.rpm
-sudo rpm -i gc-0.12.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc-0.15.0-1.x86_64.rpm
+sudo rpm -i gc-0.15.0-1.x86_64.rpm
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 
 ### 多渠道 PATH 冲突
 
-pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
+pip、npm、Homebrew、DEB/RPM 和手工 archive 都可能提供同名命令。`doctor install` 只诊断、不替用户卸载其他渠道或修改 PATH。对被中断安装的残留文件，常规文件建议重跑 bootstrap 清扫（24 小时以上）或手动删除，符号链接残留明确提示只能手动删除（安装器出于并发安全永不自动清除符号链接）。唯一的自动 PATH 注册是用户显式运行 Windows npm bootstrap `install` 后修改当前 User PATH；可用 `--no-modify-path` 退出，且绝不修改 Machine PATH：
 
 ```bash
 gitcode doctor install
@@ -380,7 +390,7 @@ gitcode doctor install --json
 ### Linux 二进制
 
 ```bash
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_linux_amd64
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_linux_amd64
 chmod +x gc_linux_amd64
 sudo mv gc_linux_amd64 /usr/local/bin/gc
 ```
@@ -402,7 +412,7 @@ gitcode doctor install
 确保包含 `--notes` 参数：
 
 ```bash
-gc release create vX.Y.Z -R gitcode-cli/cli --title "vX.Y.Z" --notes "Release notes"
+gc release create vX.Y.Z -R atomgit-cli/cli --title "vX.Y.Z" --notes "Release notes"
 ```
 
 ### Q: nfpm 找不到命令
@@ -442,7 +452,7 @@ GOOS=linux GOARCH=amd64 go build -o dist/gc_linux_amd64 ./cmd/gc
 GOOS=linux GOARCH=arm64 go build -o dist/gc_linux_arm64 ./cmd/gc
 
 # 2. 更新版本号
-VERSION="0.12.0"
+VERSION="0.15.0"
 bash scripts/sync-package-version.sh "$VERSION"
 
 # 3. 构建 DEB
@@ -466,7 +476,7 @@ GOOS=darwin GOARCH=arm64 go build -o gc_cli/bin/gc-darwin-arm64 ./cmd/gc
 GOOS=windows GOARCH=amd64 go build -o gc_cli/bin/gc-windows-amd64.exe ./cmd/gc
 
 # 2. 更新版本号
-VERSION="0.12.0"
+VERSION="0.15.0"
 bash scripts/sync-package-version.sh "$VERSION"
 
 # 3. 构建 wheel
@@ -486,10 +496,10 @@ python3 -m build --wheel --sdist --outdir dist/
 name: "gc"
 arch: "amd64"
 platform: "linux"
-version: "0.12.0"
-maintainer: "gitcode-cli contributors"
+version: "0.15.0"
+maintainer: "atomgit-cli contributors"
 description: "GitCode CLI - Command line tool for GitCode"
-homepage: "https://gitcode.com/gitcode-cli/cli"
+homepage: "https://gitcode.com/atomgit-cli/cli"
 license: "MIT"
 scripts:
   postinstall: ./build/scripts/postinstall.sh

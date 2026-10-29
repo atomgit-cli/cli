@@ -66,6 +66,7 @@
 - 命令行为说明
 - 用户操作说明
 - 安装、打包、发布的使用说明
+- SIG 与 RFC 的贡献者导航（`docs/SIGS.md`、`docs/rfcs/README.md`，规则本体在 `spec/governance/sig-governance.md` 与 `spec/workflows/rfc-workflow.md`）
 
 其中 `docs/COMMANDS.md` 是命令行为唯一真相源。
 `docs/AI-GUIDE.md` 只服务外部项目通过 AI 使用 `gc`，不定义 gitcode-cli 仓库内部开发流程。
@@ -122,6 +123,7 @@ GitCode CLI Skills 采用独立仓库治理：
 - 项目总入口：`README.md`
 - 命令行为：`docs/COMMANDS.md`
 - 项目正式规范：`spec/`
+- SIG 元数据：`spec/governance/sigs/*.yaml`
 - 真相源边界说明：`spec/governance/source-of-truth-matrix.md`
 - 项目阶段说明：`issues-plan/PROGRESS.md`
 - GitCode CLI Skills 真相源：[gitcode-cli/skills](https://gitcode.com/gitcode-cli/skills)

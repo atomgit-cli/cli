@@ -256,3 +256,16 @@ func TestNormalizeLabels(t *testing.T) {
 		})
 	}
 }
+
+// TestReadTextFromFlagSurfacesReadError verifies an io.ReadAll failure is
+// returned as-is instead of being swallowed.
+func TestReadTextFromFlagSurfacesReadError(t *testing.T) {
+	readErr := errors.New("simulated stdin failure")
+	_, err := ReadTextFromFlag(&failingReader{data: "", err: readErr}, "--body-file")
+	if err == nil {
+		t.Fatal("ReadTextFromFlag() error = nil, want read error")
+	}
+	if !errors.Is(err, readErr) {
+		t.Fatalf("ReadTextFromFlag() error = %v, want the underlying read error", err)
+	}
+}

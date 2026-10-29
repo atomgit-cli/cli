@@ -141,14 +141,14 @@ go test -tags=system ./tests/system
 
 ### 5bis. 远端 CI 验证
 
-本地验证通过后，推送分支到 GitCode 并创建 PR。GitCode 原生 CI 在 PR 提交时自动触发
-（`on: pull_request`），AI 通过 `gc actions` 核验结果：
+本地验证通过后，推送分支到 GitCode 并创建 PR。GitCode 原生 CI 在 PR 提交与 main 合并/直推时自动触发
+（`on: pull_request, push`），AI 通过 `gc actions` 核验结果：
 
 ```bash
 # 查看 GitCode PR 的 CI 运行、详情和 Jobs
-gc actions run list -R gitcode-cli/cli --pr <pr-number> --workflow "CI" --json
-gc actions run view <run-id> -R gitcode-cli/cli --json
-gc actions job list <run-id> -R gitcode-cli/cli --json
+gc actions run list -R atomgit-cli/cli --pr <pr-number> --workflow "CI" --json
+gc actions run view <run-id> -R atomgit-cli/cli --json
+gc actions job list <run-id> -R atomgit-cli/cli --json
 ```
 
 如果存在对应的 GitHub 镜像 PR，再通过 `gh` 核验跨平台 CI：
@@ -167,7 +167,7 @@ CI 通过标准：
 
 CI 失败处理：
 
-- GitCode：通过 `gc actions job log <run-id> <job-id> -R gitcode-cli/cli --output job-log.zip` 获取失败日志
+- GitCode：通过 `gc actions job log <run-id> <job-id> -R atomgit-cli/cli --output job-log.zip` 获取失败日志
 - GitHub：通过 `gh run view <run-id> --log --job=<job-id>` 获取失败日志
 - 分析根因并修复，修复后重新推送并重新触发 CI
 - 如是环境/平台偶发问题（非代码问题），在自检中记录后仍可继续

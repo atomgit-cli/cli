@@ -4,7 +4,8 @@ title = "gc custom gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "exclude tmp/gh-cli reference code (GitHub CLI source) from secret scanning"
+description = "exclude tmp/gh-cli reference code (GitHub CLI source) and dist/ build artifacts (third-party package contents) from secret scanning"
 paths = [
-    '''tmp/gh-cli/.*''',
+    '''^tmp/gh-cli/.*''',
+    '''^dist/.*''',
 ]

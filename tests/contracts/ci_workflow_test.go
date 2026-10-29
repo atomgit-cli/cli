@@ -12,15 +12,39 @@ import (
 )
 
 type workflowDocument struct {
-	Jobs map[string]workflowJob `yaml:"jobs"`
+	Jobs        map[string]workflowJob `yaml:"jobs"`
+	On          workflowTriggers       `yaml:"on"`
+	Permissions map[string]string      `yaml:"permissions"`
+}
+
+// workflowTriggers captures the trigger block. yaml.v3 decodes the "on" key
+// as a plain string key, unlike YAML 1.1 parsers that coerce it to boolean.
+type workflowTriggers struct {
+	PullRequest workflowTriggerEvent `yaml:"pull_request"`
+	Push        workflowTriggerEvent `yaml:"push"`
+}
+
+type workflowTriggerEvent struct {
+	Branches []string `yaml:"branches"`
 }
 
 type workflowJob struct {
-	Needs     stringList     `yaml:"needs"`
-	Steps     []workflowStep `yaml:"steps"`
-	Env       map[string]any `yaml:"env"`
-	Services  map[string]any `yaml:"services"`
-	Container any            `yaml:"container"`
+	Needs       stringList        `yaml:"needs"`
+	Steps       []workflowStep    `yaml:"steps"`
+	Env         map[string]any    `yaml:"env"`
+	Services    map[string]any    `yaml:"services"`
+	Container   any               `yaml:"container"`
+	Strategy    workflowStrategy  `yaml:"strategy"`
+	Permissions map[string]string `yaml:"permissions"`
+}
+
+type workflowStrategy struct {
+	Matrix   workflowMatrix `yaml:"matrix"`
+	FailFast *bool          `yaml:"fail-fast"`
+}
+
+type workflowMatrix struct {
+	OS []string `yaml:"os"`
 }
 
 type stringList []string
@@ -74,6 +98,17 @@ func TestGitCodeWorkflowContract(t *testing.T) {
 	}
 }
 
+// TestMirrorWorkflowPinsMainTriggers runs the trigger contract against the
+// GitHub mirror workflow so one side cannot silently lose its main-branch
+// triggers. Only the trigger surface is shared; the two files have
+// different job sets, so the job contracts stay GitCode-side.
+func TestMirrorWorkflowPinsMainTriggers(t *testing.T) {
+	doc := readWorkflowAt(t, filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if problems := validateTriggers(doc); len(problems) > 0 {
+		t.Fatalf("GitHub mirror workflow trigger contract violations:\n- %s", strings.Join(problems, "\n- "))
+	}
+}
+
 func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -93,6 +128,14 @@ func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "missing wheel install", mutate: removeWheelInstall, want: "wheel entrypoints"},
 		{name: "echo-only entrypoints", mutate: removeEntrypointExecutions, want: "wheel entrypoints"},
 		{name: "late setup-python", mutate: movePythonSetupAfterSmoke, want: "before wheel smoke test"},
+		{name: "missing push trigger", mutate: removePushTrigger, want: "push trigger"},
+		{name: "push trigger off main", mutate: pointPushTriggerAwayFromMain, want: "push trigger"},
+		{name: "missing pull_request trigger", mutate: removePullRequestTrigger, want: "pull_request trigger"},
+		{name: "race flag dropped", mutate: stripGitCodeRace, want: "race"},
+		{name: "security redaction stripped", mutate: stripGitCodeRedact, want: "--redact"},
+		{name: "security redaction zeroed", mutate: zeroGitCodeRedact, want: "--redact"},
+		{name: "unshallow step removed", mutate: removeGitCodeUnshallow, want: "unshallow"},
+		{name: "unshallow failure no longer fails the job", mutate: softenGitCodeUnshallow, want: "fail"},
 	}
 
 	for _, tt := range tests {
@@ -128,7 +171,11 @@ func TestDockerDisabledMessageIsAllowed(t *testing.T) {
 
 func readWorkflow(t *testing.T) workflowDocument {
 	t.Helper()
-	path := filepath.Join("..", "..", ".gitcode", "workflows", "ci.yml")
+	return readWorkflowAt(t, filepath.Join("..", "..", ".gitcode", "workflows", "ci.yml"))
+}
+
+func readWorkflowAt(t *testing.T, path string) workflowDocument {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -143,7 +190,11 @@ func readWorkflow(t *testing.T) workflowDocument {
 
 func validateWorkflow(doc workflowDocument) []string {
 	var problems []string
+	problems = append(problems, validateTriggers(doc)...)
 	problems = append(problems, validateJobs(doc)...)
+	problems = append(problems, validateRace(doc)...)
+	problems = append(problems, validateSecurityRedact(doc)...)
+	problems = append(problems, validateSecurityUnshallow(doc)...)
 	problems = append(problems, validateDependencies(doc)...)
 	problems = append(problems, validatePackage(doc)...)
 	for _, contract := range artifactContracts {
@@ -152,8 +203,78 @@ func validateWorkflow(doc workflowDocument) []string {
 	return problems
 }
 
+// validateRace pins the race detector on the GitCode test job, mirroring
+// validateMirrorRace on the GitHub side: dropping -race must fail loudly on
+// both platforms.
+func validateRace(doc workflowDocument) []string {
+	job, ok := doc.Jobs["test"]
+	if !ok {
+		return nil
+	}
+	for _, step := range job.Steps {
+		if strings.Contains(step.Run, "go test") && strings.Contains(step.Run, "-race") {
+			return nil
+		}
+	}
+	return []string{"test job must run go test with the -race flag"}
+}
+
+// validateSecurityRedact pins the redaction on the GitCode security job,
+// mirroring the mirror-side pin: --redact is a percentage, so the full
+// --redact=100 value is required to keep findings out of public CI logs.
+func validateSecurityRedact(doc workflowDocument) []string {
+	job, ok := doc.Jobs["security"]
+	if !ok {
+		return nil
+	}
+	for _, step := range job.Steps {
+		if strings.Contains(step.Run, "gitleaks") && strings.Contains(step.Run, "--redact=100") {
+			return nil
+		}
+	}
+	return []string{"security job gitleaks must run with --redact=100 so findings stay out of public logs"}
+}
+
+// validateSecurityUnshallow pins the full-history guarantee on the GitCode
+// security job, mirroring the mirror-side fetch-depth pin: the job must run
+// git fetch --unshallow for shallow checkouts, and a failed unshallow must
+// fail the job (fail-closed) instead of silently scanning partial history.
+func validateSecurityUnshallow(doc workflowDocument) []string {
+	job, ok := doc.Jobs["security"]
+	if !ok {
+		return nil
+	}
+	for _, step := range job.Steps {
+		run := step.Run
+		if strings.Contains(run, "git fetch --unshallow") && strings.Contains(run, "exit 1") {
+			return nil
+		}
+	}
+	return []string{"security job must unshallow shallow checkouts and fail the job when unshallow fails"}
+}
+
+// validateTriggers pins the spec-level trigger surface (ci-workflows.md
+// must-list and trigger configuration): both pull_request and push must
+// cover the main branch. Containment, not deep equality, so adding
+// release/* branches later does not break the pin.
+func validateTriggers(doc workflowDocument) []string {
+	var problems []string
+	for _, trigger := range []struct {
+		name  string
+		event workflowTriggerEvent
+	}{
+		{"pull_request", doc.On.PullRequest},
+		{"push", doc.On.Push},
+	} {
+		if !contains(trigger.event.Branches, "main") {
+			problems = append(problems, fmt.Sprintf("%s trigger must cover branch %q", trigger.name, "main"))
+		}
+	}
+	return problems
+}
+
 func validateJobs(doc workflowDocument) []string {
-	required := []string{"lint", "test", "build", "package"}
+	required := []string{"lint", "security", "test", "build", "package"}
 	var problems []string
 	for _, jobID := range required {
 		if _, ok := doc.Jobs[jobID]; !ok {
@@ -408,6 +529,69 @@ func stringValue(value any) string {
 		return ""
 	}
 	return fmt.Sprint(value)
+}
+
+func removePushTrigger(doc *workflowDocument) {
+	doc.On.Push = workflowTriggerEvent{}
+}
+
+func pointPushTriggerAwayFromMain(doc *workflowDocument) {
+	doc.On.Push = workflowTriggerEvent{Branches: []string{"dev"}}
+}
+
+func removePullRequestTrigger(doc *workflowDocument) {
+	doc.On.PullRequest = workflowTriggerEvent{}
+}
+
+func stripGitCodeRace(doc *workflowDocument) {
+	job := doc.Jobs["test"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " -race", "")
+	}
+	doc.Jobs["test"] = job
+}
+
+func stripGitCodeRedact(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100 ", "")
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " --redact=100", "")
+	}
+	doc.Jobs["security"] = job
+}
+
+// zeroGitCodeRedact keeps a --redact flag but disables redaction: the value
+// is a percentage, so 0 means findings print verbatim.
+func zeroGitCodeRedact(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	for i := range job.Steps {
+		job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, "--redact=100", "--redact=0")
+	}
+	doc.Jobs["security"] = job
+}
+
+func removeGitCodeUnshallow(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	filtered := make([]workflowStep, 0, len(job.Steps))
+	for _, step := range job.Steps {
+		if !strings.Contains(step.Run, "git fetch --unshallow") {
+			filtered = append(filtered, step)
+		}
+	}
+	job.Steps = filtered
+	doc.Jobs["security"] = job
+}
+
+// softenGitCodeUnshallow drops the fail-closed exit so a failed unshallow
+// would let the scan continue on partial history.
+func softenGitCodeUnshallow(doc *workflowDocument) {
+	job := doc.Jobs["security"]
+	for i := range job.Steps {
+		if strings.Contains(job.Steps[i].Run, "git fetch --unshallow") {
+			job.Steps[i].Run = strings.ReplaceAll(job.Steps[i].Run, " || { echo \"::error::failed to unshallow\"; exit 1; }", "")
+		}
+	}
+	doc.Jobs["security"] = job
 }
 
 func removePackageJob(doc *workflowDocument) {

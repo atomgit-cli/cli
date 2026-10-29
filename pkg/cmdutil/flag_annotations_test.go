@@ -68,6 +68,40 @@ func TestSetFlagEnumOrWarnSilentOnRegisteredFlag(t *testing.T) {
 	}
 }
 
+// TestSetTopicAnnotationInitializesNilMap verifies SetTopicAnnotation creates
+// the Annotations map when it is nil instead of panicking.
+func TestSetTopicAnnotationInitializesNilMap(t *testing.T) {
+	cmd := &cobra.Command{}
+	if cmd.Annotations != nil {
+		t.Fatal("precondition: Annotations should be nil on a fresh command")
+	}
+
+	SetTopicAnnotation(cmd, "issues")
+
+	if cmd.Annotations == nil {
+		t.Fatal("Annotations = nil after SetTopicAnnotation, want initialized map")
+	}
+	if got := cmd.Annotations[TopicAnnotation]; got != "issues" {
+		t.Fatalf("topic annotation = %q, want %q", got, "issues")
+	}
+}
+
+// TestSetTopicAnnotationOverwritesExistingTopic verifies a second call
+// replaces the previous topic value.
+func TestSetTopicAnnotationOverwritesExistingTopic(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Annotations = map[string]string{"unrelated": "value"}
+
+	SetTopicAnnotation(cmd, "repo")
+
+	if got := cmd.Annotations[TopicAnnotation]; got != "repo" {
+		t.Fatalf("topic annotation = %q, want %q", got, "repo")
+	}
+	if got := cmd.Annotations["unrelated"]; got != "value" {
+		t.Fatalf("unrelated annotation = %q, want preserved", got)
+	}
+}
+
 // captureStderr runs fn while os.Stderr is redirected to a pipe, returning the
 // captured output. The previous process-global os.Stderr is restored.
 func captureStderr(t *testing.T, fn func()) string {

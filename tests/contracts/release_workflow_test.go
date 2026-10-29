@@ -27,10 +27,25 @@ func TestReleaseWorkflowOrdersTagBeforeGoReleaser(t *testing.T) {
 	}
 }
 
+// TestReleaseWorkflowPreflightRunsGoTests pins the release-time unit test
+// gate: preflight must run go test before the tag is created, so a release
+// cut while main CI is missing or red still hits the unit tests.
+func TestReleaseWorkflowPreflightRunsGoTests(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		"- name: Preflight Go tests",
+		"run: go test ./...",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow preflight missing %q", required)
+		}
+	}
+	assertOrdered(t, workflow, "- name: Preflight Go tests", "- name: Create and push tag")
+}
+
 func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 	workflow := readReleaseWorkflow(t)
 	for _, required := range []string{
-		`PACKAGE_FILE="$(realpath "$(find release-assets`,
 		`if: ${{ !inputs.npm_recovery }}`,
 		`if: ${{ inputs.npm_recovery }}`,
 		`test "$(tr -d '\r\n' < VERSION)" = "${VERSION_NUM}"`,
@@ -45,12 +60,102 @@ func TestReleaseWorkflowSupportsVerifiedNPMRecovery(t *testing.T) {
 		`CHECKSUM_LINE="$(grep -F`,
 		`test "${ACTUAL_PACKAGE_SHA}" = "${PACKAGE_SHA_EXPECTED}"`,
 		`package/bin/platforms/gc-linux-amd64`,
-		`refusing to move npm dist-tag backwards`,
+		// The backslide guard lives in scripts/npm-dist-tag-guard.mjs; the
+		// workflow must invoke it on BOTH the main publish path and recovery.
 		`npm publish "${PACKAGE_FILE}" --access public --tag "${PUBLISH_TAG}"`,
+		`recovery-packages.tsv`,
+		`RECOVERY_PACKAGES=${RUNNER_TEMP}/recovery-packages.tsv`,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing npm recovery protection %q", required)
 		}
+	}
+
+	// The backslide guard (scripts/npm-dist-tag-guard.mjs) must run on BOTH
+	// the main publish path and the recovery path — a single Contains would
+	// stay green if either invocation were dropped.
+	if got := strings.Count(workflow, `node scripts/npm-dist-tag-guard.mjs "${VERSION_NUM}" "${CURRENT_TAG_VERSION}"`); got != 2 {
+		t.Errorf("dist-tag guard invocations = %d, want 2 (main publish + recovery)", got)
+	}
+}
+
+func TestReleaseWorkflowPublishesAllNPMCoordinates(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		`test "$(find . -maxdepth 1 -name '*.tgz' -type f | wc -l)" -eq 3`,
+		`test -f "gitcode-cli-cli-${VERSION_NUM}.tgz"`,
+		`test -f "atomgit-cli-cli-${VERSION_NUM}.tgz"`,
+		`test -f "atomgit-cli-${VERSION_NUM}.tgz"`,
+		`"@gitcode-cli/cli") printf 'gitcode-cli-cli-%s.tgz' "${VERSION_NUM}" ;;`,
+		`"@atomgit-cli/cli") printf 'atomgit-cli-cli-%s.tgz' "${VERSION_NUM}" ;;`,
+		`"atomgit-cli") printf 'atomgit-cli-%s.tgz' "${VERSION_NUM}" ;;`,
+		`for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do`,
+		`PACKAGE_FILE="$(realpath "release-assets/$(coordinate_tarball "${COORDINATE}")")"`,
+		`all three coordinates must publish ${VERSION_NUM}`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing multi-coordinate npm publishing guard %q", required)
+		}
+	}
+	// The per-coordinate publish loop must exist in both the regular npm job
+	// (idempotent skip + publish) and the recovery job.
+	if got := strings.Count(workflow, `npm view "${COORDINATE}@${VERSION_NUM}" version >/dev/null 2>&1`); got != 2 {
+		t.Fatalf("per-coordinate idempotency check appears %d times, want 2 (npm job + recovery)", got)
+	}
+}
+
+func TestReleaseWorkflowRecoversAllNPMCoordinates(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		// v2 manifest schema handling with the coordinate allowlist.
+		`m.packages`,
+		`unsupported recovery coordinate`,
+		`legacy manifest must reference the @gitcode-cli/cli tarball`,
+		// Every downloaded tarball must be consumed by exactly one manifest row.
+		`DOWNLOADED_TARBALLS`,
+		// TSV-driven loops must not let npm commands swallow the manifest stdin.
+		`done 3< "${RECOVERY_PACKAGES}"`,
+		`done 3< "${RUNNER_TEMP}/recovery-packages.tsv"`,
+		// A full three-coordinate manifest must end with all dist-tags aligned,
+		// with bounded retries absorbing registry propagation delay.
+		`dist_tag_with_retry()`,
+		`if [[ "$(wc -l < "${RECOVERY_PACKAGES}")" -eq 3 ]]`,
+		`expected ${VERSION_NUM}`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing multi-coordinate npm recovery guard %q", required)
+		}
+	}
+	if got := strings.Count(workflow, `done 3< "${RECOVERY_PACKAGES}"`); got != 2 {
+		t.Fatalf("recovery loops on fd 3 = %d, want 2 (publish loop + consistency gate)", got)
+	}
+}
+
+func TestPrepareNPMPackageScriptPublishesAllCoordinates(t *testing.T) {
+	path := filepath.Join("..", "..", "scripts", "prepare-npm-package.sh")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`readonly NPM_COORDINATES=("@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli")`,
+		`refusing npm coordinate outside the reviewed allowlist`,
+		`pkg.name = name`,
+		`npm pack --pack-destination "${OUTPUT_DIR}"`,
+		`trap cleanup_stage EXIT`,
+		`for coordinate in "${NPM_COORDINATES[@]}"; do`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("prepare-npm-package.sh missing multi-coordinate guard %q", required)
+		}
+	}
+	// The per-coordinate staging copies the tree, rewrites the coordinate
+	// name on the copy, then exercises and packs it under that name.
+	assertOrdered(t, script, `cp -a npm/. "${stage}/"`, `pkg.name = name`)
+	assertOrdered(t, script, `pkg.name = name`, `npm pack --pack-destination "${OUTPUT_DIR}"`)
+	if !strings.Contains(script, "\n        npm test\n") {
+		t.Error("prepare-npm-package.sh must run the npm test suite inside each staged coordinate copy")
 	}
 }
 
@@ -259,7 +364,7 @@ func TestReleaseWorkflowKeepsPrereleasesOffNpmLatest(t *testing.T) {
 			t.Errorf("release workflow missing npm prerelease tag guard %q", required)
 		}
 	}
-	assertOrdered(t, workflow, `PUBLISH_TAG="latest"`, `npm view "@gitcode-cli/cli@${VERSION_NUM}" version`)
+	assertOrdered(t, workflow, `PUBLISH_TAG="latest"`, `npm view "${COORDINATE}@${VERSION_NUM}" version`)
 }
 
 func TestPackageScriptPinsNfpm(t *testing.T) {

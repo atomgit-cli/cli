@@ -112,6 +112,8 @@ docker compose up gc
 - `actions job view`
 - `actions artifact list`
 - `actions artifact view`
+- `actions plugin list`
+- `actions plugin view`
 - `actions workflow list`
 - `search repos`
 - `search issues`
@@ -152,6 +154,10 @@ docker compose up gc
 - `release create`
 - `release edit`
 - `release upload`
+- `actions run rerun`
+- `actions run retry`
+- `actions run stop`
+- `actions setting enable|disable`
 - `actions workflow run`
 - `repo branch create`
 - `repo edit`
@@ -167,6 +173,11 @@ docker compose up gc
 - `repo sync`
 - `config set`
 - `update`
+
+写命令家族约定（issue close / pr close / artifact delete / actions run stop/rerun/retry 等）：
+
+- JSON 结果的 `action` 字段统一使用过去式（如 `stopped`、`deleted`、`retried`）；`rerun` 兼作过去分词，保持原形
+- 人类可读成功输出统一以红色 `✗` 前缀标识破坏性/写操作家族，与只读/普通写操作的绿色 `✓` 区分
 
 其中 `issue list` 额外支持：
 
@@ -260,7 +271,9 @@ gc auth login --web
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
-- 登录成功后 token 会写入本地配置；若同时设置了 `GC_TOKEN` 或 `GITCODE_TOKEN`，环境变量优先。
+- 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见[认证模型](./AUTH.md)）。
+- 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆（Unix）/删除式（Windows 用户级）停用定义、`unset`、新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
+- 未设置环境变量时，登录成功输出保持安静（不再打印环境变量优先级提示）。
 - 未显式传 `--with-token` 时需要交互式 TTY；非交互环境会直接报错，避免命令挂起等待输入。
 
 ### auth status - 查看认证状态
@@ -285,7 +298,9 @@ gitcode.com
   ✓ Git operations protocol: https
 ```
 
-未认证或 token 无效/过期时，诊断信息输出到 stderr，退出码为 `4`（`ExitAuth`）。`--json` 模式下 JSON 仍写入 stdout（`logged_in:false` 或 `token_valid:false`），退出码同样为 `4`，便于 AI 代理仅凭退出码判断认证状态。
+未认证或 token 无效/过期时，诊断信息输出到 stderr，退出码为 `4`（`ExitAuth`）。`--json` 模式下 JSON 仍写入 stdout（`logged_in` 与 `token_valid` 恒输出：未认证时 `logged_in:false`，token 无效/过期时 `token_valid:false`），退出码同样为 `4`，便于 AI 代理仅凭退出码判断认证状态、无需做字段存在性分支。
+
+token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾，方案 A 的验证在新开终端执行。来源为本地配置时维持 re-login 提示不变。该指引仅在文本输出模式出现；`--json` 模式不输出指引文本，stdout 保持纯 JSON，退出码仍为 `4`。
 
 ### auth token - 显示 Token
 
@@ -1209,7 +1224,7 @@ gc issue relations -R infra-test/gctest1 --state open --limit 50
 
 ## Discussions 命令 (discussions)
 
-只读访问 GitCode 组织级讨论（discuss）。当前覆盖组织讨论列表与详情，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss` 与 `/discuss/{number}`）。
+访问 GitCode 组织级讨论（discuss）：列表、详情、创建、编辑与删除，调用 GitCode v5 API（`GET /api/v5/orgs/{org}/discuss`、`POST /discuss`、`PUT /discuss/{number}` 等）。
 
 ### discussions list - 列出组织讨论
 
@@ -1253,6 +1268,46 @@ gc discussions view 42 --org my-org --json
 - `--org`（必填）：组织 path。位置参数为讨论编号。
 - `--json`：原样输出讨论对象（含 `md_content` 正文）。
 
+### discussions create - 创建组织讨论
+
+调用 `POST /api/v5/orgs/{org}/discuss`。
+
+```bash
+# 创建讨论
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body "描述内容"
+
+# 从文件读取正文
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body-file idea.md
+
+# 从 stdin 读取正文
+cat idea.md | gc discussions create --org my-org --title "新想法" --category "Ideas" --body-file -
+
+# 输出 JSON
+gc discussions create --org my-org --title "新想法" --category "Ideas" --body "描述" --json
+```
+
+说明：`--org`/`--title`/`--category`/`--body`（或 `--body-file`，支持 `-` 表示 stdin）均必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions edit - 编辑组织讨论
+
+调用 `PUT /api/v5/orgs/{org}/discuss/{number}`。仅更新显式传入的字段。
+
+```bash
+# 修改标题
+gc discussions edit 42 --org my-org --title "新标题"
+
+# 修改正文
+gc discussions edit 42 --org my-org --body-file idea.md
+
+# 修改分类
+gc discussions edit 42 --org my-org --category "Q&A"
+
+# 输出 JSON
+gc discussions edit 42 --org my-org --title "新标题" --json
+```
+
+说明：`--org`（必填）；位置参数为讨论编号；至少提供一个变更 flag（`--title`/`--body`/`--body-file`/`--category`），否则报参数错误；`--json` 原样输出更新结果。
+
 ### discussions project list - 列出仓库讨论
 
 仓库（项目级）讨论，调用 GitCode v5 API（`GET /api/v5/repos/{owner}/{repo}/discuss`），参数与组织讨论一致。
@@ -1285,6 +1340,46 @@ gc discussions project view 42 -R owner/repo --json
 - `-R`（必填）：仓库。位置参数为讨论编号。
 - `--json`：原样输出讨论对象（含 `md_content` 正文）。
 
+### discussions project create - 创建仓库讨论
+
+调用 `POST /api/v5/repos/{owner}/{repo}/discuss`。
+
+```bash
+# 创建讨论
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body "描述内容"
+
+# 从文件读取正文
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body-file idea.md
+
+# 从 stdin 读取正文
+cat idea.md | gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body-file -
+
+# 输出 JSON
+gc discussions project create -R owner/repo --title "新想法" --category "Ideas" --body "描述" --json
+```
+
+说明：`--title`/`--category`/`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填，`-R` 仓库在当前 Git 仓库目录执行时可省略自动推断；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions project edit - 编辑仓库讨论
+
+调用 `PUT /api/v5/repos/{owner}/{repo}/discuss/{number}`。仅更新显式传入的字段。
+
+```bash
+# 修改标题
+gc discussions project edit 42 -R owner/repo --title "新标题"
+
+# 修改正文
+gc discussions project edit 42 -R owner/repo --body-file idea.md
+
+# 修改分类
+gc discussions project edit 42 -R owner/repo --category "Q&A"
+
+# 输出 JSON
+gc discussions project edit 42 -R owner/repo --title "新标题" --json
+```
+
+说明：`-R` 仓库（可省略自动推断）；位置参数为讨论编号；至少提供一个变更 flag（`--title`/`--body`/`--body-file`/`--category`），否则报参数错误；`--json` 原样输出更新结果。
+
 ### discussions comments list - 列出组织讨论评论
 
 组织讨论评论，调用 `GET /api/v5/orgs/{org}/discuss/{number}/comment`。
@@ -1304,6 +1399,60 @@ gc discussions comments replies 42 <comment-id> --org my-org
 
 说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--page`/`--per-page`；`--json`。
 
+### discussions comments create - 创建组织讨论评论
+
+调用 `POST /api/v5/orgs/{org}/discuss/{number}/comment`。
+
+```bash
+# 创建评论
+gc discussions comments create 42 --org my-org --body "评论内容"
+
+# 从文件读取正文
+gc discussions comments create 42 --org my-org --body-file comment.md
+
+# 从 stdin 读取正文
+echo "评论内容" | gc discussions comments create 42 --org my-org --body-file -
+
+# 输出 JSON
+gc discussions comments create 42 --org my-org --body "评论内容" --json
+```
+
+说明：`--org`（必填）；位置参数为讨论编号；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建结果。
+
+### discussions comments edit - 编辑组织讨论评论
+
+调用 `PUT /api/v5/orgs/{org}/discuss/{number}/comment/{id}`。
+
+```bash
+# 编辑评论
+gc discussions comments edit 42 <comment-id> --org my-org --body "新内容"
+
+# 从文件读取正文
+gc discussions comments edit 42 <comment-id> --org my-org --body-file comment.md
+
+# 输出 JSON
+gc discussions comments edit 42 <comment-id> --org my-org --body "新内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出更新结果。
+
+### discussions comments reply - 回复组织讨论评论
+
+调用 `POST /api/v5/orgs/{org}/discuss/{number}/comment/{comment_id}/reply`。
+
+```bash
+# 回复评论
+gc discussions comments reply 42 <comment-id> --org my-org --body "回复内容"
+
+# 从文件读取正文
+gc discussions comments reply 42 <comment-id> --org my-org --body-file reply.md
+
+# 输出 JSON
+gc discussions comments reply 42 <comment-id> --org my-org --body "回复内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`--org`（必填）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建的回复。
+
 ### discussions project comments list - 列出仓库讨论评论
 
 仓库讨论评论，调用 `GET /api/v5/repos/{owner}/{repo}/discuss/{number}/comment`。
@@ -1322,6 +1471,40 @@ gc discussions project comments replies 42 <comment-id> -R owner/repo
 ```
 
 说明：两个位置参数（讨论编号 + comment-id）；`-R` 仓库，可省略自动推断；`--page`/`--per-page`/`--json`。
+
+### discussions project comments edit - 编辑仓库讨论评论
+
+调用 `PUT /api/v5/repos/{owner}/{repo}/discuss/{number}/comment/{id}`。
+
+```bash
+# 编辑评论
+gc discussions project comments edit 42 <comment-id> -R owner/repo --body "新内容"
+
+# 从文件读取正文
+gc discussions project comments edit 42 <comment-id> -R owner/repo --body-file comment.md
+
+# 输出 JSON
+gc discussions project comments edit 42 <comment-id> -R owner/repo --body "新内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`-R` 仓库（可省略自动推断）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出更新结果。
+
+### discussions project comments reply - 回复仓库讨论评论
+
+调用 `POST /api/v5/repos/{owner}/{repo}/discuss/{number}/comment/{comment_id}/reply`。
+
+```bash
+# 回复评论
+gc discussions project comments reply 42 <comment-id> -R owner/repo --body "回复内容"
+
+# 从文件读取正文
+gc discussions project comments reply 42 <comment-id> -R owner/repo --body-file reply.md
+
+# 输出 JSON
+gc discussions project comments reply 42 <comment-id> -R owner/repo --body "回复内容" --json
+```
+
+说明：两个位置参数（讨论编号 + comment-id）；`-R` 仓库（可省略自动推断）；`--body`（或 `--body-file`，支持 `-` 表示 stdin）必填；正文提交前执行敏感内容扫描；`--json` 原样输出创建的回复。
 
 评论与回复共享同一输出结构（`id`/`author`/`content`/`md_content`/`like_total`/`reply_total`/`created_at` 等）；404（讨论或评论不存在）返回 exit 3。
 
@@ -1756,6 +1939,15 @@ gc pr edit 1 --add-assignee reviewer1 -R infra-test/gctest1
 
 # 添加测试人
 gc pr edit 1 --add-tester tester1 -R infra-test/gctest1
+
+# 设置 PR 合并人（PUT，整体替换已有合并人集合）
+gc pr edit 1 --mergers user1,user2 -R infra-test/gctest1
+
+# 清空 PR 合并人（空值提交空集合）
+gc pr edit 1 --mergers "" -R infra-test/gctest1
+
+# 设置合并人并输出 JSON
+gc pr edit 1 --mergers user1 -R infra-test/gctest1 --json
 ```
 
 说明：
@@ -1766,8 +1958,9 @@ gc pr edit 1 --add-tester tester1 -R infra-test/gctest1
 - `--add-assignee`/`--remove-assignee`：添加/移除审查人（POST/DELETE /pulls/{number}/assignees）。
 - `--add-reviewer`/`--remove-reviewer`：添加/移除评审人（POST/DELETE /pulls/{number}/reviewers）。
 - `--add-tester`/`--remove-tester`：添加/移除测试人（POST/DELETE /pulls/{number}/testers）。
-- 以上 6 个 flag 可与 `--title`/`--body` 等基础编辑 flag 同时使用。
-- `--json` 会在更新成功后读取并输出完整的最终 PR 状态，`id`、`number`、`labels` 等字段可直接供脚本和 AI 代理判断结果。
+- `--mergers`：设置合并人（PUT /pulls/{number}/mergers，逗号分隔），整体替换已有合并人集合；空值 `--mergers ""` 提交空集合用于清空全部合并人。
+- 以上 7 个 flag 可与 `--title`/`--body` 等基础编辑 flag 同时使用。
+- `--json` 会在更新成功后读取并输出完整的最终 PR 状态，`id`、`number`、`labels` 等字段可直接供脚本和 AI 代理判断结果；使用 `--mergers` 时输出为 `{"pull_request": …, "mergers": […]}` 包装对象，`mergers` 为设置后的合并人列表。
 
 ### pr label - 管理 PR 标签
 
@@ -1873,13 +2066,21 @@ gc release create v1.0.0 -R infra-test/gctest1 --title "v1.0.0" --notes "Release
 # 列出所有 Releases
 gc release list -R infra-test/gctest1
 
+# 列出 150 个（跨 API 页自动累积）
+gc release list -R infra-test/gctest1 --limit 150
+
+# 只取第 2 页（单次请求）
+gc release list -R infra-test/gctest1 --page 2
+
 # 输出 JSON
 gc release list -R infra-test/gctest1 --json
 ```
 
 说明：
 - `--limit`（默认 30）返回最新 N 个 release：CLI 向 API 请求 `direction=desc`（最新优先），客户端再按 `published_at`（缺失时回退 `created_at`）降序排序。
-- 文本输出中只有最新一个正式 release 会标记为 `(latest)`。
+- API 单页上限 100：`--limit` 超过 100 时 CLI 自动跨页累积取满 N 个（不会静默截断），累积完成后统一按发布时间排序再截取。
+- `--page N`（默认 0）显式取第 N 页（单次请求，语义对齐 `issue list`/`pr list`）；与大于 100 的 `--limit` 互斥，组合时报参数错误（退出码 2）。
+- 文本输出中只有最新一个正式 release 会标记为 `(latest)`（`--page` 翻页时指该页窗口内最新的正式 release，而非全仓库最新）。
 - 其他正式 release 会标记为 `(published)`；草稿和预发布仍分别显示 `(draft)`、`(pre-release)`。
 
 ### release view - 查看 Release
@@ -1913,6 +2114,9 @@ gc release upload v1.0.0 app.zip -R infra-test/gctest1 --json
 
 说明：
 - `--label` 参数当前不受 GitCode release upload API 支持；CLI 现在会直接报错，不再静默忽略。
+- 上传前检查同名资产：release 中已存在同名资产时整批拒绝（错误信息提示先 `gc release delete-asset` 删除或改名再传），不会部分上传。
+- 多文件上传时任一文件失败即中止，错误信息附带本次已成功上传的文件清单。
+- 文件以流式上传（不整文件读入内存）。
 - `--json` 只在所有文件上传完成后输出上传结果数组；每项包含 `name`、`path`、`size` 和 `content_type`，不会混入文本提示。
 
 ### release download - 下载资产
@@ -1935,8 +2139,10 @@ gc release download v1.0.0 -R infra-test/gctest1 --all
 ```
 
 说明：
-- 默认过滤 source archive（`.zip`/`.tar.gz` 源码包），只下载二进制/ wheel 等发布资产。
+- 默认过滤 GitCode 自动生成的源码包：按下载 URL 含 `/archive/refs/heads/` 的特征识别，与文件扩展名无关；正常命名的 `.zip`/`.tar.gz` 发布资产不会被过滤。
 - 需要完整下载（包含 source archive）时显式传 `--all`。
+- 目标文件已存在时默认报错；`--clobber` 覆盖、`--skip-existing` 跳过已存在文件，两个参数互斥。
+- 显式点名资产时：任一名字不存在即报错并列出该 release 的全部可用资产名；点名的资产即使是源码包也会下载（不受默认过滤与 `--all` 影响）。
 
 ### release edit - 编辑 Release
 
@@ -1976,6 +2182,7 @@ gc release delete v1.0.0 -R infra-test/gctest1 --dry-run
 
 说明：
 - GitCode 官方 OpenAPI 当前没有 Release 删除接口，实际删除请求会返回 `405 Method Not Allowed`。
+- 405 时命令错误信息指引到仓库 Release 页面完成删除（API 响应含 `html_url` 时附上网页链接，缺失时给无链接指引）。
 - `--dry-run` 仅预览目标和参数，不执行删除；需要删除时请使用仓库 Release 页面。
 
 ### release delete-asset - 删除 Release 附件
@@ -2302,7 +2509,55 @@ gc precommit check --json
 
 ## Actions 命令 (actions)
 
-`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），只读，通过 Actions v8 API（`/api/v8/...`）访问。与其它命令默认使用的 v5 不同，Actions 走独立的 v8 路径。
+`actions` 命令组用于检视 GitCode Actions 流水线（pipeline）运行记录与工作流作业（workflow jobs），以及管理仓库的 Actions 权限。运行记录相关命令以只读为主（`run stop`/`run rerun`/`run retry`/`artifact delete`/`workflow run` 等写操作带确认门保护），通过 Actions v8 API（`/api/v8/...`）访问，与其它命令默认使用的 v5 不同；权限控制使用 GitCode Web API 的 Actions setting 接口。
+
+### actions setting - 启用或停用 Actions
+
+启用或停用单个仓库，或组织下的全部仓库 Actions。使用 `-R`/`--repo` 指定单个仓库（必须为 `owner/repo`），或使用 `--org` 指定组织以批量操作组织下的全部仓库；两者互斥，均未提供时按 `actions` 命令族惯例推断当前目录仓库。命令会先读取每个仓库当前的 Actions 权限配置，PUT 时只修改 `action_enabled`，保留 `block_all_new_pipelines`、`block_cross_repo_pr_triggers` 等其余已读取字段。
+
+Actions setting 接口位于 GitCode Web API（`web-api.gitcode.com`），需要 GitCode 网页会话 JWT，经典个人访问令牌（PAT）不适用于该接口。执行命令前，请按以下步骤获取 JWT：
+
+1. 打开 `https://gitcode.com` 并登录具有目标仓库管理权限的账号。
+2. 点击页面右上角的账号头像。
+3. 按 `F12` 打开开发者工具并切换到 `Console`。
+4. 执行 `copy(localStorage.getItem('access_token'))`。
+5. 将复制的内容粘贴到 CLI 提示处并按回车。
+
+交互式终端输入使用隐藏回显，JWT 不会显示在屏幕上；JWT 只在本次命令内存中使用，不写入日志或磁盘。命令会本地校验 JWT 格式与 `exp` 过期时间。仓库与组织列表仍使用常规 CLI 凭证（PAT/GC_TOKEN）读取。
+
+这是危险操作。默认会列出将发生变化的仓库，并要求交互式输入 `{enable|disable} Actions for {仓库或组织名}` 确认短语（`actions` 写操作命令族惯例）；当部分仓库已处于目标状态时，预览会列出这些仓库及跳过原因；确认提示以 `!` 警告标识开头，并声明该命令调用的是官方 API 文档未收录的 GitCode Web API，使用风险由执行者自行承担；非交互环境必须显式传 `--yes`。如果没有仓库需要变更，命令不会发送 PUT 请求，也不会要求确认。
+
+批量操作遇到单个仓库失败时不会中止：命令会继续处理其余仓库，保留已成功的变更，并在结果中逐仓列出 `updated`/`unchanged`/`failed` 状态；失败原因写入 stderr，退出码返回 `1` 以反映部分失败。
+
+```bash
+# 启用单个仓库的 Actions
+gc actions setting enable -R owner/repo
+
+# 停用单个仓库的 Actions
+gc actions setting disable -R owner/repo
+
+# 启用组织下全部仓库的 Actions
+gc actions setting enable --org my-org
+
+# 非交互环境跳过确认（非 TTY 需通过 --with-token 提供 JWT，见下一例）
+gc actions setting disable --org my-org --yes
+
+# 非交互：通过 stdin 提供 web JWT（不要在命令行书写 token 字面量，从密钥管理工具管道输出）
+$ <print-token-from-secret-manager> | gc actions setting disable -R owner/repo --with-token --yes
+
+# 输出结构化结果
+gc actions setting enable -R owner/repo --yes --json
+```
+
+说明：
+
+- `-R`/`--repo` 与 `--org` 互斥；均未提供时推断当前目录仓库。`-R`/`--repo` 仅接受 `owner/repo`（两段均非空，支持 CLI 通用的 HTTPS/SSH 仓库地址格式）；组织批量操作请使用 `--org <name>`。
+- 组织模式按 `GET /api/v5/orgs/{org}/repos` 分页读取组织下的全部仓库，再逐个读取 Actions setting；分页以首个空页作为终止条件（不假设短页即末页），并设置页数上限防止异常服务端导致循环。
+- Actions setting 读取和更新使用 `GET/PUT /api/v2/projects/{project_id}/actions/setting`；请求体不发送 `project_id`。
+- `--with-token` 从 stdin 首行读取 web JWT；交互式终端下未提供该 flag 时提示粘贴。非 TTY 且未提供 `--with-token` 时在发起任何 API 请求前立即报错（退出码 `2`），不会阻塞等待输入，也不会先跑读取请求。
+- JWT 格式不合法或已过期时报认证错误（退出码 `4`），提示刷新 GitCode 页面后重新执行 `copy(localStorage.getItem('access_token'))` 并粘贴新的值。
+- `--json` 输出到 stdout，包含目标仓库、project id、修改前后的 `action_enabled` 和每仓 `status`（`updated`/`unchanged`/`failed`）；确认提示和预览写入 stderr。
+- 退出码：`0` 成功；`1` 通用/API 错误（含批量部分失败）；`2` 参数或确认错误；`3` 资源不存在；`4` 认证/权限错误；`5` 资源冲突。
 
 ### actions run list - 列出流水线运行记录
 
@@ -2355,6 +2610,88 @@ gc actions run list -R owner/repo --json
 - 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
 - 分页：`--limit`/`-L`（默认 30，映射为 `per_page`）、`--page`、`--paginate`（抓取全部分页至 `--limit`）、`--per-page`（API 页大小）。`--paginate` 与 `--page` 互斥。
 - 退出码：`0` 成功；`1` 通用错误（其它 API 错误）；`2` 参数错误（如 `--paginate` 与 `--page` 同用、`--limit`/`--per-page` 为负）；`3` 资源不存在（HTTP 404，如仓库不存在）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
+
+### actions run rerun - 重跑整条流水线
+
+重新执行指定流水线的全部任务（对齐 `gh run rerun`）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`。
+
+```bash
+# 重跑 run（交互确认）
+gc actions run rerun <run-id> -R owner/repo
+
+# 跳过确认（脚本场景）
+gc actions run rerun <run-id> -R owner/repo --yes
+
+# JSON 输出
+gc actions run rerun <run-id> -R owner/repo --yes --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/rerun`。
+- 仅处于完成状态的 run 可重跑；对 RUNNING 中的 run 调用会返回冲突错误（HTTP 409，服务端业务校验）。
+- 重跑为同 run 原地重跑，可结合 `gc actions run watch <run-id>` 继续跟踪。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `rerun pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
+- 成功输出使用红色 `✗` 前缀（破坏性/写命令家族统一视觉约定）。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409，如对运行中的 run 重跑）。
+
+### actions run retry - 按 job 重试流水线任务
+
+重试指定流水线中失败/取消的任务，避免整条流水线重跑（能力对标 `gh run rerun --failed`，但 GitCode 接口按 job_run_ids 显式指定，可自由组合）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`，job id 取 `gc actions job list <run-id>` 返回的 `job_run_id`。
+
+```bash
+# 显式指定要重试的 job（可重复）
+gc actions run retry <run-id> --job <job-id> --job <job-id-2> -R owner/repo
+
+# 重试全部失败/取消的 job
+gc actions run retry <run-id> --failed -R owner/repo
+
+# 跳过确认（脚本场景）
+gc actions run retry <run-id> --failed --yes -R owner/repo
+
+# JSON 输出
+gc actions run retry <run-id> --failed --yes --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/retry`，请求体 `{"job_run_ids": [...]}`。
+- `--job` 与 `--failed` 互斥且必须二选一；`--job` 可重复传入，重复的 job id 会去重；`--failed` 会先调用 `GET .../runs/{run_id}/jobs`，过滤 `FAILED`/`CANCELED` 状态的 job 后提交。
+- 调用前一律先查询 jobs 列表校验 job 归属：服务端不校验 job_run_ids 是否属于目标 run，传入其他 run 的 job id 会造成"假运行"状态，CLI 侧收集全部不匹配的 job id 一次性报错退出、不发起请求。
+- 截断防御：服务端 jobs 列表若被分页截断（`total_count` 大于实际返回条数），归属校验拒绝基于不完整数据执行，直接报错、不发起请求。
+- `--failed` 无匹配 job（如全部成功）时报错"no failed or canceled jobs to retry"且不发起请求（服务端对空数组无校验，会静默成功但不调度任何任务）。
+- 仅失败/取消状态的 run 支持重试；对 COMPLETED 的 run 调用会透传服务端 HTTP 400 错误。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `retry pipeline run <run-id>` 确认（提示语展示将重试的 job 清单）；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。确认门在 retry 写请求之前触发，之前的 jobs 查询为只读。
+- 成功输出使用红色 `✗` 前缀（破坏性/写命令家族统一视觉约定）。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action","job_run_ids"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误（含无匹配 job、jobs 列表截断）；`2` 参数错误（如缺少 `<run-id>`、`--job` 空值、`--job` 与 `--failed` 同时指定或都未指定、非交互未携带 `--yes`、确认输入不匹配、服务端 400）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
+
+### actions run stop - 停止运行中的流水线
+
+停止一条正在运行的流水线（run）。`<run-id>` 取 `gc actions run list` 返回的 `workflow_run_id`。
+
+```bash
+# 停止运行中的 run（交互确认）
+gc actions run stop <run-id> -R owner/repo
+
+# 跳过确认（脚本场景）
+gc actions run stop <run-id> -R owner/repo --yes
+
+# JSON 输出
+gc actions run stop <run-id> -R owner/repo --yes --json
+```
+
+说明：
+
+- 调用 `POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/stop`。
+- 服务端幂等：对已经结束（非 RUNNING）的 run 调用同样返回成功。
+- 确认门（spec/foundations/agent-friendly-cli.md §4 破坏性命令确认）：默认需交互输入 `stop pipeline run <run-id>` 确认；`--yes` 跳过确认；非交互环境未携带 `--yes` 时立即失败（退出码 2）。
+- 支持 `--json`：输出 `{"run_id","owner","repo","action"}` 结构到 stdout。
+- 认证复用标准 Bearer header（`GC_TOKEN`/`GITCODE_TOKEN` 或本地配置），不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误（如缺少 `<run-id>`、非交互未携带 `--yes`、确认输入不匹配）；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误（HTTP 401/403）；`5` 资源冲突（HTTP 409）。
 
 ### actions run view - 查看流水线运行详情
 
@@ -2876,6 +3213,67 @@ gc actions runner-set shared-runner-sets -R owner/repo --json
 
 ---
 
+### actions plugin list - 列出官方 Actions 插件
+
+列出指定仓库可用的官方 GitCode Actions 插件。
+
+```bash
+# 列出插件
+gc actions plugin list -R owner/repo
+
+# 获取单页
+gc actions plugin list -R owner/repo --page 1 --per-page 20
+
+# 输出为 JSON
+gc actions plugin list -R owner/repo --json
+```
+
+说明：
+
+- 支持 `--json`：输出写入 stdout，原样保留完整 API 字段。
+- `-R`：仓库（owner/repo，可选，缺省时从当前 git 仓库解析，推断失败回退 gitcode-cli/cli）。
+- `--files <path>`：将输出写入文件（UTF-8 字节，避免 PowerShell 重定向乱码）。
+- 默认自动获取全部分页（`--limit 0` = 不限制）；`--limit N` 限制总数，`--page N` 指定单页，`--paginate` 显式全量。
+- 端点：`GET https://web-api.gitcode.com/api/v2/projects/{project}/actions/plugins/all`。
+- 请求头含 `Referer: https://gitcode.com/`，满足 Web API 同站校验。
+- 认证复用标准 Bearer header，不通过 `access_token` query 参数暴露 token。
+- 空结果输出 `[]`（JSON）或 `No actions plugins found`（文本）。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误；`5` 资源冲突。
+
+---
+
+### actions plugin view - 查看插件详情和 README
+
+查看指定官方 GitCode Actions 插件的元信息、版本及 Markdown 使用说明。`view` 有别名 `show`。
+
+```bash
+# 查看插件 README
+gc actions plugin view checkout -R owner/repo
+
+# 使用 show 别名
+gc actions plugin show checkout -R owner/repo
+
+# 输出为 JSON（保留完整 API 字段）
+gc actions plugin view checkout -R owner/repo --json
+
+# 写入文件（避免 shell 编码问题）
+gc actions plugin view checkout -R owner/repo --json --files detail.json
+```
+
+说明：
+
+- 支持 `--json`：输出写入 stdout，原样输出完整 API 响应。
+- `-R`：仓库（owner/repo，可选，缺省时从当前 git 仓库解析，推断失败回退 gitcode-cli/cli）。
+- `--files <path>`：将输出写入文件（UTF-8 字节，避免 PowerShell 重定向乱码）。
+- 位置参数：插件名称（省略时打印 help）。
+- 文本模式默认输出 `vision_content[]` 中各版本的 README。
+- 端点：`GET https://web-api.gitcode.com/api/v2/projects/{project}/actions/plugins/detail?name={plugin_name}`。
+- 请求头含 `Referer: https://gitcode.com/`，满足 Web API 同站校验。
+- 认证复用标准 Bearer header，不通过 `access_token` query 参数暴露 token。
+- 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 资源不存在（HTTP 404）；`4` 认证/权限错误；`5` 资源冲突。
+
+---
+
 ## 飞书/Lark 命令 (lark)
 
 `gc lark` 通过官方 `lark-cli` 工具与飞书/Lark 集成。gc 以子进程方式委托 `lark-cli`，飞书 OAuth 凭证由 lark-cli 存入操作系统 keychain，gc 不接触飞书令牌。
@@ -2971,22 +3369,25 @@ gc doctor install --json
 
 - 完全离线，无需认证；不读取或打印 Token。
 - 输出当前 `version` / `commit` / `built`、`distribution`、wrapper `entrypoint`、实际 `binary`，以及 `gc` / `gitcode` 在 PATH 中的全部 `candidates` 与 `selected`。
-- `distribution` 可为 `npm`、`npm-bootstrap`、`pypi`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`。
+- `distribution` 可为 `npm`、`npm-local`、`pnpm`、`npm-bootstrap`、`pypi`、`uv`、`deb`、`rpm`、`homebrew`、`system-package` 或 `archive-or-source`（npm wrapper 会透传发现的真实渠道；项目本地安装不再误标为 `npm`，pnpm 安装会与 `PNPM_HOME` 比对给出冲突诊断；uv 工具经 Python wrapper 按 venv 布局（`/uv/tools/`）识别为 `uv` 并在更新指引中给 `uv tool upgrade gitcode-cli`——`--from` 别名安装需以实际工具名为准；`system-package` 仅由 env 显式声明产生，检测路径不再产出——dpkg/rpm 均未认领属主的 `/usr/bin` 手工拷贝按 `archive-or-source` 给指引）。
 - Windows 会报告 PowerShell 内置 `gc`/`Get-Content` alias 风险，并建议使用 `gitcode`，不会建议全局删除系统 alias。
 - 只给出 `conflicts` 和 `recommendations`；不会修改 PATH、shell profile、认证配置，也不会调用其他包管理器卸载软件。
+- 检测 bin 目录中被中断安装遗留的 `leftovers`（`gc.*.backup-*` / `*.tmp-*` / 写探针残留 / `.gitcode-install.json.tmp-*`，含 Windows 的 `.exe` 变体；可能包含符号链接），并按类型分流建议：常规文件建议重跑 npm bootstrap 安装清扫（仅清扫 24 小时以上的常规文件）或手动删除；符号链接明确提示需手动删除——安装器出于并发安全永不自动清除符号链接，重跑安装无效。安装目录不在 PATH 的 bootstrap 安装（全路径调用）会单独报 `not on PATH` 冲突。
+- bootstrap 渠道（Go 二进制）在无法拉起更新 helper（node 运行时缺失等）时，将重试限流为每小时一次（正常退避仍由 JS helper 的指数策略管理）。
 - `--json` 只向 stdout 写一个稳定 JSON 对象，适合安装器、CI 与 AI 代理消费。
 
-npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。
+npm bootstrap 的 Node wrapper 另提供 `gitcode install [--target-dir <directory>] [--no-modify-path]`（POSIX 上等价入口为 `gc install`；`--target-dir` 亦接受 `--target-dir=<directory>` 等号形式，`-` 开头的目录名可用 `./-name` 或 `--target-dir=-name` 表达）；`--target-dir` 只在用户显式指定时覆盖默认的用户级安装目录，可用 `gitcode install --help` 查看。默认目录选择会避开 Homebrew 域（检测到 `/usr/local/Cellar` 布局时跳过 `/usr/local/bin` 候选）。
 
 - Windows 在用户显式执行 `install` 后，默认将安装目录置于持久 User PATH 前面并删除同目录重复项；只修改当前用户，不修改 Machine PATH、不提权、不删除或重写其他 PATH 条目，也不调用其他包管理器卸载软件。
-- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
+- 显式 `--target-dir` 会替换该目录内已有的同名常规文件；识别为外来渠道入口的目标会被拒绝替换并给出对应包管理器的卸载指引——pip console script 给 `pip uninstall`、uv 工具脚本给 `uv tool uninstall`、pipx 给 `pipx uninstall`；不得将其指向 Python Scripts、npm prefix 等由其他包管理器持有的目录。缺少参数值或把下一 flag 当成目录时立即报错。
 - `--no-modify-path` 显式跳过 Windows 持久 PATH 修改，并输出中文 Windows 用户环境变量设置步骤；Linux/macOS 接受该参数但原有 PATH/profile 行为不变。
 - `npx` 子进程无法修改已经运行的父 PowerShell 环境。当前窗口尚未优先包含目标目录时，安装完成输出必须用中文显性给出 `$env:Path` 刷新命令、关闭全部 PowerShell/Windows Terminal 后重开的替代方式，以及 `gitcode version` 验证步骤。
+- 安装完成输出会检测合并 PATH（System PATH 在前、User PATH 在后）中先于安装目录的其他 `gc`/`gitcode` 提供者，并区分两种情形：提供者位于用户 PATH 时提示"重新打开窗口后本安装优先生效"；提供者位于系统 PATH 或 shell 配置时明确提示"重开窗口也无法解决"，并给出卸载旧提供者或由管理员调整系统 PATH 顺序的指引（含 `gitcode doctor install` 排查入口）。
 - Windows 持久化失败不会伪装为 PATH 配置成功；安装器保留已通过校验的二进制，输出中文失败原因、Windows 用户环境变量设置步骤和当前窗口刷新命令。持久写入后的系统广播失败必须单独警告并提示注销后重新登录。
 - 目标目录含分号、空字符或不是绝对 Windows 路径时，不得生成任何 PATH 修改命令，只能提示更换目录或直接运行已安装程序。
 
 - Linux/macOS 安装时，如果历史版本留下的 `gitcode` 符号链接解析后精确指向同目录常规 `gc` 文件，bootstrap 会在同一安装事务中自动迁移该别名，无需用户先删除。
-- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖；Windows 不迁移符号链接。
+- `gc` 主程序目标上的符号链接、指向其他位置的 `gitcode` 链接和其他非常规目标一律拒绝覆盖，**但解析进自家 npm 坐标包树（classic 全局安装或项目级最外层 `node_modules`）的软链会被采纳迁移**；pnpm（`/pnpm/global/` 或 `/.pnpm/` 存储；项目级 `.bin` 链接给项目域 `pnpm remove <坐标>` 指引）、yarn（`/yarn/global/` 与 Windows 的 `/Yarn/Data/global/` 布局，给 `yarn global remove <坐标>`）与 bun（`/.bun/`，给 `bun remove -g <坐标>`）布局的软链即便解析进自家坐标也一律拒绝；Windows 不迁移非自家软链。
 - 别名迁移保留事务唯一备份；后续二进制校验、健康检查或 metadata 写入失败时，旧 `gc` 与原始链接会按逆序原样回滚。
 
 <a id="gitcode-update"></a>
@@ -3000,10 +3401,13 @@ gc update
 gc update --json
 ```
 
-- npm global wrapper 只从官方 `https://registry.npmjs.org` 更新精确包 `@gitcode-cli/cli@<stable latest>`；不会更新其他全局 npm 包，并使用 `--ignore-scripts` 禁止更新包生命周期脚本。
+- npm global wrapper 只从官方 `https://registry.npmjs.org` 更新**所安装坐标**的精确包 `<所装坐标>@<stable latest>`（`atomgit-cli` / `@atomgit-cli/cli` / `@gitcode-cli/cli`，坐标取自 package.json，不跨坐标安装）；不会更新其他全局 npm 包，并使用 `--ignore-scripts` 禁止更新包生命周期脚本。
 - npm bootstrap 使用安装 manifest 和独立 helper，在当前进程退出后原子替换 `gc` / `gitcode`，下一次启动生效。
+- 显式 `gc update`（npm bootstrap）先在前台完成版本检查：已是最新 stable 时直接返回 `current`，不调度任何替换；存在新版本才调度原子替换；检查失败立即透出底层错误（如 registry 连接重置）并以非零退出码结束。若显式更新时恰有并发更新持锁（如刚触发的后台检查），返回 `busy` 状态且退出码为 0，稍后重试即可。
 - stable 版本不会自动进入 prerelease，也不会降级。
-- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码，摘要在下次启动写入 stderr 一次。
+- 版本检查有有界重试（3 次尝试，应对 registry 网络抖动；E404/E401/E403 等确定性 registry 错误不重试、立即失败）；npm 网络请求显式 `--fetch-timeout=60000`，使 npm 自身的 fetch-retry 能落在 300 秒安装总预算内；后台失败摘要携带真实错误原因（超长按码点边界截断），不再输出无效指引；update.log 每行带 `package=<坐标> channel=<渠道>` 前缀，多坐标并行可追溯。
+- 生命周期钩子差异：Go 二进制（bootstrap 渠道）在命令非零退出时跳过安装后钩子（cobra RunE 失败不执行 PersistentPostRun，摘要展示与调度均不触发）；npm wrapper 对任意退出码都会执行生命周期收尾。bootstrap 渠道命令失败后可用 `gc update --check` 手动复查。
+- 更新有 24 小时 TTL、跨进程锁、`version --json` 健康检查与失败回滚；后台失败不会改变刚完成业务命令的退出码。失败后按 1 小时起步的指数退避重试（2h、4h……上限 24 小时），同一错误指纹的失败摘要只展示一次；manifest 损坏、npm 运行时缺失等重试无法自愈的永久错误会暂停后台检查，并在摘要中给出修复动作（重跑 bootstrap 安装或重装 Node.js 后运行 `gitcode update` 恢复）。
 - updater 子进程使用最小环境白名单，不继承 GitCode/npm/GitHub/云平台凭证或用户 npm registry 配置；仅保留 PATH、系统目录、状态/配置目录、代理和 CA 等运行所需变量。
 - `--check` 只查询 stable `latest`，不安装。
 - 非 npm 渠道只返回对应包管理器的手工升级说明，不会调用 pip、Homebrew、apt、dnf 或 rpm。
@@ -3025,7 +3429,7 @@ gc config set update.mode off --json
 - `notify`：默认值；后台检查 stable 新版本，在下一次启动提示 `gitcode update`，不自动安装。
 - `auto`：用户明确启用后，后台检查并应用 stable 更新。
 - `off`：不联网检查，不自动更新。
-- 配置保存在 `~/.config/gc/config.json` 的 `gitcode.com` host 下；`GC_UPDATE_MODE` 优先于文件配置。
+- 配置保存在 `~/.config/gc/config.json` 的 `gitcode.com` host 下；`GC_UPDATE_MODE` 为合法值（`auto`/`notify`/`off`）时优先于文件配置，非法值回落到文件配置。
 - 首次 npm 命令会在 stderr 说明默认策略和退出方式。
 - `CI=true`、`--no-interactive`、`--no-update-check`、`GC_NO_UPDATE_CHECK=1` 均禁用隐式后台检查、联网与自动应用；显式 `update` / `update --check` 仍由用户主动控制。
 
@@ -3051,7 +3455,7 @@ gc config list --json
 
 ### config clear-cache - 清除缓存
 
-清除 CLI 缓存目录中的临时文件（API 缓存、补全脚本等），不影响认证和配置文件。
+清除 CLI 缓存目录中的文件，不影响认证和配置文件。
 
 ```bash
 gc config clear-cache
@@ -3300,6 +3704,31 @@ gc help --topic issues
 # 输出 JSON
 gc help --json
 ```
+
+### completion - 生成 Shell 补全脚本
+
+```bash
+# 生成 bash 补全（输出到 stdout，需自行重定向）
+gc completion bash > ${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/gc
+
+# zsh：目标目录需在 fpath 中，之后运行 compinit
+gc completion zsh > ~/.zsh/completions/_gc
+
+# fish
+gc completion fish > ${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish
+
+# PowerShell（Windows 下用 gitcode 调用，gc 是 Get-Content 别名；profile 不存在时先 New-Item -ItemType File -Path $PROFILE -Force）
+gitcode completion powershell >> $PROFILE
+
+# 生成不含描述的精简版本
+gc completion bash --no-descriptions
+```
+
+说明：
+- cobra 内建命令，支持 `bash` / `zsh` / `fish` / `powershell` 四种 shell，脚本输出到 stdout。
+- 命令名跟随调用名与 `GITCODE_CLI_COMMAND_NAME`：`gitcode` 启动或显式设置时生成 gitcode 命名版本（见 version 节的命令名说明）。
+- npm 渠道安装器会自动安装 gc 与 gitcode 双名补全（bash/zsh/fish；Windows 跳过，用上面的 powershell 命令）。跳过项（如某命令名被 PATH 上其他提供者占用）会在安装输出中逐一列明；zsh 需 `fpath` 配置才会加载（见 npm README 的 Uninstall 小节了解补全文件位置）。
+- 本命令不进入 schema 命令树（见 schema 节说明）。
 
 ### schema - 命令元数据
 

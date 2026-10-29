@@ -2,6 +2,8 @@
 package installupdate
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
@@ -19,6 +22,7 @@ import (
 const (
 	updateTTL       = 24 * time.Hour
 	updateLockStale = 15 * time.Minute
+	checkDeadline   = 120 * time.Second
 )
 
 // Manifest describes an npm-bootstrap installation.
@@ -29,13 +33,25 @@ type Manifest struct {
 	Node         string `json:"node"`
 	NPM          string `json:"npm"`
 	Helper       string `json:"helper"`
-	path         string
+	// Package is the npm coordinate being bootstrapped. Optional: legacy
+	// manifests lack it and fall back to the flat state path, matching the
+	// old helper that writes the same flat file.
+	Package string `json:"package,omitempty"`
+	path    string
 }
 
 type updateState struct {
 	NextCheck   int64         `json:"nextCheck,omitempty"`
 	NoticeShown bool          `json:"noticeShown,omitempty"`
 	Summary     *stateSummary `json:"summary,omitempty"`
+	// Failure bookkeeping written by the JS updaters (backoff streak,
+	// summary deduplication, permanent-failure stop). Every field must be
+	// declared here: mutateStateLocked rewrites the whole file from this
+	// struct, so an undeclared field would be silently dropped.
+	LastChecked          string `json:"lastChecked,omitempty"`
+	FailureStreak        int64  `json:"failureStreak,omitempty"`
+	LastErrorFingerprint string `json:"lastErrorFingerprint,omitempty"`
+	PermanentError       bool   `json:"permanentError,omitempty"`
 }
 
 type stateSummary struct {
@@ -81,7 +97,7 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 	if err != nil {
 		return
 	}
-	statePath := StatePath()
+	statePath := StatePath(manifest)
 	updatesDisabled := disabled(cfg, noUpdate, noInteractive)
 	var state updateState
 	if !mutateStateLocked(statePath, func(current *updateState) {
@@ -101,11 +117,32 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 	if updatesDisabled {
 		return
 	}
+	// A permanent failure (broken manifest, missing npm runtime) stops
+	// background scheduling until the user repairs the install; the pending
+	// summary above is still shown first.
+	if state.PermanentError {
+		return
+	}
 	if state.NextCheck > time.Now().UnixMilli() {
 		return
 	}
 	if err := StartDetached(manifest, false); err != nil {
 		fmt.Fprintf(errOut, "update check skipped: %v\n", err)
+		// A missing or broken helper fails on every command; without a
+		// backoff this prints on each invocation forever. Rate-limit the
+		// retry to hourly (a repaired install or a successful update
+		// resets the schedule; the JS helper owns the finer backoff).
+		if !mutateStateLocked(statePath, func(current *updateState) {
+			if current.NextCheck <= time.Now().UnixMilli() {
+				current.NextCheck = time.Now().Add(time.Hour).UnixMilli()
+			}
+		}) {
+			// The backoff write itself failed (unwritable state directory):
+			// nothing can be persisted, so say so once with a fixed,
+			// actionable line instead of repeating the spawn detail on
+			// every command.
+			fmt.Fprintf(errOut, "update state is not writable at %s; fix permissions to stop this notice\n", filepath.Dir(statePath))
+		}
 	}
 }
 
@@ -117,12 +154,29 @@ func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	}
 	defer func() {
 		_ = lock.Close()
-		_ = os.Remove(lockPath)
+		// Identity check: if this lock was reclaimed as stale while we were
+		// stalled, the path now holds someone else's fresh lock — removing
+		// it would let a third process double-hold.
+		if data, err := os.ReadFile(lockPath); err == nil && strings.TrimSpace(string(data)) == strconv.Itoa(os.Getpid()) {
+			_ = os.Remove(lockPath)
+		}
 	}()
 	state := readState(path)
 	mutate(&state)
-	writeState(path, state)
-	return true
+	return writeState(path, state) == nil
+}
+
+// retireLockFile renames a stale lock out of the way; a package-level seam
+// so the losing-reclaimer race can be tested deterministically.
+var retireLockFile = os.Rename
+
+// restoreLockFile puts a retired lock back without clobbering a fresh
+// claim: link fails with EEXIST when the path is taken. Also a seam.
+var restoreLockFile = func(retired, path string) error {
+	if err := os.Link(retired, path); err != nil {
+		return err
+	}
+	return os.Remove(retired)
 }
 
 func acquireStateLock(path string) (*os.File, error) {
@@ -131,32 +185,85 @@ func acquireStateLock(path string) (*os.File, error) {
 	}
 	lock, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if !os.IsExist(err) {
+		if err == nil {
+			// Record the holder so release can verify identity: a stalled
+			// holder resuming after a stale reclaim must not remove the
+			// reclaimer's fresh lock.
+			_, _ = lock.WriteString(strconv.Itoa(os.Getpid()))
+		}
 		return lock, err
 	}
 	info, statErr := os.Stat(path)
 	if statErr != nil || time.Since(info.ModTime()) <= updateLockStale {
 		return nil, err
 	}
-	if removeErr := os.Remove(path); removeErr != nil {
-		return nil, removeErr
+	// Atomic reclaim: renaming the stale lock to a private name lets exactly
+	// one of two racing reclaimers win. The loser's rename fails (the winner
+	// already retired the lock) and its claim then hits the winner's fresh
+	// lock — removing the shared path instead would delete each other's
+	// fresh locks and let both believe they hold it.
+	retired := fmt.Sprintf("%s.retired-%d", path, os.Getpid())
+	if renameErr := retireLockFile(path, retired); renameErr != nil {
+		return nil, err
 	}
-	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// Re-verify staleness on the retired file: a fresh claim may have
+	// landed between the check above and the rename, and renaming a live
+	// lock away would silently break its holder. Restore via link+remove —
+	// a plain rename would silently overwrite a third process's fresh
+	// claim on the freed path; link fails with EEXIST and we yield.
+	if retiredInfo, statErr := os.Stat(retired); statErr == nil &&
+		time.Since(retiredInfo.ModTime()) <= updateLockStale {
+		_ = restoreLockFile(retired, path)
+		return nil, err
+	}
+	_ = os.Remove(retired)
+	lock, claimErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if claimErr != nil {
+		return nil, claimErr
+	}
+	_, _ = lock.WriteString(strconv.Itoa(os.Getpid()))
+	return lock, nil
 }
 
-// StatePath returns the cross-platform npm update state file.
-func StatePath() string {
+// StatePath returns the npm-bootstrap update state file, scoped per package
+// coordinate and channel so parallel installs (npm-global, other
+// coordinates) do not share nextCheck or summaries. An explicit
+// GC_STATE_DIR keeps the legacy flat file; a legacy manifest without a
+// package name falls back to the flat path too, staying consistent with
+// the old helper copy that writes the same flat file.
+func StatePath(manifest *Manifest) string {
 	if dir := os.Getenv("GC_STATE_DIR"); dir != "" {
 		return filepath.Join(dir, "update-state.json")
 	}
-	if local := os.Getenv("LOCALAPPDATA"); runtime.GOOS == "windows" && local != "" {
-		return filepath.Join(local, "gitcode-cli", "update-state.json")
+	root := stateRoot()
+	if manifest != nil && manifest.Package != "" {
+		return filepath.Join(root, manifest.Package, "npm-bootstrap", "update-state.json")
+	}
+	return filepath.Join(root, "update-state.json")
+}
+
+func stateRoot() string {
+	if runtime.GOOS == "windows" {
+		home, _ := os.UserHomeDir()
+		return windowsStateRoot(os.Getenv("LOCALAPPDATA"), home)
 	}
 	home, _ := os.UserHomeDir()
 	root := os.Getenv("XDG_STATE_HOME")
 	if root == "" {
 		root = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(root, "gitcode-cli", "update-state.json")
+	return filepath.Join(root, "gitcode-cli")
+}
+
+// windowsStateRoot mirrors the JS stateDir precedence: LOCALAPPDATA wins,
+// then <home>\AppData\Local. An empty LOCALAPPDATA must not split the Go
+// binary and its JS helper onto different state files (~/.local/state vs
+// ~/AppData/Local) within the same bootstrap channel.
+func windowsStateRoot(localAppData, home string) string {
+	if localAppData != "" {
+		return filepath.Join(localAppData, "gitcode-cli")
+	}
+	return filepath.Join(home, "AppData", "Local", "gitcode-cli")
 }
 
 // StartDetached runs the copied bootstrap helper after this process exits.
@@ -173,6 +280,7 @@ func StartDetached(manifest *Manifest, force bool) error {
 	}
 	cmd := exec.Command(node, args...)
 	cmd.Env = updaterEnvironment()
+	cmd.SysProcAttr = detachAttrs()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -186,11 +294,131 @@ func RunCheck(manifest *Manifest, jsonOutput bool, out, errOut io.Writer) error 
 	if jsonOutput {
 		args = append(args, "--json")
 	}
-	cmd := exec.Command(node, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Env = updaterEnvironment()
-	cmd.Stdout = out
-	cmd.Stderr = errOut
-	return cmd.Run()
+	// Capture the streams so a failed check can surface the helper's reason
+	// in the returned error (matching CheckNow's wrapping) instead of a bare
+	// "exit status 1". Captured stdout is always forwarded; the helper's
+	// stderr is forwarded only in text mode — in --json mode the returned
+	// error carries the detail, and forwarding it too would print the same
+	// reason twice.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if out != nil {
+		cmd.Stdout = io.MultiWriter(out, &stdout)
+	}
+	if errOut != nil && !jsonOutput {
+		cmd.Stderr = io.MultiWriter(errOut, &stderr)
+	}
+	if err := cmd.Run(); err != nil {
+		detail := truncateDetail(checkFailureDetail(stdout.String(), stderr.String(), err))
+		if jsonOutput {
+			// The --json contract: stdout always carries exactly one JSON
+			// object. A helper killed by the deadline (or a crash before any
+			// output) leaves stdout empty, so synthesize the error object
+			// here instead of leaving the consumer with empty stdout and a
+			// non-zero exit.
+			var probe struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(stdout.Bytes(), &probe) != nil || probe.Status == "" {
+				synthesized := map[string]string{
+					"status":       "error",
+					"distribution": "npm-bootstrap",
+					"current":      manifest.Version,
+					"latest":       "",
+					"message":      "update check failed: " + detail,
+				}
+				if data, marshalErr := json.Marshal(synthesized); marshalErr == nil && out != nil {
+					fmt.Fprintln(out, string(data))
+				}
+			}
+		}
+		return fmt.Errorf("update check failed: %s", detail)
+	}
+	return nil
+}
+
+// checkFailureDetail extracts the helper's failure reason: the JSON error
+// message first (--json mode prints it to stdout), then the helper's stderr
+// line with its own "update failed: " prefix stripped (avoiding double
+// wrapping), then the raw run error.
+func checkFailureDetail(stdout, stderr string, runErr error) string {
+	var parsed struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(stdout), &parsed) == nil && parsed.Message != "" {
+		return parsed.Message
+	}
+	line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(stderr), "update failed:"))
+	if line != "" {
+		return line
+	}
+	return runErr.Error()
+}
+
+// CheckResult mirrors the bootstrap helper's JSON result for a foreground
+// update check.
+type CheckResult struct {
+	Status       string `json:"status"`
+	Distribution string `json:"distribution"`
+	Current      string `json:"current"`
+	Latest       string `json:"latest"`
+	Message      string `json:"message"`
+}
+
+// CheckNow runs a foreground update check and parses the helper's result.
+// A failed check returns the helper's error message so callers can surface
+// the underlying cause instead of a generic failure notice.
+func CheckNow(manifest *Manifest) (*CheckResult, error) {
+	node := resolveNode(manifest.Node)
+	args := []string{manifest.Helper, "--check", "--json", "--manifest", manifest.ManifestPath()}
+	var stdout, stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, args...)
+	cmd.Env = updaterEnvironment()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	var result CheckResult
+	parseErr := json.Unmarshal(stdout.Bytes(), &result)
+	if parseErr == nil && result.Status != "error" {
+		return &result, nil
+	}
+	detail := ""
+	if parseErr == nil {
+		detail = result.Message
+	}
+	if detail == "" {
+		detail = strings.TrimSpace(stderr.String())
+	}
+	if detail == "" {
+		switch {
+		case runErr != nil:
+			detail = runErr.Error()
+		case parseErr != nil:
+			detail = parseErr.Error()
+		}
+	}
+	return nil, fmt.Errorf("update check failed: %s", truncateDetail(detail))
+}
+
+// truncateDetail bounds helper error details to one collapsed line so failure
+// summaries and JSON output stay readable regardless of npm stderr volume.
+// Truncation is rune-aware: slicing mid-codepoint would emit broken UTF-8.
+func truncateDetail(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if utf8.RuneCountInString(text) > 200 {
+		text = string([]rune(text)[:200]) + "..."
+	}
+	if text == "" {
+		text = "unknown update check failure"
+	}
+	return text
 }
 
 func resolveNode(recorded string) string {
@@ -206,14 +434,57 @@ func resolveNode(recorded string) string {
 }
 
 func disabled(cfg config.Config, noUpdate, noInteractive bool) bool {
-	if noUpdate || noInteractive || truthy(os.Getenv("GC_NO_UPDATE_CHECK")) || truthy(os.Getenv("CI")) {
+	if noUpdate || noInteractive || truthy(os.Getenv("GC_NO_UPDATE_CHECK")) || ciEnvironment() {
 		return true
 	}
-	mode := strings.ToLower(os.Getenv("GC_UPDATE_MODE"))
-	if mode == "" && cfg != nil {
-		mode, _ = cfg.Get("gitcode.com", "update.mode")
+	return resolveUpdateMode(os.Getenv("GC_UPDATE_MODE"), configUpdateMode(cfg)) == "off"
+}
+
+// resolveUpdateMode mirrors the JS updateMode: an invalid GC_UPDATE_MODE
+// value falls back to the configured mode. The old behavior treated any
+// non-empty value as authoritative, so GC_UPDATE_MODE=banana silently
+// overrode a configured "off" and kept the checks running.
+func resolveUpdateMode(envValue, cfgValue string) string {
+	if m := strings.ToLower(strings.TrimSpace(envValue)); m == "auto" || m == "notify" || m == "off" {
+		return m
 	}
-	return mode == "off"
+	if m := strings.ToLower(strings.TrimSpace(cfgValue)); m == "auto" || m == "notify" || m == "off" {
+		return m
+	}
+	return "notify"
+}
+
+func configUpdateMode(cfg config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	// Get() honors GC_UPDATE_MODE first, which returns the (possibly
+	// invalid) environment text verbatim and masks exactly the configured
+	// value we need here. Read the file directly when the implementation
+	// supports it; foreign Config implementations fall back to Get.
+	if reader, ok := cfg.(interface {
+		FileGet(host, key string) (string, error)
+	}); ok {
+		value, _ := reader.FileGet("gitcode.com", "update.mode")
+		return value
+	}
+	value, _ := cfg.Get("gitcode.com", "update.mode")
+	return value
+}
+
+// ciEnvironment covers the CI vendors that do not set CI=true (Jenkins,
+// TeamCity, CodeShip): the variants carry version or build strings, so
+// their mere presence is the signal. Mirrors the JS ciEnvironment.
+func ciEnvironment() bool {
+	if truthy(os.Getenv("CI")) {
+		return true
+	}
+	for _, name := range []string{"GITHUB_ACTIONS", "BUILD_NUMBER", "CI_NAME", "TEAMCITY_VERSION"} {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func truthy(value string) bool {
@@ -251,41 +522,46 @@ func readState(path string) updateState {
 	}
 	var state updateState
 	if json.Unmarshal(data, &state) != nil {
+		// Corrupt state: preserve the bytes beside the file (fixed name, so
+		// it never accumulates) instead of silently wiping noticeShown and
+		// summary on the rewrite in mutateStateLocked. A failed rename still
+		// resets, exactly as before.
+		_ = os.Rename(path, path+".corrupt")
 		return updateState{}
 	}
 	return state
 }
 
-func writeState(path string, state updateState) {
+func writeState(path string, state updateState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
+		return err
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".update-state-*")
 	if err != nil {
-		return
+		return err
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	if err := temp.Chmod(0o600); err != nil {
 		temp.Close()
-		return
+		return err
 	}
 	if _, err := temp.Write(append(data, '\n')); err != nil {
 		temp.Close()
-		return
+		return err
 	}
 	if err := temp.Close(); err != nil {
-		return
+		return err
 	}
 	if os.Rename(tempPath, path) == nil {
-		return
+		return nil
 	}
 	_ = os.Remove(path)
-	_ = os.Rename(tempPath, path)
+	return os.Rename(tempPath, path)
 }
 
 // DueAt returns the next automatic-check time used by tests and diagnostics.

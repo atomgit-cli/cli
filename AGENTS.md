@@ -73,9 +73,11 @@
 
 | 文档 | 角色 |
 |------|------|
-| `spec/` | 项目正式规范唯一来源（编码、测试、安全、门禁、流程、交付、治理） |
+| `spec/` | 项目正式规范唯一来源（编码、测试、安全、门禁、流程、交付、治理，含 SIG 治理与 RFC 流程） |
+| `spec/governance/sigs/*.yaml` | SIG 元数据唯一真相源（角色、范围、scope_labels 映射、Agent 登记） |
 | `docs/COMMANDS.md` | 命令行为唯一真相源 |
 | `docs/AUTH.md`、`docs/PACKAGING.md`、`docs/REGRESSION.md` | 认证、打包、回归说明 |
+| `docs/SIGS.md`、`docs/rfcs/` | SIG 与 RFC 的贡献者导航（规则本体在 `spec/governance/sig-governance.md`、`spec/workflows/rfc-workflow.md`） |
 | `docs/AI-GUIDE.md` | 外部项目通过 AI 使用 `gc` 的说明，不定义本仓库内部流程 |
 | `README.md`、`AGENTS.md`、`CLAUDE.md` | 入口导航，非规则源 |
 | `issues-plan/PROGRESS.md` | 阶段说明，可能滞后 |
@@ -118,7 +120,7 @@ make check             # test + lint
 ```bash
 ./scripts/package.sh <version> [release|linux|deb|rpm|pypi]
 make release-local     # goreleaser 本地快照
-make release           # goreleaser 正式发布（需 tag）
+make release           # goreleaser 本地正式构建（不发布；正式发布走 release workflow）
 make completions       # 生成 shell 补全
 ```
 
@@ -169,32 +171,33 @@ make verify-remote-facts REPO=owner/repo [ISSUE=1] [PR=2] [HEAD_SHA=<sha>]
 
 ### 3.6 远端 CI（GitCode 原生 + GitHub 镜像）
 
-CI 同时运行在 **GitCode Actions**（主仓 `gitcode.com/gitcode-cli/cli`）和 **GitHub Actions**
-（镜像仓 `github.com/gitcode-cli/cli`）。GitCode 原生工作流定义在 `.gitcode/workflows/ci.yml`，
+CI 同时运行在 **GitCode Actions**（主仓 `gitcode.com/atomgit-cli/cli`）和 **GitHub Actions**
+（镜像仓 `github.com/atomgit-cli/cli`）。GitCode 原生工作流定义在 `.gitcode/workflows/ci.yml`，
 对齐 GitHub CI 的 Linux 路径；GitHub 工作流定义在 `.github/workflows/ci.yml`，继续承担
 Linux/macOS/Windows 跨平台验证。正式规范见 [spec/delivery/ci-workflows.md](./spec/delivery/ci-workflows.md)。
 
-**触发**：PR 提交或更新到 `main` 时自动触发（`on: pull_request: branches: [main]`），无需手动操作。
+**触发**：PR 提交或更新到 `main` 时自动触发（`on: pull_request: branches: [main]`）；`main` 收到合并提交或直推时同样自动触发（`on: push: branches: [main]`），使主干时点拥有独立 CI 证据，无需手动操作。
 
 **Job 映射**：
 
 | Job | GitCode Actions | GitHub Actions | 对应门禁 |
 |-----|-----------------|----------------|---------|
 | `lint` | Ubuntu latest | Ubuntu | 编码规范 |
+| `security` / `secret-scan` | Ubuntu latest（security） | Ubuntu（secret-scan） | gitleaks 凭证泄漏扫描 |
 | `test` | Ubuntu latest | Ubuntu / macOS / Windows | 单元测试 + 竞态 + 覆盖率 |
 | `build` | Ubuntu latest | Ubuntu / macOS / Windows | Linux / 跨平台构建 |
 | `package` / `docker` | Ubuntu latest（package） | Ubuntu（docker） | 补全 + wheel 入口冒烟 / Docker |
 
-依赖：`lint` 与 `test` 并行 → GitCode `build`、`package` 和 GitHub `build`、`docker`
+依赖：`lint`、`security` 与 `test` 并行 → GitCode `build`、`package` 和 GitHub `build`、`docker`
 等待 `test` 通过后执行；任一 Job 失败即整体失败。
 
 **AI 通过 `gc` / `gh` 监控**：
 
 ```bash
 # GitCode 主仓原生 CI
-gc actions run list -R gitcode-cli/cli --pr <pr-number> --workflow "CI" --json
-gc actions run view <run-id> -R gitcode-cli/cli --json
-gc actions job list <run-id> -R gitcode-cli/cli --json
+gc actions run list -R atomgit-cli/cli --pr <pr-number> --workflow "CI" --json
+gc actions run view <run-id> -R atomgit-cli/cli --json
+gc actions job list <run-id> -R atomgit-cli/cli --json
 
 # GitHub 镜像仓跨平台 CI
 gh run list --workflow=ci.yml --branch <pr-branch> --limit 1
@@ -230,7 +233,7 @@ gh run view <run-id> --log --job=<job-id>
 - 测试文件与源文件同目录，命名 `<source>_test.go`；函数以 `Test` 开头，推荐表格驱动测试
 - 覆盖率：新功能 ≥ 70%，核心模块 ≥ 80%
 - 命令行为变更必须至少做一个真实命令验证，且**只能使用 `infra-test/*` 仓库**（首选 `infra-test/gctest1`）
-- 禁止使用个人仓库、其他组织仓库或 `gitcode-cli/cli` 自身测试
+- 禁止使用个人仓库、其他组织仓库或 `atomgit-cli/cli` 自身测试
 - 优先执行核心回归脚本：`./scripts/regression-core.sh`
 - 真实命令验证前需先完成认证（如人工 `gc auth login` 或自行管理的环境变量），并用 `./gc auth status` 验证；脚本和 AI 代理不得读取、打印或转存真实 token
 - Mock/Stub 通过接口实现，参考 `pkg/testutil/roundtrip.go`
@@ -247,6 +250,8 @@ gh run view <run-id> --log --job=<job-id>
 - 禁止提交：`*.pem`、`*.key`、`*.p12`、`*.pfx`、`id_rsa*`、`id_ed*`、`.env*`、`*.secret`、`credentials.json`、`token.txt`、`*.token`、`secrets.y*ml`
 - 提交前自检：无硬编码凭证、无敏感文件被追踪、测试与文档不含真实凭证
 - 不得在 issue/PR/comment/discussion/commit/release 的内容中含敏感信息（token 值、密钥、私钥、安全漏洞细节、PoC、攻击细节）；gc 在 `--body`/`--body-file`/`--comment`/`--comment-file`/`--description`/`--description-file`/`--notes`/`--notes-file` 提交前会扫描当前 `GC_TOKEN`/`GITCODE_TOKEN` 值（`cmdutil.ScanContentForSecrets`），但 AI 代理仍须自觉避免任何敏感信息进入提交内容
+- `git add` 必须逐个精确指定文件，禁止 `git add -A` / `git add .`；提交前必须 `git status` + `git diff --staged` 复核暂存区只含本次任务相关文件（详见 [spec/foundations/security.md](./spec/foundations/security.md) 本地防线与提交纪律）
+- 禁止 `git commit --no-verify` / `git push --no-verify`；新 clone 后必须执行 `pre-commit install --hook-type pre-commit --hook-type pre-push`（钩子不随 clone 自动安装）；gitleaks 误报须登记 `.gitleaksignore`，不得绕过钩子
 - CI/CD 使用 Secrets；PyPI 发布使用 Trusted Publishing（OIDC）
 - 安全漏洞通过提交私密 Issue 报告（标记为私有），不在公开 Issue/PR/comment 中披露漏洞细节、PoC 或攻击细节
 
@@ -297,6 +302,7 @@ gh run view <run-id> --log --job=<job-id>
 - 改 API / auth / config：`spec/foundations/coding-standards.md`、`spec/foundations/security.md`、`spec/foundations/testing-guide.md`
 - 补测试或做真实命令验证：`spec/foundations/testing-guide.md`、`spec/workflows/test-workflow.md`
 - 提交 PR / 做 review：`spec/workflows/pr-workflow.md`、`spec/workflows/review-workflow.md`
+- 改 SIG 治理 / 发起大型设计提案（RFC）：`spec/governance/sig-governance.md`、`spec/workflows/rfc-workflow.md`
 - 改构建 / 打包 / 发布：`spec/delivery/build-and-package.md`、`spec/delivery/release-process.md`
 
 具体流程任务再进入：

@@ -4,7 +4,45 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
+
+// TestAddJSONFlagRegistersFalseByDefault verifies AddJSONFlag registers the
+// json flag defaulting to false so JSON output stays opt-in.
+func TestAddJSONFlagRegistersFalseByDefault(t *testing.T) {
+	cmd := &cobra.Command{}
+	var jsonOut bool
+
+	AddJSONFlag(cmd, &jsonOut)
+
+	flag := cmd.Flags().Lookup("json")
+	if flag == nil {
+		t.Fatal("json flag not registered")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("json flag default = %q, want %q", flag.DefValue, "false")
+	}
+	if jsonOut {
+		t.Fatal("target = true, want false before parsing")
+	}
+}
+
+// TestAddJSONFlagBindsTarget verifies the flag writes parsed values into the
+// target variable.
+func TestAddJSONFlagBindsTarget(t *testing.T) {
+	cmd := &cobra.Command{}
+	var jsonOut bool
+
+	AddJSONFlag(cmd, &jsonOut)
+
+	if err := cmd.Flags().Set("json", "true"); err != nil {
+		t.Fatalf("Set(json, true) error = %v", err)
+	}
+	if !jsonOut {
+		t.Fatal("target = false, want true after Set")
+	}
+}
 
 func TestWriteJSONNilSliceEmitsEmptyArray(t *testing.T) {
 	tests := []struct {

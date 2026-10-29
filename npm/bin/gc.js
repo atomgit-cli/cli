@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Wrapper entry for @gitcode-cli/cli.
+// Wrapper entry for the npm-distributed CLI package.
 //
 // - Default: resolve the bundled platform binary and exec it with the
 //   remaining args (so `gc version`, `gc issue list`, ... all work).
@@ -35,7 +35,7 @@ function binPath() {
   return path.join(PLATFORMS_DIR, name);
 }
 
-function runBinary(args) {
+function runBinary(args, metadata) {
   const p = binPath();
   // Ensure the exec bit survives tarball extraction on posix.
   if (process.platform !== "win32") {
@@ -49,7 +49,10 @@ function runBinary(args) {
     stdio: "inherit",
     env: {
       ...process.env,
-      GITCODE_CLI_DISTRIBUTION: "npm",
+      // Pass the real discovered channel through (npm, pnpm, npm-local)
+      // so doctor/update report the actual install instead of a hardcoded
+      // npm; fall back to npm when discovery found nothing.
+      GITCODE_CLI_DISTRIBUTION: (metadata && metadata.distribution) || "npm",
       GITCODE_CLI_ENTRYPOINT: process.argv[1],
       GITCODE_CLI_BINARY: p,
       GITCODE_CLI_PACKAGE_ROOT: path.resolve(__dirname, ".."),
@@ -60,7 +63,7 @@ function runBinary(args) {
       process.stderr.write(
         `gc binary not found at ${p}. ` +
           `Run "npx --yes --ignore-scripts --registry=https://registry.npmjs.org ` +
-          `--@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install" first.\n`
+          `${pkg.name.startsWith("@") ? `--${pkg.name.split("/")[0]}:registry=https://registry.npmjs.org ` : ""}${pkg.name}@latest install" first.\n`
       );
       process.exit(127);
     }
@@ -88,14 +91,14 @@ function finishUpdateLifecycle(args) {
   if (!metadata || !metadata.global || metadata.distribution !== "npm") return;
   try {
     showPendingSummary();
-    showFirstRunNotice();
+    showFirstRunNotice(args);
     if (!shouldSchedule(args)) return;
     const helper = path.join(packageRoot, "lib", "update-helper.js");
     const child = spawn(process.execPath, [helper, "--background"], {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: { ...updaterEnvironment(), GC_UPDATE_BACKGROUND: "1" },
+      env: updaterEnvironment(),
     });
     child.unref();
   } catch (error) {
@@ -105,15 +108,15 @@ function finishUpdateLifecycle(args) {
 
 function main() {
   const args = process.argv.slice(2);
-  ensureInstallMetadata(path.resolve(__dirname, ".."), pkg.version);
+  const metadata = ensureInstallMetadata(path.resolve(__dirname, ".."), pkg.version);
 
   // Intercept the install subcommand (lark-cli-style bootstrap). If the Go
   // CLI grows a real "gc install" later, prefer forwarding "--help"/unknown
   // flags through and reserve only the bare "install" first token.
   if (args[0] === "install") {
-    const { runInstall } = require("../lib/install");
+    const { runInstall, formatErrorChain } = require("../lib/install");
     runInstall(args.slice(1)).catch((err) => {
-      process.stderr.write(`install failed: ${err && err.message ? err.message : err}\n`);
+      process.stderr.write(`install failed: ${formatErrorChain(err)}\n`);
       process.exit(1);
     });
     return;
@@ -125,7 +128,7 @@ function main() {
     return;
   }
 
-  runBinary(args);
+  runBinary(args, metadata);
 }
 
 main();

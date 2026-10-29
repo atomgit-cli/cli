@@ -30,6 +30,16 @@ SCHEMAS = {
             "下一步动作",
         ],
     },
+    "issue-create": {
+        "heading": "## 背景与证据",
+        "fields": [
+            "### 问题",
+            "### 证据",
+            "## 改动建议",
+            "## 验收标准",
+            "## 影响范围",
+        ],
+    },
     "issue-verification": {
         "heading": "## 验证记录",
         "fields": [
@@ -129,6 +139,11 @@ SCHEMAS = {
 
 
 FIELD_RE = re.compile(r"^- ([^:]+):(.*)$")
+HEADING_RE = re.compile(r"^(#{2,6} .+)$")
+# Whole-line full-width parentheticals are template placeholders (e.g.
+# "（问题描述）"): they must not count as section content, so a template
+# submitted as-is fails record mode just like the list-style kinds.
+PLACEHOLDER_RE = re.compile(r"^(?:- )?（.*）$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -177,13 +192,35 @@ def first_non_empty(lines: list[str]) -> str:
 def parse_fields(lines: list[str]) -> dict[str, str]:
     found: dict[str, str] = {}
     for raw in lines:
-        match = FIELD_RE.match(raw.strip())
-        if not match:
+        stripped = raw.strip()
+        match = FIELD_RE.match(stripped)
+        if match:
+            found[match.group(1).strip()] = match.group(2).strip()
             continue
-        key = match.group(1).strip()
-        value = match.group(2).strip()
-        found[key] = value
+        # Heading-style fields (section templates such as issue-create):
+        # the value is the section body, so it starts empty here and is
+        # filled by section_content below.
+        heading = HEADING_RE.match(stripped)
+        if heading:
+            found.setdefault(heading.group(1).strip(), "")
     return found
+
+
+def section_content(lines: list[str], heading: str) -> str:
+    """Return the body of a heading-style field: everything until the next
+    heading, ignoring blanks and HTML comment guidance."""
+    body: list[str] = []
+    inside = False
+    for raw in lines:
+        stripped = raw.strip()
+        if HEADING_RE.match(stripped):
+            if inside:
+                break
+            inside = stripped == heading
+            continue
+        if inside and stripped and not stripped.startswith("<!--") and not PLACEHOLDER_RE.match(stripped):
+            body.append(stripped)
+    return "\n".join(body)
 
 
 def validate(path: Path, kind: str, mode: str) -> list[str]:
@@ -202,8 +239,12 @@ def validate(path: Path, kind: str, mode: str) -> list[str]:
         if field not in found:
             errors.append(f"missing field: {field}")
             continue
-        if mode == "record" and not found[field]:
-            errors.append(f"empty value: {field}")
+        if mode == "record":
+            if field.startswith("#"):
+                if not section_content(lines, field):
+                    errors.append(f"empty value: {field}")
+            elif not found[field]:
+                errors.append(f"empty value: {field}")
 
     return errors
 

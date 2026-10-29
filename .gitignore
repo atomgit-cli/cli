@@ -86,3 +86,6 @@ secrets.yml
 .ai/skills/
 .codex/skills/
 tmp/
+
+# AI draft/review workspace - local only, never committed
+.codex-tmp/

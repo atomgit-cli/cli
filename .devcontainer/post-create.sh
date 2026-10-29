@@ -32,7 +32,6 @@ Recommended checks:
 Packaging and release helpers:
   ./scripts/package.sh v0.3.10 release
   make release-local
-  make release-snapshot
 
 Notes:
   - Real command validation still requires GC_TOKEN or GITCODE_TOKEN.

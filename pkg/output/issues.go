@@ -146,7 +146,7 @@ func templateFuncs(timeFormat TimeFormat) template.FuncMap {
 	return template.FuncMap{
 		"upper": strings.ToUpper,
 		"lower": strings.ToLower,
-		"trunc": truncate,
+		"trunc": Truncate,
 		"json":  toJSON,
 		"time": func(v interface{}) string {
 			switch t := v.(type) {
@@ -157,16 +157,6 @@ func templateFuncs(timeFormat TimeFormat) template.FuncMap {
 			}
 		},
 	}
-}
-
-func truncate(value string, max int) string {
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	if max <= 3 {
-		return value[:max]
-	}
-	return value[:max-3] + "..."
 }
 
 func toJSON(v interface{}) (string, error) {

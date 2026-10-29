@@ -37,6 +37,7 @@
 - 命令实现细节
 - 一般编码规范
 - 本地构建与发布流程
+- SIG 治理语境下的 Agent 角色与行为边界（由 [sig-governance.md](./sig-governance.md) §4.3 负责）
 
 ## 权威关系
 

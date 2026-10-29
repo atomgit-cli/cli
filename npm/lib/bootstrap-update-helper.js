@@ -9,10 +9,20 @@ const path = require("path");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
-const PACKAGE = "@gitcode-cli/cli";
+// Derived from package.json so parallel npm coordinates (atomgit-cli,
+// @atomgit-cli/cli, @gitcode-cli/cli) each bootstrap-update themselves.
+// install.js rewrites this exact two-line marker to a literal
+// `const PACKAGE = "<name>";` when copying the helper into the bin dir,
+// because the copy runs outside the package tree (standalone, built-ins only).
+const pkg = require("../package.json");
+const PACKAGE = pkg.name;
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 15 * 60 * 1000;
+const CHECK_ATTEMPTS = 3;
+const CHECK_TIMEOUT_MS = 20000;
+const CHECK_RETRY_DELAY_MS = 1000;
+const INSTALL_TIMEOUT_MS = 300000;
 const UPDATE_ENV_ALLOWLIST = new Set([
   "ALL_PROXY", "APPDATA", "COMSPEC", "GC_CONFIG_DIR", "GC_STATE_DIR", "GC_UPDATE_MODE",
   "HOME", "HTTP_PROXY", "HTTPS_PROXY", "LANG", "LC_ALL", "LOCALAPPDATA", "NO_PROXY",
@@ -20,17 +30,48 @@ const UPDATE_ENV_ALLOWLIST = new Set([
   "USERPROFILE", "WINDIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 ]);
 
+// cobra/pflag accepts --flag and --flag=value for boolean flags; only a
+// truthy value counts as set. A non-boolean value in the =form is
+// rejected. Value flags (--manifest, --parent-pid) accept the =value form
+// alongside the space-separated form.
+function booleanFlag(args, name) {
+  return args.some((arg) => arg === name ||
+    (arg.startsWith(`${name}=`) && ["1", "true", "yes"].includes(arg.slice(name.length + 1).trim().toLowerCase())));
+}
+
+function isBooleanFlagArg(arg, name) {
+  if (arg === name) return true;
+  if (!arg.startsWith(`${name}=`)) return false;
+  return ["1", "true", "yes", "0", "false", "no", ""].includes(arg.slice(name.length + 1).trim().toLowerCase());
+}
+
 function parseArgs(args) {
   const options = { background: false, check: false, force: false, json: false, manifest: "", parentPid: 0 };
+  options.background = booleanFlag(args, "--background");
+  options.check = booleanFlag(args, "--check");
+  options.force = booleanFlag(args, "--force");
+  options.json = booleanFlag(args, "--json");
+  const booleanNames = ["--background", "--check", "--force", "--json"];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--background") options.background = true;
-    else if (arg === "--check") options.check = true;
-    else if (arg === "--force") options.force = true;
-    else if (arg === "--json") options.json = true;
-    else if (arg === "--manifest" && args[index + 1]) options.manifest = path.resolve(args[++index]);
-    else if (arg === "--parent-pid" && args[index + 1]) options.parentPid = Number(args[++index]);
-    else throw new Error(`unknown updater argument: ${arg}`);
+    let manifestValue = "";
+    let parentPidValue = "";
+    if (arg === "--manifest" && args[index + 1]) {
+      manifestValue = args[++index];
+    } else if (arg.startsWith("--manifest=")) {
+      manifestValue = arg.slice("--manifest=".length);
+    } else if (arg === "--parent-pid" && args[index + 1]) {
+      parentPidValue = args[++index];
+    } else if (arg.startsWith("--parent-pid=")) {
+      parentPidValue = arg.slice("--parent-pid=".length);
+    } else if (booleanNames.some((name) => isBooleanFlagArg(arg, name))) {
+      // Boolean flags, handled above (including =value forms).
+    } else if (arg === "--no-update-check" || arg === "--no-interactive" ||
+        arg.startsWith("--no-update-check=") || arg.startsWith("--no-interactive=")) {
+      // Global flags: accepted for CLI consistency, no effect here.
+    } else throw new Error(`unknown updater argument: ${arg}`);
+    if (manifestValue) options.manifest = path.resolve(manifestValue);
+    if (parentPidValue) options.parentPid = Number(parentPidValue);
   }
   if (!options.manifest) options.manifest = path.join(__dirname, ".gitcode-install.json");
   return options;
@@ -49,29 +90,59 @@ function writeJSON(file, value) {
   const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   try {
-    fs.renameSync(temp, file);
+    try {
+      fs.renameSync(temp, file);
+    } catch (error) {
+      if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+      // Retry once without unlinking: a concurrent writer may have just
+      // replaced the target, and the plain retry (or a transient lock)
+      // avoids destroying their write. Mirrors lib/update.js.
+      try {
+        fs.renameSync(temp, file);
+        return;
+      } catch {
+        // Fall through to the replace below (Windows rename-over-existing).
+      }
+      fs.unlinkSync(file);
+      fs.renameSync(temp, file);
+    }
   } catch (error) {
-    if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
-    fs.unlinkSync(file);
-    fs.renameSync(temp, file);
+    // Never strand the temp file: an update-state.json.tmp-* residue
+    // matches no sweep prefix and would outlive the failed write.
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
   }
 }
 
-function statePath(env = process.env) {
-  let root = env.GC_STATE_DIR;
-  if (!root && process.platform === "win32") {
-    root = path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "gitcode-cli");
+function stateRoot(env = process.env) {
+  if (env.GC_STATE_DIR) return env.GC_STATE_DIR;
+  if (process.platform === "win32") {
+    return path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "gitcode-cli");
   }
-  if (!root) root = path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "gitcode-cli");
-  return path.join(root, "update-state.json");
+  return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "gitcode-cli");
+}
+
+// Scoped per package coordinate and channel (mirrors lib/update.js): the
+// bootstrap channel keeps its own nextCheck/summary instead of sharing the
+// npm-global state file. An explicit GC_STATE_DIR keeps the legacy flat
+// file as a deliberate user (and test) override.
+function statePath(env = process.env) {
+  if (env.GC_STATE_DIR) return path.join(env.GC_STATE_DIR, "update-state.json");
+  return path.join(stateRoot(env), PACKAGE, "npm-bootstrap", "update-state.json");
 }
 
 function updateMode(env = process.env) {
-  const requested = String(env.GC_UPDATE_MODE || "").toLowerCase();
+  // Trim like the Go side (resolveUpdateMode): CRLF-contaminated profile
+  // values (" off") must resolve the same on both channels.
+  const requested = String(env.GC_UPDATE_MODE || "").trim().toLowerCase();
   if (["auto", "notify", "off"].includes(requested)) return requested;
   const configRoot = env.GC_CONFIG_DIR || path.join(os.homedir(), ".config", "gc");
   const config = readJSON(path.join(configRoot, "config.json"));
-  const stored = (((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").toLowerCase();
+  const stored = String(((config.hosts || {})["gitcode.com"] || {})["update.mode"] || "").trim().toLowerCase();
   return ["auto", "notify", "off"].includes(stored) ? stored : "notify";
 }
 
@@ -84,9 +155,95 @@ function updaterEnvironment(env = process.env) {
 }
 
 function appendLog(message) {
-  const file = path.join(path.dirname(statePath()), "update.log");
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  try {
+    // The log stays shared at the state root (not inside the per-channel
+    // directory): all channels append to one diagnostic timeline.
+    const file = path.join(stateRoot(), "update.log");
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`, { mode: 0o600 });
+  } catch {
+    // Logging is best-effort: an unwritable update.log (root-owned file,
+    // read-only directory) must never turn a successful update into a
+    // reported failure or replace the real result summary.
+  }
+}
+
+// Collapses an error into one bounded line so failure summaries stay readable
+// on the next launch while still carrying the real cause (registry resets,
+// timeouts, spawn failures) instead of a generic dead-end notice.
+function summarizeError(error) {
+  const raw = (error && (error.message || error.code)) || error;
+  let text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim() || "unknown error";
+  if (text.length > 200) {
+    let cut = text.slice(0, 200);
+    // Do not leave an orphaned high surrogate at the cut boundary.
+    const last = cut.charCodeAt(cut.length - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+    text = `${cut}...`;
+  }
+  return text;
+}
+
+// Permanent update failures: retrying cannot fix them (the on-disk install
+// manifest or the npm runtime is broken), so background checks stop and the
+// summary carries the repair action. Registry oddities (an unstable
+// dist-tag) stay retryable. Mirrors lib/update.js; keep both in sync.
+const PERMANENT_ERROR_PATTERNS = [
+  /invalid npm-bootstrap install manifest/,
+  /npm CLI JavaScript runtime not found/,
+];
+
+function permanentUpdateError(error) {
+  const text = summarizeError(error);
+  return PERMANENT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+// Failure backoff: 1h, 2h, 4h, ... capped at the daily TTL. Mirrors
+// lib/update.js; keep both in sync.
+function failureBackoffMs(streak) {
+  const step = Number(streak) > 0 ? Number(streak) : 1;
+  return Math.min(TTL_MS, 60 * 60 * 1000 * 2 ** (step - 1));
+}
+
+function errorFingerprint(error) {
+  return crypto.createHash("sha256").update(summarizeError(error)).digest("hex").slice(0, 16);
+}
+
+// npm error codes that retrying cannot fix (404 package deleted/renamed,
+// 401/403 auth). Mirrors lib/update.js.
+const DETERMINISTIC_NPM_ERROR = /code E(40[01345]|42[89])/;
+
+function isPrereleaseVersion(value) {
+  return /^v?\d+\.\d+\.\d+-/.test(String(value || "").trim());
+}
+
+// Compares the installed version against the stable latest. A prerelease
+// current (a manual @next install) with a stable latest is a legitimate
+// upgrade path: report it as available instead of an unactionable
+// "cannot compare" that would keep failing on every scheduled check. A
+// garbage current version is not a prerelease and still fails loudly.
+// Mirrors lib/update.js.
+function currentVsLatest(current, latest) {
+  const comparison = compareVersions(current, latest);
+  if (comparison != null) return { comparison, prerelease: false };
+  if (isPrereleaseVersion(current) && stableVersion(latest) != null) {
+    return { comparison: -1, prerelease: true };
+  }
+  return { comparison: null, prerelease: false };
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// A failing command sometimes reports on stdout with an empty stderr; fall
+// back to the first non-empty stdout line before the generic message.
+// Mirrors lib/install.js and lib/update.js.
+function commandFailureDetail(result, fallback) {
+  const stderr = String(result.stderr || "").trim();
+  if (stderr) return stderr;
+  const stdoutLine = String(result.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return stdoutLine || fallback;
 }
 
 function stableVersion(value) {
@@ -124,7 +281,7 @@ function withNpmIsolation(args, userConfig, globalConfig) {
   const isolation = [
     `--userconfig=${userConfig}`,
     `--globalconfig=${globalConfig}`,
-    `--@gitcode-cli:registry=${OFFICIAL_REGISTRY}`,
+    ...(PACKAGE.startsWith("@") ? [`--${PACKAGE.split("/")[0]}:registry=${OFFICIAL_REGISTRY}`] : []),
     `--registry=${OFFICIAL_REGISTRY}`,
   ];
   const separator = args.indexOf("--");
@@ -153,18 +310,32 @@ function runNpm(manifest, args, timeout) {
 }
 
 function latestVersion(manifest) {
-  const result = runNpm(
-    manifest,
-    ["view", PACKAGE, "dist-tags.latest", "--json"],
-    10000
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "npm registry check failed").trim());
-  const version = JSON.parse(result.stdout);
-  if (!stableVersion(version)) throw new Error(`registry latest is not stable: ${version}`);
-  return version;
+  let lastError;
+  for (let attempt = 1; attempt <= CHECK_ATTEMPTS; attempt += 1) {
+    const result = runNpm(
+      manifest,
+      ["view", PACKAGE, "dist-tags.latest", "--json"],
+      CHECK_TIMEOUT_MS
+    );
+    if (!result.error && result.status === 0) {
+      const version = JSON.parse(result.stdout);
+      if (!stableVersion(version)) throw new Error(`registry latest is not stable: ${version}`);
+      return version;
+    }
+    lastError = result.error || new Error((result.stderr || "npm registry check failed").trim());
+    // Deterministic registry errors (package deleted or renamed, auth or
+    // forbidden): retrying cannot fix them, so fail fast instead of burning
+    // the attempt budget on every scheduled check. Mirrors lib/update.js.
+    if (DETERMINISTIC_NPM_ERROR.test(String(result.stderr || ""))) break;
+    if (attempt < CHECK_ATTEMPTS) sleepSync(CHECK_RETRY_DELAY_MS * attempt);
+  }
+  throw lastError;
 }
 
+// Waits for the parent process to exit before replacing binaries. Known
+// limitation: if the parent dies and its pid is reused by an unrelated
+// process, the wait spins its full 30s and then reports a spurious
+// failure (which enters the backoff). Rare, self-limiting, accepted.
 function waitForParent(pid) {
   if (!pid) return;
   const deadline = Date.now() + 30000;
@@ -188,7 +359,7 @@ function healthCheck(manifest, expected) {
     env: updaterEnvironment(),
   });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error((result.stderr || "bootstrap health check failed").trim());
+  if (result.status !== 0) throw new Error(commandFailureDetail(result, "bootstrap health check failed"));
   const actual = JSON.parse(result.stdout).version;
   if (compareVersions(actual, expected) !== 0) throw new Error(`updated CLI reported ${actual}, expected ${expected}`);
 }
@@ -199,13 +370,16 @@ function installLatest(manifest, latest) {
     "--yes",
     `--package=${PACKAGE}@${latest}`,
     "--ignore-scripts",
+    // A 60s fetch timeout lets npm's own fetch-retries finish inside the
+    // 300s overall budget (see lib/update.js exactInstallArgs).
+    "--fetch-timeout=60000",
     "--",
     "gitcode",
     "install",
     "--target-dir",
     manifest.targetDir,
   ];
-  const result = runNpm(manifest, args, 120000);
+  const result = runNpm(manifest, args, INSTALL_TIMEOUT_MS);
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error((result.stderr || `npm exec exited ${result.status}`).trim());
   healthCheck(manifest, latest);
@@ -213,14 +387,51 @@ function installLatest(manifest, latest) {
 
 function acquireLock(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  // Record the holder so release can verify identity by content on
+  // platforms where st_ino is unavailable (Windows). Mirrors lib/update.js.
+  const claim = () => {
+    const descriptor = fs.openSync(file, "wx", 0o600);
+    try {
+      fs.writeSync(descriptor, String(process.pid));
+    } catch {
+      // Best effort: the inode check still guards POSIX releases.
+    }
+    return descriptor;
+  };
   try {
-    return fs.openSync(file, "wx", 0o600);
+    return claim();
   } catch (error) {
     if (error.code === "EEXIST") {
       try {
         if (Date.now() - fs.statSync(file).mtimeMs > LOCK_STALE_MS) {
-          fs.unlinkSync(file);
-          return fs.openSync(file, "wx", 0o600);
+          // Atomic reclaim: renaming the stale lock to a private name lets
+          // exactly one of two racing reclaimers win (the loser's rename
+          // hits ENOENT and its claim then hits the winner's fresh lock).
+          // The retired file is re-verified as stale: a fresh claim may
+          // have landed between the check and the rename, and renaming a
+          // live lock away would silently break its holder. Mirrors
+          // lib/update.js.
+          const retired = `${file}.retired-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+          fs.renameSync(file, retired);
+          if (Date.now() - fs.statSync(retired).mtimeMs <= LOCK_STALE_MS) {
+            // Restore via link+unlink (never clobbers a third process's
+            // fresh claim on the freed path — rename would overwrite it).
+            // Mirrors lib/update.js.
+            try {
+              fs.linkSync(retired, file);
+              fs.unlinkSync(retired);
+            } catch {
+              // The path is taken (or links are refused): leave the
+              // retired debris and yield the hold.
+            }
+            return null;
+          }
+          try {
+            fs.unlinkSync(retired);
+          } catch {
+            // Best effort; a stranded .retired-* file is inert debris.
+          }
+          return claim();
         }
       } catch {
         // Another process owns or just released the lock.
@@ -231,6 +442,36 @@ function acquireLock(file) {
   }
 }
 
+// Releases a state lock after verifying the holder identity: if the lock
+// was reclaimed as stale while we were stalled, the path now holds someone
+// else's fresh lock and removing it would let a third process double-hold.
+// Mirrors lib/update.js.
+function releaseLock(file, descriptor) {
+  try {
+    // Identity check, doubly guarded (inode on POSIX, pid content on
+    // Windows where st_ino is 0): a reclaimed lock's path holds someone
+    // else's fresh lock and must not be removed. Mirrors lib/update.js.
+    const held = fs.fstatSync(descriptor);
+    const current = fs.statSync(file);
+    if (held.ino !== current.ino) return;
+    const holder = fs.readFileSync(file, "utf8").trim();
+    if (holder !== String(process.pid)) return;
+  } catch {
+    return;
+  } finally {
+    try {
+      fs.closeSync(descriptor);
+    } catch {
+      // Best effort.
+    }
+  }
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    // Stale bootstrap locks are visible and can be removed by the user.
+  }
+}
+
 function run(options) {
   const manifest = readJSON(options.manifest);
   if (manifest.distribution !== "npm-bootstrap" || !manifest.targetDir || !manifest.version) {
@@ -238,22 +479,43 @@ function run(options) {
   }
   const stateFile = statePath();
   const state = readJSON(stateFile);
-  if (!options.force && !options.check && state.nextCheck && Number(state.nextCheck) > Date.now()) {
+  // A permanent failure stops scheduled checks until the install is
+  // repaired (the Go side refuses to spawn the helper as well); --force
+  // and --check still proceed for manual recovery.
+  if (!options.force && !options.check && (state.permanentError || (state.nextCheck && Number(state.nextCheck) > Date.now()))) {
     return { status: "cached", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Update check is not due yet." };
   }
   const lock = `${stateFile}.lock`;
   const descriptor = acquireLock(lock);
   if (descriptor == null) return { status: "busy", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Another update is running." };
   try {
+    // Re-check under the lock (mirrors lib/update.js): a foreground check
+    // that finished while we waited for the lock must not be repeated, and
+    // its freshly written nextCheck/summary must not be overwritten. An
+    // explicit --force spawn is exempt (mirrors the pre-lock gate): the Go
+    // `gitcode update` chain runs a --check first — which writes nextCheck —
+    // and then spawns --background --force; gating that on the TTL the check
+    // itself just wrote would silently skip the install the user asked for.
+    if (options.background && !options.force) {
+      const pending = readJSON(stateFile);
+      if (pending.permanentError || (pending.nextCheck && Number(pending.nextCheck) > Date.now())) {
+        return { status: "cached", distribution: "npm-bootstrap", current: manifest.version, latest: "", message: "Update check is not due yet." };
+      }
+    }
     const latest = latestVersion(manifest);
-    const comparison = compareVersions(manifest.version, latest);
+    const { comparison, prerelease } = currentVsLatest(manifest.version, latest);
     let result;
     if (comparison == null) throw new Error(`cannot compare ${manifest.version} and ${latest}`);
     if (comparison >= 0) {
       result = { status: "current", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${manifest.version} is current.` };
     } else if (options.check || (updateMode() === "notify" && !options.force)) {
-      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available.` };
+      const note = prerelease ? ", a prerelease" : "";
+      result = { status: "available", distribution: "npm-bootstrap", current: manifest.version, latest, message: `GitCode CLI ${latest} is available (current ${manifest.version}${note}); run "gitcode update" to install it.` };
     } else if (updateMode() === "off" && !options.force) {
+      // off disables the automatic daily checks, never an explicit command:
+      // --check and --force are both exempt (checked earlier in this chain),
+      // so `gitcode update` still installs under off — mirroring the npm
+      // channel's foreground semantics.
       result = { status: "disabled", distribution: "npm-bootstrap", current: manifest.version, latest, message: "Automatic updates are disabled." };
     } else {
       waitForParent(options.parentPid);
@@ -261,19 +523,26 @@ function run(options) {
       result = { status: "updated", distribution: "npm-bootstrap", current: manifest.version, latest, message: `Updated GitCode CLI ${manifest.version} -> ${latest}.` };
     }
     const now = Date.now();
-    state.lastChecked = new Date(now).toISOString();
-    state.nextCheck = now + TTL_MS;
-    state.summary = { message: result.message, shown: !options.background };
-    writeJSON(stateFile, state);
-    appendLog(`status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
+    // Re-read under the lock: the pre-lock snapshot can be minutes old after
+    // a long check or install, and writing it back would roll back notice
+    // flags or summary state another process recorded meanwhile.
+    const fresh = readJSON(stateFile);
+    fresh.lastChecked = new Date(now).toISOString();
+    fresh.nextCheck = now + TTL_MS;
+    // A recovered environment clears the failure bookkeeping so the next
+    // failure starts the backoff from scratch.
+    fresh.failureStreak = 0;
+    delete fresh.lastErrorFingerprint;
+    fresh.permanentError = false;
+    // "current" carries no action for the user; queueing it would print the
+    // notice once a day. Stale "available" summaries are cleared instead.
+    if (result.status === "current") delete fresh.summary;
+    else fresh.summary = { message: result.message, shown: !options.background };
+    writeJSON(stateFile, fresh);
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=${result.status} current=${result.current} latest=${result.latest || "none"}`);
     return result;
   } finally {
-    fs.closeSync(descriptor);
-    try {
-      fs.unlinkSync(lock);
-    } catch {
-      // Stale bootstrap locks are visible and can be removed by the user.
-    }
+    releaseLock(lock, descriptor);
   }
 }
 
@@ -286,23 +555,71 @@ function main(args = process.argv.slice(2)) {
     return 0;
   } catch (error) {
     if (options && options.background) {
-      const file = statePath();
-      const state = readJSON(file);
-      state.nextCheck = Date.now() + TTL_MS;
-      state.summary = { message: "Automatic update failed; run gitcode update for details.", shown: false };
-      writeJSON(file, state);
-      appendLog("status=error; run an explicit update for details");
+      recordBackgroundFailure(error);
     }
     if (!options || !options.background) {
-      if (options && options.json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
+      // parseArgs failures leave options unset: detect --json from the raw
+      // argv so JSON consumers still get a JSON error object (mirrors
+      // lib/update-helper.js).
+      const json = options ? options.json : args.includes("--json");
+      if (json) process.stdout.write(`${JSON.stringify({ status: "error", distribution: "npm-bootstrap", current: "", latest: "", message: error.message })}\n`);
       else process.stderr.write(`update failed: ${error.message}\n`);
     }
     return 1;
   }
 }
 
+// Records a background failure under the state lock. When the lock is held
+// by another updater the write is skipped entirely: writing without the lock
+// could clobber a pending summary or push nextCheck forward underneath the
+// lock owner.
+function recordBackgroundFailure(error) {
+  const file = statePath();
+  const lock = `${file}.lock`;
+  const descriptor = acquireLock(lock);
+  if (descriptor == null) {
+    appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}" (state locked; summary skipped)`);
+    return;
+  }
+  try {
+    const state = readJSON(file);
+    const now = Date.now();
+    state.lastChecked = new Date(now).toISOString();
+    const streak = (Number(state.failureStreak) || 0) + 1;
+    state.failureStreak = streak;
+    state.nextCheck = now + failureBackoffMs(streak);
+    const fingerprint = errorFingerprint(error);
+    const permanent = permanentUpdateError(error);
+    // Sticky: a transient failure must not lift the pause a permanent one
+    // recorded — only a successful update proves the environment repaired.
+    state.permanentError = Boolean(state.permanentError) || permanent;
+    // Deduplicate by fingerprint: the same failure on the next backoff
+    // attempt must not requeue (and reprint) the seen summary.
+    if (state.lastErrorFingerprint !== fingerprint) {
+      let message = `Automatic update failed: ${summarizeError(error)}.`;
+      if (permanent) {
+        message += /npm-bootstrap install manifest/.test(summarizeError(error))
+          ? " Background checks are paused: rerun the npm bootstrap install (npx --yes --package=<coordinate>@latest gitcode install) to repair the install manifest."
+          : ' Background checks are paused: reinstall Node.js, then run "gitcode update" to resume background checks.';
+      } else if (state.permanentError) {
+        // The pause is sticky from an earlier unrepaired failure; do not
+        // attribute it to the transient error at hand (mirrors
+        // lib/update.js).
+        message += ' Background checks remain paused from an earlier unrepaired failure; repair it (rerun the bootstrap install or reinstall Node.js), then run "gitcode update".';
+      }
+      state.summary = { message, shown: false };
+      state.lastErrorFingerprint = fingerprint;
+    }
+    writeJSON(file, state);
+  } finally {
+    releaseLock(lock, descriptor);
+  }
+  appendLog(`package=${PACKAGE} channel=npm-bootstrap status=error detail="${summarizeError(error)}"`);
+}
+
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  compareVersions, main, npmCommand, parseArgs, stableVersion, updateMode, updaterEnvironment, withNpmIsolation,
+  CHECK_ATTEMPTS, acquireLock, compareVersions, latestVersion, main, npmCommand, parseArgs, stableVersion, summarizeError,
+  updateMode, updaterEnvironment, withNpmIsolation,
 };

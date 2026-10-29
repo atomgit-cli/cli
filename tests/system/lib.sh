@@ -72,6 +72,14 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    fail "expected output to NOT contain: $needle"
+  fi
+}
+
 assert_json() {
   python3 -c 'import json, sys; json.load(sys.stdin)' >/dev/null
 }

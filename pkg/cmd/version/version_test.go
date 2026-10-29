@@ -30,7 +30,7 @@ func TestNewCmdVersion(t *testing.T) {
 			version:      "v0.2.8",
 			commit:       "abc1234",
 			date:         "2026-03-24",
-			wantContains: []string{"gc version v0.2.8", "commit: abc1234", "built:  2026-03-24", "https://gitcode.com/gitcode-cli/cli"},
+			wantContains: []string{"gc version v0.2.8", "commit: abc1234", "built:  2026-03-24", "https://gitcode.com/atomgit-cli/cli"},
 		},
 		{
 			name:         "with dev version",
@@ -110,7 +110,7 @@ func TestVersionOutput(t *testing.T) {
 			if !strings.Contains(output, "built:") {
 				t.Error("output missing 'built:'")
 			}
-			if !strings.Contains(output, "https://gitcode.com/gitcode-cli/cli") {
+			if !strings.Contains(output, "https://gitcode.com/atomgit-cli/cli") {
 				t.Error("output missing project URL")
 			}
 		})
@@ -153,7 +153,7 @@ func TestVersionJSONOutput(t *testing.T) {
 		Version: "v1.0.0",
 		Commit:  "abc123",
 		Built:   "2026-07-13",
-		URL:     "https://gitcode.com/gitcode-cli/cli",
+		URL:     "https://gitcode.com/atomgit-cli/cli",
 	}
 	if got != want {
 		t.Fatalf("version JSON = %+v, want %+v", got, want)

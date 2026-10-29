@@ -98,6 +98,6 @@ GC_SYSTEM_PR_HEAD=test-branch tests/system/run.sh --write --write-repo infra-tes
 
 - Do not use personal repositories.
 - Do not use production repositories.
-- Do not use `gitcode-cli/cli`.
+- Do not use `atomgit-cli/cli`.
 - Do not print, read, or pipe real tokens.
 - Keep write cases self-cleaning whenever the remote API allows it.

@@ -185,6 +185,55 @@ func GetActionsRun(client *Client, owner, repo, runID string) (*WorkflowRunDetai
 	return &detail, resp.Body, nil
 }
 
+// RetryActionsRunRequest is the request body for retrying jobs of a run.
+type RetryActionsRunRequest struct {
+	JobRunIDs []string `json:"job_run_ids"`
+}
+
+// RetryActionsRun retries selected jobs of a pipeline run.
+//
+// It calls POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/retry with
+// a {"job_run_ids": [...]} body. The server only allows retrying runs in a
+// failed/canceled status; retrying a COMPLETED run fails with HTTP 400.
+// Callers must ensure the job run ids belong to the target run (e.g. via
+// ListActionsRunJobs): the server does not validate ownership and silently
+// accepts foreign job ids, leaving the run in a broken "fake running" state.
+func RetryActionsRun(client *Client, owner, repo, runID string, jobRunIDs []string) error {
+	endpoint := "/api/v8/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/actions/runs/" + url.PathEscape(runID) + "/retry"
+
+	body, err := json.Marshal(RetryActionsRunRequest{JobRunIDs: jobRunIDs})
+	if err != nil {
+		return fmt.Errorf("failed to marshal retry request: %w", err)
+	}
+
+	_, err = client.RawREST("POST", endpoint, bytes.NewReader(body), nil)
+	return err
+}
+
+// StopActionsRun stops a running pipeline run.
+//
+// It calls POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/stop.
+// The endpoint is idempotent: stopping a run that has already finished still
+// returns success.
+func StopActionsRun(client *Client, owner, repo, runID string) error {
+	endpoint := "/api/v8/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/actions/runs/" + url.PathEscape(runID) + "/stop"
+
+	_, err := client.RawREST("POST", endpoint, nil, nil)
+	return err
+}
+
+// RerunActionsRun reruns all jobs of a pipeline run.
+//
+// It calls POST /api/v8/repos/{owner}/{repo}/actions/runs/{run_id}/rerun.
+// The server only allows rerunning a run in a complete status; rerunning a
+// RUNNING run fails with HTTP 409.
+func RerunActionsRun(client *Client, owner, repo, runID string) error {
+	endpoint := "/api/v8/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/actions/runs/" + url.PathEscape(runID) + "/rerun"
+
+	_, err := client.RawREST("POST", endpoint, nil, nil)
+	return err
+}
+
 // WorkflowRunJobsResponse represents the response from listing the jobs of a
 // workflow run.
 type WorkflowRunJobsResponse struct {

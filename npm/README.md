@@ -1,36 +1,54 @@
-# @gitcode-cli/cli
+# AtomGit CLI
 
-The open-source [GitCode CLI](https://gitcode.com/gitcode-cli/cli) distributed via npm with **bundled multi-platform binaries** (Linux x64/ARM64, macOS x64/ARM64, Windows x64). No separate binary download is needed after the bootstrap or global installation.
+The open-source [AtomGit CLI](https://gitcode.com/atomgit-cli/cli) (formerly GitCode CLI) distributed via npm with **bundled multi-platform binaries** (Linux x64/ARM64, macOS x64/ARM64, Windows x64, OpenHarmony arm64). No separate binary download is needed after the bootstrap or global installation.
 
-GitCode CLI (`gc` / `gitcode`) is the community-developed, MIT-licensed command line tool for GitCode — bringing repositories, issues, pull requests, releases and Actions back to the terminal for developers, scripts, and AI agents. It is an independent open-source project, not published by the GitCode platform team.
+AtomGit CLI (`gc` / `gitcode`) is the community-developed, MIT-licensed command line tool for GitCode / AtomGit — bringing repositories, issues, pull requests, releases and Actions back to the terminal for developers, scripts, and AI agents. It is an independent open-source project, not published by the platform team.
+
+## Distribution coordinates
+
+All coordinates below ship identical content with synchronized versions. Command entries stay `gc` / `gitcode`, and each coordinate updates itself — never a sibling package:
+
+| Coordinate | Status |
+| --- | --- |
+| **`atomgit-cli`** | **Recommended** |
+| `@atomgit-cli/cli` | New scoped coordinate, equivalent |
+| `@gitcode-cli/cli` | Legacy coordinate — **kept in parallel for the long term**, existing installs never need to migrate |
+
+Parallel publishing is a long-term commitment: every release ships to all three coordinates with identical content and synchronized versions, and no coordinate has a deprecation date.
+
+> ⚠️ The bare npm name `gitcode-cli` is an **unrelated third-party package** (not this tool; it even ships its own `gc` bin that would shadow this one). Do not install it.
 
 ## Install
 
 ### One-line bootstrap (no global npm install)
 
 ```bash
-npx -y @gitcode-cli/cli@latest install
+npx -y atomgit-cli@latest install
 ```
+
+Equivalent coordinates: `npx -y @atomgit-cli/cli@latest install` / `npx -y @gitcode-cli/cli@latest install`
 
 The short command is intended for trusted user environments and inherits the current npm configuration. For CI, audits, untrusted project directories, custom registries, or a custom target directory, use the hardened form:
 
 ```bash
-npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install
-npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install --target-dir /custom/bin
+npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest install
+npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest install --target-dir /custom/bin
 ```
 
-Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions.
-If an older installation left a same-directory `gitcode -> gc` alias, bootstrap migrates that verified alias transactionally; links to any other target are never overwritten.
+(For scoped coordinates, additionally pin the scope registry, e.g. `--@atomgit-cli:registry=https://registry.npmjs.org`.)
+
+Copies the platform binary to a global bin dir (`/usr/local/bin` if writable, else `~/.local/bin`). On Linux/macOS it also installs bash/zsh/fish completions for both `gc` and `gitcode` (zsh: `~/.zsh/completions` must be on your `fpath` — see [Uninstall](#uninstall) below for all file locations).
+If an older installation left a same-directory `gitcode -> gc` alias, or bin symlinks resolving into one of our own npm package trees — a classic global install or a project-level `node_modules` (`proj/node_modules/@gitcode-cli/cli/...`) of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) — bootstrap migrates those verified links transactionally; pnpm (`/pnpm/global/` or `/.pnpm/` store) and yarn (`/yarn/global/`) symlinks are refused with their own removal guidance even when they resolve into our coordinates; links to any other target are never overwritten.
 On Windows it installs both `gc.exe` and `gitcode.exe`, then prepends the install directory to the persistent user PATH. Pass `--no-modify-path` to opt out. An npx child process cannot refresh the already-running PowerShell process, so the installer prints explicit Chinese instructions for refreshing `$env:Path` immediately or closing all PowerShell/Windows Terminal windows before reopening. It never changes the machine PATH or removes another package manager's entry. Use `gitcode` in PowerShell because `gc` is the built-in `Get-Content` alias.
 
 An explicit `--target-dir` replaces regular `gc`/`gitcode` files inside that directory. Do not point it at Python Scripts, an npm prefix, or another package manager-owned directory.
 
-Do not use `npm i @gitcode-cli/cli` as a CLI installation command. It only adds a dependency to the current project's `node_modules` and does not replace an existing `gitcode` earlier on PATH.
+Do not use `npm i atomgit-cli` as a CLI installation command. It only adds a dependency to the current project's `node_modules` and does not replace an existing `gitcode` earlier on PATH.
 
 ### Global npm install
 
 ```bash
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest
+npm install -g --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest
 gitcode version
 ```
 
@@ -52,7 +70,32 @@ gitcode config set update.mode off
 GC_NO_UPDATE_CHECK=1 gitcode version
 ```
 
-`CI=true` and `--no-interactive` disable background checks. The updater touches only `@gitcode-cli/cli`; it never invokes pip, Homebrew, apt, dnf, or rpm, and it never rewrites PATH. If another `gitcode` is earlier on PATH, npm's non-failing install check and `doctor install` report the exact candidates and remediation choices.
+`CI=true` and `--no-interactive` disable background checks. The updater touches only the coordinate you installed (for example `atomgit-cli`); it never invokes pip, Homebrew, apt, dnf, or rpm, and it never rewrites PATH. If another `gitcode` is earlier on PATH, npm's non-failing install check and `doctor install` report the exact candidates and remediation choices. Installs managed by pnpm are detected as such and get pnpm's own upgrade command (`pnpm add -g <coordinate>@latest`); the updater never installs a parallel npm copy for a pnpm-managed install.
+
+## Troubleshooting
+
+### `refusing non-regular install target`
+
+The bootstrap installer refuses to replace a symlink at the install target. Symlinks resolving into one of our own npm package trees — global or project-level, outermost `node_modules` — of our coordinates (`atomgit-cli`, `@atomgit-cli/cli`, `@gitcode-cli/cli`) are migrated automatically (pnpm `/pnpm/global/` / `/.pnpm/` store and yarn `/yarn/global/` symlinks are refused instead, with `pnpm remove -g` / `yarn global remove` guidance): rerun the install command. For any other symlink the error names the link target and the remediation:
+
+- A symlink into `node_modules/gitcode-cli/` belongs to the third-party npm package `gitcode-cli`, which is not AtomGit CLI: run `npm uninstall -g gitcode-cli` (check `npm prefix -g`), or remove the symlink.
+- Otherwise remove the stale symlink manually, or install to another directory with `--target-dir <dir>`.
+
+After a successful migration, the old classic global package tree stays behind and can be removed with `npm uninstall -g <coordinate>` (for example `npm uninstall -g @gitcode-cli/cli`).
+
+### Uninstall
+
+`npm uninstall` removes the package files but intentionally leaves the bootstrap-installed binary, manifest, and shell completions in place (they live outside the package tree). To remove a bootstrap install manually:
+
+1. Delete `gc` and `gitcode` (on Windows: `gc.exe` / `gitcode.exe`) from the install directory, plus the adjacent `gitcode-update-helper.js` and `.gitcode-install.json`.
+2. Delete the completion files (all six, both command names):
+
+   - `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/gc` and `.../gitcode`
+     (if `BASH_COMPLETION_USER_DIR` is set, they live in its first entry's `completions/` instead)
+   - `~/.zsh/completions/_gc` and `_gitcode` (rerun `compinit` afterwards)
+   - `${XDG_CONFIG_HOME:-~/.config}/fish/completions/gc.fish` and `gitcode.fish`
+
+3. Run `gitcode doctor install` to confirm which providers (if any) still resolve on PATH.
 
 ## Supported platforms
 
@@ -61,15 +104,18 @@ GC_NO_UPDATE_CHECK=1 gitcode version
 | Linux | x64, arm64 |
 | macOS | x64, arm64 |
 | Windows | x64 |
+| OpenHarmony | arm64 |
 
-Windows arm64 is not shipped by npm, wheel, or release archives yet; build from source with Go for that target. On other unsupported combinations, use only a channel that explicitly lists the OS/architecture: https://gitcode.com/gitcode-cli/cli/releases
+OpenHarmony (arm64) reuses the bundled `gc-linux-arm64` binary: the OpenHarmony standard system runs the Linux kernel and gc ships fully static binaries, so no separate download is needed. Node.js reports `process.platform === "openharmony"` there; official upstream support is experimental, so use a Node.js build for OpenHarmony.
+
+Windows arm64 is not shipped by npm, wheel, or release archives yet; build from source with Go for that target. On other unsupported combinations, use only a channel that explicitly lists the OS/architecture: https://gitcode.com/atomgit-cli/cli/releases
 
 ## Links
 
-- Repository: https://gitcode.com/gitcode-cli/cli
-- Issues: https://gitcode.com/gitcode-cli/cli/issues
-- Command reference: https://gitcode.com/gitcode-cli/cli/blob/main/docs/COMMANDS.md
-- Feishu/Lark notifications: https://gitcode.com/gitcode-cli/cli/blob/main/docs/LARK.md
+- Repository: https://gitcode.com/atomgit-cli/cli
+- Issues: https://gitcode.com/atomgit-cli/cli/issues
+- Command reference: https://gitcode.com/atomgit-cli/cli/blob/main/docs/COMMANDS.md
+- Feishu/Lark notifications: https://gitcode.com/atomgit-cli/cli/blob/main/docs/LARK.md
 
 ## License
 

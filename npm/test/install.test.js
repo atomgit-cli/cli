@@ -11,9 +11,127 @@ const fs = require("fs");
 const path = require("path");
 const {
   chooseGlobalBinDir, commitTransaction, completionTarget, dirFirstOnPath, dirOnPath,
-  installHelp, parseInstallArgs, persistWindowsUserPath, prependWindowsUserPath,
-  quotePowerShell, replacePath, rollbackTransaction, validateWindowsPathDirectory, windowsPathGuidance,
+  ensureUsableInstallDir, acquireInstallLock, releaseInstallLock, writeCompletionFile, installCompletions, providerIsRunningPackage,
+  firstProviderOnPath, foreignChannelHint, foreignChannelTargetError, formatErrorChain,
+  helperPackageNameTransform, installHelp, isTransactionLeftoverName, parseInstallArgs,
+  persistWindowsUserPath, prependWindowsUserPath, quotePowerShell, replacePath,
+  rollbackTransaction, sweepTransactionLeftovers, validateWindowsPathDirectory, windowsPathGuidance,
+  windowsPathShadowing,
 } = require("../lib/install");
+
+test("copied update helper gets the npm coordinate injected and loads standalone", () => {
+  const helperSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"), "utf8");
+  for (const name of ["atomgit-cli", "@atomgit-cli/cli", "@gitcode-cli/cli"]) {
+    const rendered = helperPackageNameTransform(name)(helperSrc);
+    assert.ok(!rendered.includes('require("../package.json")'), `${name}: relative require must be rewritten`);
+    assert.ok(rendered.includes(`const PACKAGE = ${JSON.stringify(name)};`), `${name}: literal coordinate expected`);
+    // The copy runs from the bin directory: loading it must not throw and
+    // must expose the injected coordinate through its behavior.
+    const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-copy-"));
+    const copy = path.join(dir, "gitcode-update-helper.js");
+    fs.writeFileSync(copy, rendered, { mode: 0o755 });
+    const helper = require(copy);
+    const args = helper.withNpmIsolation(["exec", "--yes", "--", "gitcode", "install"], "u.npmrc", "g.npmrc");
+    assert.ok(args.includes("--registry=https://registry.npmjs.org"), `${name}: official registry must be pinned`);
+    if (name.startsWith("@")) {
+      assert.ok(args.some((a) => a === `--${name.split("/")[0]}:registry=https://registry.npmjs.org`), `${name}: scope flag expected`);
+    } else {
+      assert.ok(!args.some((a) => a.includes(":registry=")), `${name}: no scope flag for unscoped names`);
+    }
+  }
+});
+
+test("helper transform fails loudly when the marker is missing", () => {
+  assert.throws(() => helperPackageNameTransform("atomgit-cli")("const PACKAGE = 'stale';"));
+});
+
+test("chooseGlobalBinDir fallback explains the failure and the --target-dir escape hatch", (t) => {
+  if (process.platform === "win32") {
+    t.skip("posix fallback path only");
+    return;
+  }
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-home-notdir-"));
+  fs.writeFileSync(path.join(home, ".local"), "regular file");
+  // Inject candidates so the test does not depend on /usr/local/bin
+  // writability (CI runners can write it, which would bypass the fallback).
+  const unwritable = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-nowrite-"));
+  fs.chmodSync(unwritable, 0o555);
+  try {
+    assert.throws(
+      () => chooseGlobalBinDir(home, false, [unwritable, path.join(home, ".local", "bin")]),
+      (error) => /cannot create install directory/.test(error.message) &&
+        /\.local/.test(error.message) &&
+        /--target-dir/.test(error.message)
+    );
+  } finally {
+    fs.chmodSync(unwritable, 0o755);
+  }
+});
+
+test("ensureUsableInstallDir reports an unwritable target dir with guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-unusable-"));
+  if (process.platform === "win32") {
+    t.skip("chmod read-only bits are advisory on Windows");
+    return;
+  }
+  const dir = path.join(root, "bin");
+  fs.mkdirSync(dir);
+  fs.chmodSync(dir, 0o555);
+  try {
+    assert.throws(
+      () => ensureUsableInstallDir(dir),
+      (error) => /install directory is not usable/.test(error.message) &&
+        /--target-dir/.test(error.message)
+    );
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+});
+
+test("ensureUsableInstallDir rejects a path occupied by a regular file with guidance", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-notdir-"));
+  const target = path.join(root, "occupied");
+  fs.writeFileSync(target, "file");
+  assert.throws(
+    () => ensureUsableInstallDir(target),
+    (error) => /install directory is not usable/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+});
+
+test("ensureUsableInstallDir accepts and creates a writable target dir", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-dir-ok-"));
+  const dir = path.join(root, "nested", "bin");
+  ensureUsableInstallDir(dir);
+  assert.strictEqual(fs.statSync(dir).isDirectory(), true);
+  assert.strictEqual(fs.existsSync(path.join(dir, `.gc-install-probe-${process.pid}`)), false);
+});
+
+test("formatErrorChain renders nested AggregateError causes with their errno", () => {
+  const leaf = new Error("EACCES: permission denied, rename 'gc.backup-t1' -> 'gc'");
+  const inner = new AggregateError([leaf, new Error("restore denied")], "path replacement failed and rollback was incomplete");
+  const outer = new AggregateError([inner], "installation failed and rollback was incomplete");
+  const rendered = formatErrorChain(outer);
+  assert.ok(rendered.includes("installation failed and rollback was incomplete"));
+  assert.ok(rendered.includes("EACCES: permission denied, rename 'gc.backup-t1' -> 'gc'"));
+  assert.ok(rendered.includes("restore denied"));
+  assert.ok(rendered.split("\n").length >= 4);
+});
+
+test("install explains that a directory occupies the target and points to --target-dir", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-dir-target-"));
+  const source = path.join(root, "source");
+  const target = path.join(root, "gc");
+  fs.writeFileSync(source, "new");
+  fs.mkdirSync(target);
+  assert.throws(
+    () => replacePath(source, target, "dir-target"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /is a directory/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  assert.strictEqual(fs.statSync(target).isDirectory(), true);
+});
 
 test("chooseGlobalBinDir returns a writable, existing dir on posix (regardless of /usr/local/bin)", () => {
   // Deterministic: on hosted runners /usr/local/bin may be writable, so we
@@ -36,10 +154,99 @@ test("chooseGlobalBinDir returns the Windows per-user dir on win32 (no FS writab
 
 test("completionTarget maps each shell to a standard path", () => {
   const home = "/u/home";
-  assert.strictEqual(completionTarget("bash", home), path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
-  assert.strictEqual(completionTarget("zsh", home), path.join(home, ".zsh", "completions", "_gc"));
-  assert.strictEqual(completionTarget("fish", home), path.join(home, ".config", "fish", "completions", "gc.fish"));
-  assert.strictEqual(completionTarget("powershell", home), null);
+  assert.strictEqual(completionTarget("bash", home, "gc", {}), path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  assert.strictEqual(completionTarget("zsh", home, "gc", {}), path.join(home, ".zsh", "completions", "_gc"));
+  assert.strictEqual(completionTarget("fish", home, "gc", {}), path.join(home, ".config", "fish", "completions", "gc.fish"));
+  assert.strictEqual(completionTarget("powershell", home, "gc", {}), null);
+});
+
+test("completionTarget honors XDG and BASH_COMPLETION_USER_DIR", () => {
+  const home = "/u/home";
+  const xdg = { XDG_DATA_HOME: "/xdg/data", XDG_CONFIG_HOME: "/xdg/config" };
+  assert.strictEqual(completionTarget("bash", home, "gc", xdg), path.join("/xdg/data", "bash-completion", "completions", "gc"));
+  assert.strictEqual(completionTarget("fish", home, "gitcode", xdg), path.join("/xdg/config", "fish", "completions", "gitcode.fish"));
+  // Relative XDG values are treated as unset: targets must stay absolute.
+  assert.strictEqual(completionTarget("bash", home, "gc", { XDG_DATA_HOME: "rel/data" }),
+    path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  // bash-completion's own override wins for bash; zsh has no XDG standard.
+  assert.strictEqual(completionTarget("bash", home, "gc", { ...xdg, BASH_COMPLETION_USER_DIR: "/bcd" }),
+    path.join("/bcd", "completions", "gc"));
+  assert.strictEqual(completionTarget("zsh", home, "gc", xdg), path.join(home, ".zsh", "completions", "_gc"));
+});
+
+test("installCompletions installs six targets and pins the command name env per pass", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const calls = [];
+  const runner = (bin, args, options) => {
+    calls.push({ bin, args, env: options.env });
+    return { status: 0, stdout: "# completion script" };
+  };
+  // A polluted base env must not leak into the gc-named passes (the Go side
+  // resolves the command name env-first over argv[0]).
+  const result = installCompletions("/fake/bin/gc", home,
+    { env: { GITCODE_CLI_COMMAND_NAME: "gitcode" }, runner });
+  assert.strictEqual(result.installed.length, 6);
+  assert.strictEqual(result.skipped.length, 0);
+  for (const [shell, name] of [
+    ["bash", "gc"], ["bash", "gitcode"], ["zsh", "gc"], ["zsh", "gitcode"],
+    ["fish", "gc"], ["fish", "gitcode"],
+  ]) {
+    const call = calls.find((c) => c.args[0] === "completion" && c.args[1] === shell && c.env.GITCODE_CLI_COMMAND_NAME === name);
+    assert.ok(call, `missing ${shell} (${name}) pass`);
+  }
+  assert.ok(calls.every((c) => c.env.GC_NO_UPDATE_CHECK === "1"));
+});
+
+test("installCompletions emits the zsh fpath notice only when zsh files land", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const ok = { env: {}, runner: () => ({ status: 0, stdout: "# s" }) };
+  const result = installCompletions("/fake/gc", home, ok);
+  assert.strictEqual(result.installed.length, 6);
+  assert.strictEqual(result.notices.length, 1);
+  assert.match(result.notices[0], /fpath/);
+  assert.match(result.notices[0], /compinit/);
+
+  const failing = installCompletions("/fake/gc", home, { env: {}, runner: () => ({ status: 1, stdout: "" }) });
+  assert.strictEqual(failing.installed.length, 0);
+  assert.strictEqual(failing.notices.length, 0);
+});
+
+test("installCompletions skips shadowed command names without touching the other name", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const result = installCompletions("/fake/gc", home, {
+    env: {},
+    runner: () => ({ status: 0, stdout: "# s" }),
+    shadowedBy: { gc: "/usr/local/bin/gc" },
+  });
+  assert.strictEqual(result.installed.length, 3);
+  assert.ok(result.installed.every((entry) => entry.includes("(gitcode)")));
+  assert.strictEqual(result.skipped.length, 3);
+  assert.ok(result.skipped.every((entry) => entry.includes("shadowed by /usr/local/bin/gc")));
+});
+
+test("installCompletions attributes each skip reason", () => {
+  const home = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  const okRunner = () => ({ status: 0, stdout: "# s" });
+
+  // 1. The completion command itself fails.
+  const failing = installCompletions("/fake/gc", home, { env: {}, runner: () => ({ status: 1, stdout: "" }) });
+  assert.strictEqual(failing.skipped.length, 6);
+  assert.ok(failing.skipped.every((s) => s.endsWith("completion command failed")));
+
+  // 2. A symlink already sits at one bash target.
+  const bashGc = completionTarget("bash", home, "gc", {});
+  fs.mkdirSync(path.dirname(bashGc), { recursive: true });
+  fs.symlinkSync("/elsewhere", bashGc);
+  const withSymlink = installCompletions("/fake/gc", home, { env: {}, runner: okRunner });
+  assert.ok(withSymlink.skipped.some((s) => s.includes("bash (gc)") && s.includes("is a symlink")));
+  assert.strictEqual(withSymlink.installed.length, 5);
+
+  // 3. The zsh target parent cannot be created (regular file in the way).
+  const home2 = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completions-"));
+  fs.writeFileSync(path.join(home2, ".zsh"), "not a directory");
+  const blocked = installCompletions("/fake/gc", home2, { env: {}, runner: okRunner });
+  assert.strictEqual(blocked.installed.length, 4);
+  assert.ok(blocked.skipped.every((s) => s.includes("zsh") && s.includes("not writable")));
 });
 
 test("dirOnPath reflects the current PATH delimiter", () => {
@@ -91,6 +298,9 @@ test("parseInstallArgs supports target directory and Windows PATH opt-out", () =
 test("install help documents target directory and Windows PATH opt-out", () => {
   assert.match(installHelp(), /--target-dir <directory>/);
   assert.match(installHelp(), /--no-modify-path/);
+  assert.match(installHelp(), /--target-dir=<directory>/);
+  // The usage line shows the name the platform's users actually type.
+  assert.match(installHelp(), new RegExp(`${process.platform === "win32" ? "gitcode" : "gc"} install \\[`));
 });
 
 test("PowerShell guidance escapes single quotes in target directories", () => {
@@ -102,7 +312,11 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const calls = [];
   const runner = (executable, args, options) => {
     calls.push({ executable, args, options });
-    return { status: 0, stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true}', stderr: "" };
+    return {
+      status: 0,
+      stdout: '{"changed":true,"kind":"ExpandString","broadcasted":true,"previous":"C:\\\\Python311\\\\Scripts"}',
+      stderr: "",
+    };
   };
   const env = {
     SystemRoot: "C:\\Windows",
@@ -114,6 +328,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   const result = persistWindowsUserPath(dir, { env, runner, fileExists: () => true });
   assert.deepStrictEqual(result, {
     ok: true, changed: true, registryKind: "ExpandString", broadcasted: true,
+    previousUserPath: "C:\\Python311\\Scripts",
   });
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].executable, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
@@ -122,6 +337,7 @@ test("persistWindowsUserPath uses one raw-registry PowerShell transaction and a 
   assert.match(script, /DoNotExpandEnvironmentNames/);
   assert.match(script, /GetValueKind\('Path'\)/);
   assert.match(script, /SetValue\('Path', \$next, \$kind\)/);
+  assert.match(script, /previous = \[string\]\$current/);
   assert.match(script, /Mutex.*Global\\GitCodeCli\.UserPath/);
   assert.match(script, /path-mutex-id/);
   assert.match(script, /File\]::Move\(\$candidatePath, \$mutexIdPath\)/);
@@ -161,7 +377,7 @@ test("persistWindowsUserPath reports idempotence from the same registry transact
     },
   });
   assert.deepStrictEqual(result, {
-    ok: true, changed: false, registryKind: "String", broadcasted: true,
+    ok: true, changed: false, registryKind: "String", broadcasted: true, previousUserPath: null,
   });
   assert.strictEqual(calls, 1);
 });
@@ -233,6 +449,70 @@ test("Windows PATH guidance never emits PATH commands for an unsafe directory", 
   assert.match(guidance, /gitcode\.exe' version/);
 });
 
+test("windowsPathShadowing classifies providers by old User PATH membership", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-fn-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const system = windowsPathShadowing(install, env, install);
+  assert.strictEqual(system.length, 1);
+  assert.strictEqual(system[0].name, "gitcode");
+  assert.strictEqual(system[0].provider, path.join(early, "gitcode.exe"));
+  assert.strictEqual(system[0].scope, "system");
+
+  const user = windowsPathShadowing(install, env, early);
+  assert.strictEqual(user[0].scope, "user");
+
+  const expanded = windowsPathShadowing(install, { PATH: `${early};${install}`, EARLY: early }, "%EARLY%");
+  assert.strictEqual(expanded[0].scope, "user");
+
+  const unknown = windowsPathShadowing(install, env, null);
+  assert.strictEqual(unknown[0].scope, "unknown");
+
+  // The freshly installed dir providing its own names is not a shadow.
+  const clean = windowsPathShadowing(install, { PATH: `${install}` }, null);
+  assert.deepStrictEqual(clean, []);
+});
+
+test("Windows PATH guidance distinguishes reopen-fixable from persistent shadowing", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-win-shadow-guide-"));
+  const early = path.join(root, "python");
+  const install = path.join(root, "install");
+  fs.mkdirSync(early);
+  fs.mkdirSync(install);
+  fs.writeFileSync(path.join(early, "gitcode.exe"), "");
+  fs.writeFileSync(path.join(install, "gc.exe"), "");
+  const env = { PATH: `${early};${install}` };
+
+  const systemScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, env
+  );
+  assert.match(systemScope, /重开窗口也无法解决/);
+  assert.match(systemScope, /系统 PATH/);
+  assert.match(systemScope, /gitcode doctor install/);
+
+  const userScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: early }, env
+  );
+  assert.match(userScope, /重新打开 PowerShell\/Windows Terminal 窗口后本安装将优先生效/);
+
+  const unknownScope = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true }, env
+  );
+  assert.match(unknownScope, /若该提供者来自系统 PATH/);
+
+  // No earlier provider: no shadowing lines at all.
+  const clean = windowsPathGuidance(
+    install, { modifyPath: true }, { ok: true, changed: true, previousUserPath: install }, { PATH: `${install}` }
+  );
+  assert.doesNotMatch(clean, /先于本安装目录/);
+});
+
 test("install rollback restores only files touched by the current transaction", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-transaction-"));
   const source = path.join(root, "source");
@@ -263,6 +543,23 @@ test("install commit removes transaction-scoped backups", () => {
   commitTransaction([record]);
   assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
   assert.strictEqual(fs.existsSync(record.backup), false);
+});
+
+test("replacePath applies the helper transform at the wiring level", () => {
+  // Guards the P0 wiring itself: without the transform option, the copied
+  // helper keeps require("../package.json") and cannot load from a bin dir.
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-helper-wiring-"));
+  const copied = path.join(root, "gitcode-update-helper.js");
+  const record = replacePath(
+    path.join(__dirname, "..", "lib", "bootstrap-update-helper.js"),
+    copied,
+    "helper-wiring",
+    { transform: helperPackageNameTransform(require("../package.json").name) }
+  );
+  commitTransaction([record]);
+  const helper = require(copied);
+  assert.ok(helper.withNpmIsolation(["exec", "--", "gitcode", "install"], "u.npmrc", "g.npmrc")
+    .includes("--registry=https://registry.npmjs.org"));
 });
 
 function createFileSymlinkOrSkip(t, target, link) {
@@ -382,6 +679,210 @@ test("install still rejects a symlink at the primary gc target", (t) => {
   assert.strictEqual(fs.readFileSync(other, "utf8"), "old");
 });
 
+test("install adopts a gitcode symlink left by a classic npm-global install and restores it on rollback", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-global-"));
+  const packageBin = path.join(root, "lib", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  const record = replacePath(source, alias, "npm-global-alias");
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "new");
+  assert.strictEqual(fs.lstatSync(record.backup).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(record.backup, "utf8"), "old");
+
+  rollbackTransaction([record]);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  // Windows readlink returns backslash-separated targets; normalize both sides.
+  assert.strictEqual(fs.readlinkSync(alias).split(path.sep).join("/"), "../lib/node_modules/@gitcode-cli/cli/bin/gc.js");
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "old");
+  assert.strictEqual(fs.existsSync(record.backup), false);
+});
+
+test("install adopts npm-global symlinks for every own npm coordinate", (t) => {
+  for (const coordinate of ["@atomgit-cli/cli", "@gitcode-cli/cli", "atomgit-cli"]) {
+    const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-coord-"));
+    const packageBin = path.join(root, "node_modules", ...coordinate.split("/"), "bin", "gc.js");
+    fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+    fs.writeFileSync(packageBin, "old");
+    const binDir = path.join(root, "bin");
+    fs.mkdirSync(binDir);
+    const source = path.join(root, "source");
+    const alias = path.join(binDir, "gitcode");
+    fs.writeFileSync(source, "new");
+    if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), alias)) return;
+
+    const record = replacePath(source, alias, `npm-coord-${coordinate.replace(/\//g, "-")}`);
+    assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false, coordinate);
+    assert.strictEqual(fs.readFileSync(alias, "utf8"), "new", coordinate);
+    commitTransaction([record]);
+    assert.strictEqual(fs.existsSync(record.backup), false, coordinate);
+  }
+});
+
+test("install adopts an npm-global symlink at the primary gc target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-primary-"));
+  const packageBin = path.join(root, "node_modules", "atomgit-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), target)) return;
+
+  const record = replacePath(source, target, "npm-global-primary");
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
+  commitTransaction([record]);
+});
+
+test("install adopts a broken npm-global symlink into our own package tree", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-npm-broken-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  const record = replacePath(source, alias, "npm-global-broken");
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), false);
+  assert.strictEqual(fs.readFileSync(alias, "utf8"), "new");
+  commitTransaction([record]);
+});
+
+test("install rejects a symlink into the third-party gitcode-cli package with uninstall guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-third-party-"));
+  const packageBin = path.join(root, "lib", "node_modules", "gitcode-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "unrelated");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/gitcode-cli/bin/gc.js", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "third-party-reject"),
+    (error) => {
+      // Windows renders the link target with backslashes; normalize before matching.
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /node_modules\/gitcode-cli/.test(message) &&
+        /npm uninstall -g gitcode-cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "unrelated");
+});
+
+test("install rejects a foreign symlink with the link target and --target-dir guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-foreign-"));
+  const source = path.join(root, "source");
+  const other = path.join(root, "other");
+  const alias = path.join(root, "gitcode");
+  fs.writeFileSync(source, "new");
+  fs.writeFileSync(other, "unrelated");
+  if (!createFileSymlinkOrSkip(t, "other", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "foreign-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /symlink -> other/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(other, "utf8"), "unrelated");
+});
+
+test("install reports an actionable refusal for a symlink loop at the primary target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-loop-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "gitcode", target)) return;
+  if (!createFileSymlinkOrSkip(t, "gc", path.join(binDir, "gitcode"))) return;
+
+  assert.throws(
+    () => replacePath(source, target, "loop-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      !/ELOOP/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install reports an actionable refusal for a symlink loop at the alias target", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-alias-loop-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const realGc = path.join(binDir, "gc");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  fs.writeFileSync(realGc, "binary");
+  if (!createFileSymlinkOrSkip(t, "gitcode", alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "alias-loop-reject", { allowedSymlinkTarget: realGc }),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      !/ELOOP/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(realGc, "utf8"), "binary");
+});
+
+test("install refuses symlinks inside the nested dependency tree of another package", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-nested-"));
+  const packageBin = path.join(root, "project", "node_modules", "pkg-a", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(packageBin), { recursive: true });
+  fs.writeFileSync(packageBin, "old");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, packageBin), alias)) return;
+
+  assert.throws(() => replacePath(source, alias, "nested-reject"), /refusing non-regular install target/);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(packageBin, "utf8"), "old");
+});
+
+test("install judges npm-global adoption by the resolved path, not the link text", (t) => {
+  if (process.platform === "win32") {
+    t.skip("directory symlinks require Windows Developer Mode or elevated privileges");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-authority-"));
+  const external = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-authority-external-"));
+  fs.mkdirSync(path.join(root, "lib"));
+  fs.mkdirSync(path.join(external, "libs", "@gitcode-cli", "cli", "bin"), { recursive: true });
+  const externalBin = path.join(external, "libs", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.writeFileSync(externalBin, "external");
+  fs.symlinkSync(path.join(external, "libs"), path.join(root, "lib", "node_modules"), "dir");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, "../lib/node_modules/@gitcode-cli/cli/bin/gc.js", alias)) return;
+
+  assert.throws(() => replacePath(source, alias, "authority-reject"), /refusing non-regular install target/);
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(externalBin, "utf8"), "external");
+});
+
 test("rollback continues restoring remaining paths after one restore fails", () => {
   const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-rollback-failure-"));
   const source = path.join(root, "source");
@@ -477,4 +978,593 @@ test("replacePath reports a backup that disappears before internal restore", () 
   }
   assert.strictEqual(fs.existsSync(target), false);
   assert.strictEqual(fs.existsSync(backup), false);
+});
+
+test("sweepTransactionLeftovers removes stale regular leftovers only", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-sweep-"));
+  const now = Date.now();
+  const stale = new Date(now - 25 * 60 * 60 * 1000);
+  const files = {
+    "gc.backup-old-txn": { content: "stale", mtime: stale, removed: true },
+    "gitcode.tmp-111-abc": { content: "stale", mtime: stale, removed: true },
+    "gitcode-update-helper.js.backup-old": { content: "stale", mtime: stale, removed: true },
+    ".gc-install-probe-999": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-old-1-abc": { content: "stale", mtime: stale, removed: true },
+    ".gitcode-install.json.tmp-fresh": { content: "fresh", mtime: new Date(now), removed: false },
+    "gc.tmp-222-fresh": { content: "fresh", mtime: new Date(now), removed: false },
+    "gc": { content: "binary", mtime: stale, removed: false },
+    "gitcode": { content: "binary", mtime: stale, removed: false },
+    ".gitcode-install.json": { content: "{}", mtime: stale, removed: false },
+    "unrelated.backup-not-ours": { content: "x", mtime: stale, removed: false },
+  };
+  for (const [name, spec] of Object.entries(files)) {
+    fs.writeFileSync(path.join(root, name), spec.content);
+    fs.utimesSync(path.join(root, name), spec.mtime, spec.mtime);
+  }
+  if (!createFileSymlinkOrSkip(t, "gc", path.join(root, "gitcode.backup-migrated"))) return;
+  fs.utimesSync(path.join(root, "gitcode.backup-migrated"), stale, stale);
+
+  const removed = sweepTransactionLeftovers(root, now);
+  let expectedRemovals = 0;
+  for (const [name, spec] of Object.entries(files)) {
+    assert.strictEqual(fs.existsSync(path.join(root, name)), !spec.removed, name);
+    if (spec.removed) expectedRemovals += 1;
+  }
+  // A symlink backup keeps its original mtime through rename, so it is never
+  // swept by age (an active transaction could own it).
+  assert.strictEqual(fs.lstatSync(path.join(root, "gitcode.backup-migrated")).isSymbolicLink(), true);
+  assert.strictEqual(removed, expectedRemovals);
+});
+
+test("isTransactionLeftoverName matches only installer transaction artifacts", () => {
+  for (const name of [
+    "gc.backup-1-abc", "gc.tmp-1-abc",
+    "gc.exe.backup-1-abc", "gc.exe.tmp-1-abc",
+    "gitcode.backup-1-abc", "gitcode.tmp-1-abc",
+    "gitcode.exe.backup-1-abc", "gitcode.exe.tmp-1-abc",
+    "gitcode-update-helper.js.backup-1-abc", "gitcode-update-helper.js.tmp-1-abc",
+    ".gitcode-install.json.tmp-1-abc", ".gitcode-install.json.backup-1-abc",
+    ".gc-install-probe-123", ".gc-write-probe",
+  ]) {
+    assert.strictEqual(isTransactionLeftoverName(name), true, name);
+  }
+  for (const name of ["gc", "gitcode", "gc.exe", "gitcode.exe", "gitcode-update-helper.js", ".gitcode-install.json", "other.backup-x", "gcbackup-1"]) {
+    assert.strictEqual(isTransactionLeftoverName(name), false, name);
+  }
+});
+
+test("foreignChannelHint recognizes pip console scripts and ignores binaries", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-channel-hint-"));
+  const script = path.join(root, "gitcode");
+  fs.writeFileSync(script, "#!/usr/bin/env python3\nimport gc_cli\n");
+  assert.match(foreignChannelHint(script), /pip uninstall gitcode-cli/);
+  const versioned = path.join(root, "gitcode3");
+  fs.writeFileSync(versioned, "#!/usr/local/bin/python3.11\nimport gc_cli\n");
+  assert.match(foreignChannelHint(versioned), /pip uninstall gitcode-cli/);
+  const fakeComment = path.join(root, "fake");
+  fs.writeFileSync(fakeComment, "#!/bin/sh # python wrapper\nexec something\n");
+  assert.strictEqual(foreignChannelHint(fakeComment), "");
+  const binary = path.join(root, "gc");
+  fs.writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]));
+  assert.strictEqual(foreignChannelHint(binary), "");
+  const missing = path.join(root, "absent");
+  assert.strictEqual(foreignChannelHint(missing), "");
+});
+
+test("foreignChannelHint accepts interpreter arguments and Windows PE shims", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-channel-hint-args-"));
+  // Shebangs with interpreter options must be recognized as pip scripts.
+  for (const shebang of [
+    "#!/usr/bin/env python3 -E",
+    "#!/usr/bin/env -S python3",
+    "#!/usr/bin/env -S python3 -u -E",
+    "#!/usr/local/bin/python3.11 -u",
+  ]) {
+    const script = path.join(root, shebang.replace(/[^a-z0-9]/gi, "_").slice(0, 40));
+    fs.writeFileSync(script, `${shebang}\nimport gc_cli\n`);
+    assert.match(foreignChannelHint(script), /pip uninstall gitcode-cli/, shebang);
+  }
+  // A shebang pointing at a script path (not just options) stays unrecognized.
+  const odd = path.join(root, "odd");
+  fs.writeFileSync(odd, "#!/usr/bin/env python3 /opt/tool.py\n");
+  assert.strictEqual(foreignChannelHint(odd), "");
+
+  // Windows pip console shims: a PE stub with the shebang appended deep
+  // into the launcher (distlib layout), in front of the zip payload.
+  const shim = path.join(root, "gc.exe");
+  fs.writeFileSync(shim, Buffer.concat([
+    Buffer.from([0x4d, 0x5a, 0x90, 0x00]),
+    Buffer.alloc(150 * 1024, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+    Buffer.from("PK\x03\x04zip-payload", "utf8"),
+  ]));
+  assert.match(foreignChannelHint(shim, true), /pip uninstall gitcode-cli/);
+  // A PE binary without the embedded python shebang stays unrecognized.
+  const plain = path.join(root, "plain.exe");
+  fs.writeFileSync(plain, Buffer.concat([Buffer.from([0x4d, 0x5a]), Buffer.alloc(2048, 1)]));
+  assert.strictEqual(foreignChannelHint(plain, true), "");
+  // A shebang past the 1 MiB read window is out of scope by design.
+  const far = path.join(root, "far.exe");
+  fs.writeFileSync(far, Buffer.concat([
+    Buffer.from([0x4d, 0x5a]),
+    Buffer.alloc(1 << 20, 0x00),
+    Buffer.from('#!"C:\\Python311\\python.exe"\r\n', "utf8"),
+  ]));
+  assert.strictEqual(foreignChannelHint(far, true), "");
+});
+
+test("acquireInstallLock serializes installs and reclaims stale locks", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-install-lock-"));
+  const lock = acquireInstallLock(root);
+  assert.strictEqual(fs.existsSync(lock.path), true);
+  // The claim holds the descriptor open for identity-checked release.
+  assert.strictEqual(typeof lock.fd, "number");
+  // The lock name must never join the leftover families: the sweep would
+  // then delete a live lock mid-install.
+  assert.strictEqual(isTransactionLeftoverName(path.basename(lock.path)), false);
+  // A second install while the lock is fresh is refused.
+  assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
+  releaseInstallLock(lock);
+  assert.strictEqual(fs.existsSync(lock), false);
+  // Re-acquire works after release.
+  const again = acquireInstallLock(root);
+  releaseInstallLock(again);
+
+  // A lock older than the stale threshold is reclaimed.
+  const stale = acquireInstallLock(root);
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  fs.utimesSync(stale.path, old, old);
+  fs.closeSync(stale.fd);
+  const reclaimed = acquireInstallLock(root);
+  assert.strictEqual(fs.readFileSync(reclaimed.path, "utf8").trim().split(" ")[0], String(process.pid));
+  releaseInstallLock(reclaimed);
+
+  // The losing reclaimer of a stale-lock race is refused, not double-holding.
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "");
+  fs.utimesSync(path.join(root, ".gc-install-lock"), old, old);
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = () => {
+      const error = new Error("ENOENT: no such file or directory");
+      error.code = "ENOENT";
+      throw error;
+    };
+    assert.throws(() => acquireInstallLock(root), /another gc install appears to be running/);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  // A release never removes a lock reclaimed by another install: rewrite
+  // the pid token, release, and the other holder's lock must survive.
+  const ours = acquireInstallLock(root);
+  fs.writeFileSync(path.join(root, ".gc-install-lock"), "999999 2000-01-01T00:00:00.000Z\n");
+  releaseInstallLock(ours);
+  assert.strictEqual(fs.existsSync(path.join(root, ".gc-install-lock")), true);
+  fs.unlinkSync(path.join(root, ".gc-install-lock"));
+});
+
+test("writeCompletionFile never writes through a symlink and replaces atomically", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-completion-"));
+  const target = path.join(root, "_gc");
+  fs.writeFileSync(target, "old");
+  assert.deepStrictEqual(writeCompletionFile(target, "new"), { skipped: false });
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "new");
+
+  // A symlink target is skipped, and whatever it points at stays intact.
+  const victim = path.join(root, "victim");
+  fs.writeFileSync(victim, "precious");
+  fs.unlinkSync(target);
+  if (!createFileSymlinkOrSkip(t, "victim", target)) return;
+  assert.deepStrictEqual(writeCompletionFile(target, "new"), { skipped: true });
+  assert.strictEqual(fs.readFileSync(victim, "utf8"), "precious");
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("parseInstallArgs accepts --target-dir= forms and dash-prefixed names", () => {
+  assert.deepStrictEqual(parseInstallArgs(["--target-dir=/opt/gc"]), {
+    targetDir: path.resolve("/opt/gc"),
+    modifyPath: true,
+  });
+  // Space-separated dash-prefixed directory names are now valid values.
+  const dashed = parseInstallArgs(["--target-dir", "-weird"]);
+  assert.strictEqual(dashed.targetDir, path.resolve("-weird"));
+  // ./-name form keeps working.
+  assert.strictEqual(parseInstallArgs(["--target-dir", "./-weird"]).targetDir, path.resolve("./-weird"));
+  // A known flag as the value still means a missing value.
+  assert.throws(() => parseInstallArgs(["--target-dir", "--no-modify-path"]), /\.\/-name or --target-dir=-name/);
+  // Any "--"-prefixed value is rejected, not just the known flags.
+  assert.throws(() => parseInstallArgs(["--target-dir", "--unknown-flag"]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dir"]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dir="]), /requires a directory value/);
+  assert.throws(() => parseInstallArgs(["--target-dirx"]), /unknown install argument/);
+});
+
+test("install gives Homebrew-specific guidance for a brew-owned symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-link-"));
+  const brewBin = path.join(root, "opt", "homebrew", "Cellar", "gc", "0.14.0", "bin", "gc");
+  fs.mkdirSync(path.dirname(brewBin), { recursive: true });
+  fs.writeFileSync(brewBin, "brew-binary");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, brewBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "brew-reject"),
+    (error) => /refusing non-regular install target/.test(error.message) &&
+      /Homebrew/.test(error.message) &&
+      /brew uninstall gc/.test(error.message)
+  );
+  assert.strictEqual(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(brewBin, "utf8"), "brew-binary");
+});
+
+test("install gives pipx-specific guidance for a pipx-owned symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pipx-link-"));
+  const pipxBin = path.join(root, ".local", "pipx", "venvs", "gitcode-cli", "bin", "gitcode");
+  fs.mkdirSync(path.dirname(pipxBin), { recursive: true });
+  fs.writeFileSync(pipxBin, "pipx-shim");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, pipxBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "pipx-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pipx uninstall gitcode-cli/.test(message);
+    }
+  );
+});
+
+test("install keeps the generic guidance for a non-pipx directory named pipx", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pipx-lookalike-"));
+  const fakeBin = path.join(root, "pipx", "mytool", "bin", "gitcode");
+  fs.mkdirSync(path.dirname(fakeBin), { recursive: true });
+  fs.writeFileSync(fakeBin, "unrelated");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gitcode");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, fakeBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "pipx-lookalike-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /--target-dir/.test(message) &&
+        !/pipx uninstall/.test(message);
+    }
+  );
+});
+
+test("install refuses a pnpm-global symlink instead of adopting it", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-link-"));
+  const pnpmBin = path.join(root, ".local", "share", "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, pnpmBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "pnpm-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+  assert.strictEqual(fs.readFileSync(pnpmBin, "utf8"), "pnpm-wrapper");
+});
+
+test("install refuses a pnpm symlink with an absolute target or a broken link", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-abs-"));
+  const pnpmBin = path.join(root, "pnpm", "global", "5", "node_modules", "atomgit-cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(pnpmBin), { recursive: true });
+  fs.writeFileSync(pnpmBin, "pnpm-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const absolute = path.join(binDir, "gc");
+  if (!createFileSymlinkOrSkip(t, pnpmBin, absolute)) return;
+  assert.throws(
+    () => replacePath(source, absolute, "pnpm-abs-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g atomgit-cli/.test(message);
+    }
+  );
+  // A broken link whose text still points into a pnpm tree is refused the
+  // same way (the raw link text carries the marker).
+  const broken = path.join(binDir, "gitcode");
+  if (!createFileSymlinkOrSkip(t, path.join(root, "pnpm", "global", "5", "node_modules", "@gitcode-cli", "cli", "bin", "gone.js"), broken)) return;
+  assert.throws(
+    () => replacePath(source, broken, "pnpm-broken-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove -g/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(broken).isSymbolicLink(), true);
+});
+
+test("install refuses to replace a pip console script instead of warn-and-destroy", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pip-script-"));
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  fs.writeFileSync(source, "new");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(target, "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  assert.throws(
+    () => replacePath(source, target, "pip-reject"),
+    (error) => /refusing to replace foreign install target/.test(error.message) &&
+      /pip uninstall gitcode-cli/.test(error.message) &&
+      /--target-dir/.test(error.message)
+  );
+  // The refusal happens before any file change: the script is untouched.
+  assert.strictEqual(fs.readFileSync(target, "utf8"), "#!/usr/bin/env python3\nimport gc_cli\n");
+
+  // A plain regular file (no recognizable foreign-channel shebang) is still
+  // replaced normally.
+  const plain = path.join(binDir, "gitcode");
+  fs.writeFileSync(plain, "old-binary");
+  const record = replacePath(source, plain, "pip-plain");
+  assert.strictEqual(fs.readFileSync(plain, "utf8"), "new");
+  fs.unlinkSync(record.backup);
+});
+
+test("chooseGlobalBinDir avoids the Homebrew domain when the layout is present", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-brew-skip-"));
+  const fakeCellar = path.join(root, "Cellar");
+  fs.mkdirSync(fakeCellar);
+  const fallback = path.join(root, "local-bin");
+  // With the Homebrew layout present, /usr/local/bin is skipped even when
+  // it heads the candidate list.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, ["/usr/local/bin", fallback], fakeCellar),
+    fallback
+  );
+  // Injected candidates without /usr/local/bin are unaffected by the check.
+  assert.strictEqual(
+    chooseGlobalBinDir("/home/u", false, [fallback], path.join(root, "absent")),
+    fallback
+  );
+});
+
+test("install gives uv-specific guidance for a uv tool symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-uv-link-"));
+  const uvBin = path.join(root, ".local", "share", "uv", "tools", "gitcode-cli", "bin", "gc");
+  fs.mkdirSync(path.dirname(uvBin), { recursive: true });
+  fs.writeFileSync(uvBin, "uv-shim");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, uvBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "uv-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /uv tool uninstall gitcode-cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install gives yarn-specific guidance for a yarn global symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-yarn-link-"));
+  const yarnBin = path.join(root, ".config", "yarn", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(yarnBin), { recursive: true });
+  fs.writeFileSync(yarnBin, "yarn-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, yarnBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "yarn-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /yarn global remove @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("firstProviderOnPath resolves the earliest provider and skips broken links", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-provider-path-"));
+  const early = path.join(root, "early");
+  const late = path.join(root, "late");
+  fs.mkdirSync(early);
+  fs.mkdirSync(late);
+  fs.writeFileSync(path.join(early, "gc"), "binary");
+  fs.writeFileSync(path.join(late, "gc"), "binary");
+  fs.writeFileSync(path.join(late, "gitcode"), "binary");
+  const env = { PATH: [early, late].join(path.delimiter) };
+  assert.strictEqual(firstProviderOnPath("gc", env), path.join(early, "gc"));
+  assert.strictEqual(firstProviderOnPath("gitcode", env), path.join(late, "gitcode"));
+  assert.strictEqual(firstProviderOnPath("missing", env), "");
+  if (process.platform !== "win32") {
+    const broken = path.join(root, "broken");
+    fs.mkdirSync(broken);
+    fs.symlinkSync("nowhere", path.join(broken, "gitcode"), "file");
+    const envBroken = { PATH: [broken, late].join(path.delimiter) };
+    // The broken link is skipped; the real file in the later dir wins.
+    assert.strictEqual(firstProviderOnPath("gitcode", envBroken), path.join(late, "gitcode"));
+  }
+});
+
+test("install refuses a yarn symlink from the Windows default global layout", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-yarn-win-"));
+  const yarnBin = path.join(root, "AppData", "Local", "Yarn", "Data", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(yarnBin), { recursive: true });
+  fs.writeFileSync(yarnBin, "yarn-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, yarnBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "yarn-win-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /yarn global remove @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("install refuses a bun global symlink with bun-specific guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-bun-link-"));
+  const bunBin = path.join(root, ".bun", "install", "global", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(bunBin), { recursive: true });
+  fs.writeFileSync(bunBin, "bun-wrapper");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, bunBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "bun-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /bun remove -g @gitcode-cli\/cli/.test(message);
+    }
+  );
+  assert.strictEqual(fs.lstatSync(target).isSymbolicLink(), true);
+});
+
+test("a project-level pnpm .bin symlink gets project-scoped removal guidance", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-pnpm-proj-"));
+  const storeBin = path.join(root, "proj", "node_modules", ".pnpm", "@gitcode-cli+cli@1.0.0", "node_modules", "@gitcode-cli", "cli", "bin", "gc.js");
+  fs.mkdirSync(path.dirname(storeBin), { recursive: true });
+  fs.writeFileSync(storeBin, "pnpm-wrapper");
+  const binDir = path.join(root, "proj", "node_modules", ".bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const source = path.join(root, "source");
+  const target = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, storeBin), target)) return;
+
+  assert.throws(
+    () => replacePath(source, target, "pnpm-proj-reject"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /pnpm remove @gitcode-cli\/cli in the owning project/.test(message) &&
+        !/pnpm remove -g/.test(message);
+    }
+  );
+});
+
+test("foreignChannelHint routes uv and pipx console scripts to their own guidance", () => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-hint-channels-"));
+  const uvScript = path.join(root, "gc");
+  fs.writeFileSync(uvScript, "#!/home/u/.local/share/uv/tools/gitcode-cli/bin/python\nimport gc_cli\n");
+  assert.match(foreignChannelHint(uvScript), /uv tool uninstall gitcode-cli/);
+  const pipxScript = path.join(root, "gitcode");
+  fs.writeFileSync(pipxScript, "#!/home/u/.local/pipx/venvs/gitcode-cli/bin/python3.11\nimport gc_cli\n");
+  assert.match(foreignChannelHint(pipxScript), /pipx uninstall gitcode-cli/);
+  const pipScript = path.join(root, "plain");
+  fs.writeFileSync(pipScript, "#!/usr/bin/env python3\nimport gc_cli\n");
+  assert.match(foreignChannelHint(pipScript), /pip uninstall gitcode-cli/);
+});
+
+test("a dangling symlink at the lock path fails with explicit guidance", (t) => {
+  // POSIX only: Windows open(O_CREAT|O_EXCL) on a dangling symlink creates
+  // the target instead of failing, so the claim path differs there.
+  if (process.platform === "win32") {
+    t.skip("POSIX symlink-at-lock semantics only");
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-lock-symlink-"));
+  fs.symlinkSync("nowhere", path.join(root, ".gc-install-lock"), "file");
+  assert.throws(() => acquireInstallLock(root), /symbolic link; remove it manually/);
+});
+
+test("completionTarget produces both gc and gitcode names", () => {
+  for (const shell of ["bash", "zsh", "fish"]) {
+    const gc = completionTarget(shell, "/home/u", "gc", {});
+    const gitcode = completionTarget(shell, "/home/u", "gitcode", {});
+    assert.ok(gc.endsWith("gc") || gc.endsWith("_gc") || gc.endsWith("gc.fish"), shell);
+    assert.ok(gitcode.endsWith("gitcode") || gitcode.endsWith("_gitcode") || gitcode.endsWith("gitcode.fish"), shell);
+    assert.notStrictEqual(gc, gitcode, shell);
+  }
+});
+
+test("install gives Homebrew guidance for an Intel Mac Cellar symlink", (t) => {
+  const root = fs.mkdtempSync(path.join(require("os").tmpdir(), "gc-cellar-case-"));
+  const brewBin = path.join(root, "usr", "local", "Cellar", "gc", "0.14.0", "bin", "gc");
+  fs.mkdirSync(path.dirname(brewBin), { recursive: true });
+  fs.writeFileSync(brewBin, "brew-binary");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  const source = path.join(root, "source");
+  const alias = path.join(binDir, "gc");
+  fs.writeFileSync(source, "new");
+  if (!createFileSymlinkOrSkip(t, path.relative(binDir, brewBin), alias)) return;
+
+  assert.throws(
+    () => replacePath(source, alias, "cellar-case"),
+    (error) => {
+      const message = error.message.split(path.sep).join("/");
+      return /refusing non-regular install target/.test(message) &&
+        /brew uninstall gc/.test(message);
+    }
+  );
+});
+
+test("providerIsRunningPackage detects the running package tree as self", () => {
+  // A provider inside the package running these tests is self — the npx
+  // flow prepends the package's own cache node_modules/.bin to PATH, and
+  // those shims must not count as a foreign provider.
+  const inside = path.join(__dirname, "..", "bin", "gc.js");
+  assert.strictEqual(providerIsRunningPackage(inside), true);
+  // Anything else is a real provider (an old global install, a third-party
+  // package).
+  assert.strictEqual(providerIsRunningPackage("/usr/local/bin/gc"), false);
+  assert.strictEqual(providerIsRunningPackage("/opt/other/bin/gitcode"), false);
+});
+
+test("completionTarget ignores relative BASH_COMPLETION_USER_DIR entries", () => {
+  const home = "/u/home";
+  // Relative entries are treated as unset, like relative XDG values.
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: "rel/dir" }),
+    path.join(home, ".local", "share", "bash-completion", "completions", "gc"));
+  // A list with one absolute entry takes that entry. "/abs dir" is
+  // absolute on both POSIX and win32 (root-relative), and the delimiter
+  // must follow the running platform.
+  const abs = "/abs dir";
+  assert.strictEqual(completionTarget("bash", home, "gc", { BASH_COMPLETION_USER_DIR: `rel${path.delimiter}${abs}` }),
+    path.join(abs, "completions", "gc"));
 });

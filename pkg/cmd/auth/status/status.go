@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/api"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -33,7 +36,10 @@ type AuthStatus struct {
 	LoggedIn    bool   `json:"logged_in"`
 	Username    string `json:"username,omitempty"`
 	TokenSource string `json:"token_source,omitempty"`
-	TokenValid  bool   `json:"token_valid,omitempty"`
+	// TokenValid has no omitempty: it is a state field whose false is
+	// information (invalid/expired token), not an absence to be dropped, and
+	// docs/COMMANDS.md promises token_valid:false in the failure JSON.
+	TokenValid  bool   `json:"token_valid"`
 	GitProtocol string `json:"git_protocol,omitempty"`
 	Token       string `json:"token,omitempty"`
 }
@@ -165,7 +171,19 @@ func statusRun(opts *StatusOptions) error {
 		if isAuthError {
 			fmt.Fprintf(opts.IO.ErrOut, "  %s Token is invalid or expired\n", cs.Red("✗"))
 			fmt.Fprintf(opts.IO.ErrOut, "\n")
-			fmt.Fprintf(opts.IO.ErrOut, "To re-authenticate, run: gc auth login\n")
+			// A token coming from the environment keeps overriding any local
+			// login, so suggesting a plain re-login would be a dead end. Point
+			// at the copy-paste remediation plans instead (issue 613).
+			if tokenSource == "GC_TOKEN" || tokenSource == "GITCODE_TOKEN" {
+				fmt.Fprint(opts.IO.ErrOut, envtoken.Warning(envtoken.Options{
+					EnvVars:    envtoken.SetEnvVars(os.LookupEnv),
+					Shell:      os.Getenv("SHELL"),
+					GOOS:       runtime.GOOS,
+					LoginSaved: false,
+				}))
+			} else {
+				fmt.Fprintf(opts.IO.ErrOut, "To re-authenticate, run: gc auth login\n")
+			}
 			return cmdutil.NewAuthError(fmt.Sprintf("token for %s is invalid or expired", opts.Hostname))
 		}
 		fmt.Fprintf(opts.IO.ErrOut, "  %s Token verification failed: %v\n", cs.Red("✗"), err)

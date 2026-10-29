@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -32,9 +33,11 @@ type DownloadOptions struct {
 	Assets  []string
 
 	// Flags
-	Repository string
-	Output     string
-	All        bool
+	Repository   string
+	Output       string
+	All          bool
+	Clobber      bool
+	SkipExisting bool
 }
 
 // NewCmdDownload creates the download command
@@ -89,6 +92,9 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
 	cmd.Flags().StringVarP(&opts.Output, "output", "o", ".", "Output directory")
 	cmd.Flags().BoolVarP(&opts.All, "all", "A", false, "Download source archives as well")
+	cmd.Flags().BoolVar(&opts.Clobber, "clobber", false, "Overwrite existing files")
+	cmd.Flags().BoolVar(&opts.SkipExisting, "skip-existing", false, "Skip downloading when a file of the same name exists")
+	cmd.MarkFlagsMutuallyExclusive("clobber", "skip-existing")
 
 	return cmd
 }
@@ -150,11 +156,38 @@ func downloadRun(opts *DownloadOptions) error {
 	// Filter assets
 	assets := release.Assets
 	if len(opts.Assets) > 0 {
-		assets = filterAssets(assets, opts.Assets)
-	}
-
-	// Filter out source archives unless --all is set
-	if !opts.All {
+		// Explicit names are exact intent: any miss is an error (the message
+		// lists the available names so recovery needs no extra round trip),
+		// and the named set bypasses the source-archive filter — naming an
+		// archive explicitly must download it even without --all.
+		matched := filterAssets(assets, opts.Assets)
+		requested := map[string]bool{}
+		for _, name := range opts.Assets {
+			requested[name] = true
+		}
+		matchedNames := map[string]bool{}
+		for _, asset := range matched {
+			matchedNames[asset.Name] = true
+		}
+		var missing []string
+		for name := range requested {
+			if !matchedNames[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			available := make([]string, 0, len(release.Assets))
+			for _, asset := range release.Assets {
+				available = append(available, asset.Name)
+			}
+			sort.Strings(available)
+			return fmt.Errorf("asset(s) not found in release %s: %s\navailable assets: %s",
+				release.TagName, strings.Join(missing, ", "), strings.Join(available, ", "))
+		}
+		assets = matched
+	} else if !opts.All {
+		// Filter out source archives unless --all is set (unnamed path only).
 		assets = filterSourceArchives(assets)
 	}
 
@@ -165,7 +198,7 @@ func downloadRun(opts *DownloadOptions) error {
 
 	// Download each asset
 	for _, asset := range assets {
-		err := downloadAsset(asset, opts.Output, downloadClient, cs, opts.IO.Out, client, owner, repo, release.TagName)
+		err := downloadAsset(asset, opts.Output, downloadClient, cs, opts.IO.Out, client, owner, repo, release.TagName, opts.Clobber, opts.SkipExisting)
 		if err != nil {
 			return err
 		}
@@ -174,11 +207,25 @@ func downloadRun(opts *DownloadOptions) error {
 	return nil
 }
 
-func downloadAsset(asset api.ReleaseAsset, outputDir string, httpClient *http.Client, cs *iostreams.ColorScheme, out io.Writer, client *api.Client, owner, repo, tag string) error {
+func downloadAsset(asset api.ReleaseAsset, outputDir string, httpClient *http.Client, cs *iostreams.ColorScheme, out io.Writer, client *api.Client, owner, repo, tag string, clobber, skipExisting bool) error {
 	// Validate and construct safe output path
 	outputPath, err := safeOutputPath(outputDir, asset.Name)
 	if err != nil {
 		return fmt.Errorf("invalid asset name '%s': %w", asset.Name, err)
+	}
+	// An existing file is the user's data: refuse by default (gh release
+	// download semantics) instead of silently clobbering it.
+	if info, statErr := os.Stat(outputPath); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf("output path is a directory: %s", outputPath)
+		}
+		if skipExisting {
+			fmt.Fprintf(out, "%s Skipped %s (exists)\n", cs.Yellow("!"), asset.Name)
+			return nil
+		}
+		if !clobber {
+			return fmt.Errorf("file already exists: %s (use --clobber to overwrite or --skip-existing to skip)", outputPath)
+		}
 	}
 	fmt.Fprintf(out, "%s Downloading %s...\n", cs.Blue("⬇"), asset.Name)
 

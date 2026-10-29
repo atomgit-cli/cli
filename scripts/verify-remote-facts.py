@@ -91,6 +91,11 @@ def main() -> int:
                 "pr.referenced_issues="
                 + ",".join(str(number) for number in inferred_issues)
             )
+            if args.issue is not None and inferred_issues and args.issue not in inferred_issues:
+                problems.append(
+                    f"--issue {args.issue} is not referenced by pr #{args.pr} "
+                    f"(referenced: {','.join(str(n) for n in sorted(inferred_issues))})"
+                )
             if args.issue is None and len(inferred_issues) == 1:
                 args.issue = inferred_issues[0]
                 issue = run_json(

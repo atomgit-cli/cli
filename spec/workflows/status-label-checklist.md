@@ -14,6 +14,10 @@
 - **risk**: 风险标签（low/medium/high）
 - **scope**: 范围标签（auth/repo/issue/pr/release/docs/testing）
 
+此外还有**第五维（如有则必须保留）**：
+
+- **sig**: 治理归属标签（`sig/<name>`，与 `spec/governance/sigs/<name>.yaml` 对应）。triage 时默认不打 `sig/*`，仅当需要 SIG 治理介入时打标（规则见 [sig-governance.md](../governance/sig-governance.md) §6.1）；一旦打上，后续每次 `--labels` 更新都必须携带，否则会被静默移除
+
 ## Issue 状态更新时机
 
 | 步骤 | 操作命令 | 必须添加 | 必须移除 |
@@ -25,7 +29,7 @@
 
 ## PR 状态更新时机
 
-**注意**：`gc pr edit --labels` 是替换操作，每次必须携带完整四维标签。
+**注意**：`gc pr edit --labels` 是替换操作，每次必须携带完整四维标签（已打 `sig/*` 时须一并携带）。
 
 | 步骤 | 操作命令 | 状态变化 |
 |------|----------|----------|
@@ -65,6 +69,8 @@ gc pr edit 456 -R owner/repo --labels status/self-checked,type/feature,risk/low,
 gc pr edit 456 -R owner/repo --labels status/ready-for-review,type/feature,risk/low,scope/pr
 gc pr edit 456 -R owner/repo --labels status/approved,type/feature,risk/low,scope/pr
 gc pr edit 456 -R owner/repo --labels status/merged,type/feature,risk/low,scope/pr
+# 已打 sig/* 标签时，状态推进必须携带（替换语义，遗漏即丢失）：
+gc pr edit 456 -R owner/repo --labels status/self-checked,type/feature,risk/low,scope/pr,sig/pr
 ```
 
 ---

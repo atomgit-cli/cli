@@ -1,8 +1,12 @@
 // Platform -> binary name resolution for the bundled GitCode CLI binaries.
 //
-// Mirrors the selection logic in gc_cli/wrapper.py (get_binary_name): Node's
-// process.platform/process.arch are mapped to the bundled binary file name
-// under npm/bin/platforms/.
+// Node's process.platform/process.arch are mapped to the bundled binary file
+// name under npm/bin/platforms/. This solves the same problem as
+// gc_cli/wrapper.py (get_binary_name), but the two do not mirror each other:
+// the Python side classifies the OS via uname, which already reports Linux on
+// OpenHarmony and needs no alias, while Node reports
+// process.platform === "openharmony" there and requires the explicit
+// openharmony mapping below.
 
 "use strict";
 
@@ -13,11 +17,24 @@ const ARCH_MAP = {
   arm64: "arm64",
 };
 
-// Node platform -> gc platform segment.
+// Node platform -> gc platform segment. OpenHarmony reuses the bundled
+// Linux binary: the OpenHarmony standard system runs the Linux kernel and
+// gc ships fully static binaries (CGO_ENABLED=0), so gc-linux-* runs there
+// unmodified. Node reports process.platform === "openharmony" on that OS.
 const PLATFORM_MAP = {
   linux: "linux",
+  openharmony: "linux",
   darwin: "darwin",
   win32: "windows",
+};
+
+// Platform aliases that only apply to a specific Node arch. The OpenHarmony
+// standard system is only shipped as arm64, so the openharmony alias maps
+// openharmony/arm64 -> linux/arm64 and nothing else; openharmony/x64 must
+// stay unsupported to keep behavior aligned with the documented support
+// matrix (npm/README.md, docs/INTRODUCTION.md).
+const PLATFORM_ARCH_RESTRICTIONS = {
+  openharmony: "arm64",
 };
 
 /**
@@ -28,10 +45,15 @@ const PLATFORM_MAP = {
 function resolveBinaryName(platform, arch) {
   const p = PLATFORM_MAP[platform];
   const a = ARCH_MAP[arch];
-  if (!p || !a || (p === "windows" && a !== "amd64")) {
+  const restrictedTo = PLATFORM_ARCH_RESTRICTIONS[platform];
+  if (
+    !p || !a ||
+    (restrictedTo && restrictedTo !== arch) ||
+    (p === "windows" && a !== "amd64")
+  ) {
     throw new Error(
       `unsupported platform/arch: ${platform}/${arch}; ` +
-        `supported: linux/x64, linux/arm64, darwin/x64, darwin/arm64, win32/x64`
+        `supported: linux/x64, linux/arm64, openharmony/arm64, darwin/x64, darwin/arm64, win32/x64`
     );
   }
   const name = `gc-${p}-${a}`;

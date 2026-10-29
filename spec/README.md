@@ -47,6 +47,8 @@ spec/
 │   ├── issue-workflow.md
 │   ├── pr-workflow.md
 │   ├── review-workflow.md
+│   ├── rfc-workflow.md
+│   ├── status-label-checklist.md
 │   └── test-workflow.md
 ├── delivery/                # 构建与交付
 │   ├── build-and-package.md
@@ -55,7 +57,9 @@ spec/
 └── governance/              # 治理与协作边界
     ├── docs-governance.md
     ├── source-of-truth-matrix.md
-    └── ai-collaboration.md
+    ├── ai-collaboration.md
+    ├── sig-governance.md
+    └── sigs/                # SIG 元数据（api / cli-ux / governance）
 ```
 
 ## 权威边界
@@ -83,7 +87,9 @@ spec/
 | [文档治理规范](./governance/docs-governance.md) | 文档分层、唯一真相源、AI 协作分层、分阶段实施方案 |
 | [真相源矩阵](./governance/source-of-truth-matrix.md) | 各类信息的事实来源、边界和判定优先级 |
 | [AI 协作规范](./governance/ai-collaboration.md) | Codex / Claude 入口关系、共享源与适配层边界 |
+| [SIG 治理规范](./governance/sig-governance.md) | SIG 角色与生命周期、决策机制、Agent 在 SIG 中的位置、sig/* label 与 scope/* 的关系 |
 | [开发工作流程](./workflows/development-workflow.md) | 完整流程、分支规范、禁止行为、检查清单 |
+| [RFC 工作流程](./workflows/rfc-workflow.md) | 大型设计提案（RFC）的触发判断、编号、流程与结果判定 |
 | [AI 本地开发流程](./workflows/ai-local-development-workflow.md) | 仓库内 AI 从接任务到本地验证到评审前的编排流程 |
 | [本地构建与打包规范](./delivery/build-and-package.md) | 标准构建命令、打包方式、产物边界和验证要求 |
 | [发布流程规范](./delivery/release-process.md) | 版本规则、发布步骤、release notes 和发布后验证 |
@@ -127,4 +133,4 @@ spec/
 | docs/PACKAGING.md | docs/ | 打包发布使用说明 |
 | issues-plan/PROGRESS.md | issues-plan/ | 项目阶段说明 |
 
-**最后更新**: 2026-06-02
+**最后更新**: 2026-09-17

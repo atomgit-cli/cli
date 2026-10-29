@@ -4,6 +4,7 @@ package update
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +20,13 @@ type result struct {
 	Message      string `json:"message"`
 }
 
+// checkNow and startDetached are seams for tests; production uses the
+// installupdate implementations.
+var (
+	checkNow      = installupdate.CheckNow
+	startDetached = installupdate.StartDetached
+)
+
 // NewCmdUpdate creates the update command.
 func NewCmdUpdate(_ *cmdutil.Factory) *cobra.Command {
 	var checkOnly bool
@@ -28,8 +36,11 @@ func NewCmdUpdate(_ *cmdutil.Factory) *cobra.Command {
 		Short: "Check for or apply an installation-channel update",
 		Long: `Update GitCode CLI through the channel that owns the current installation.
 
-Global npm wrappers update @gitcode-cli/cli directly. npm-bootstrap installs
-schedule an atomic replacement after the current process exits. Other package
+Global npm wrappers update the installed npm coordinate (atomgit-cli,
+@atomgit-cli/cli, or @gitcode-cli/cli) directly. npm-bootstrap installs run
+a foreground update check first: when a newer stable version exists, the
+atomic replacement is scheduled after the current process exits; otherwise
+the current version is reported and nothing is scheduled. Other package
 managers remain user-controlled and are never invoked or removed implicitly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manifest, err := installupdate.LoadBootstrapManifest()
@@ -37,21 +48,10 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 				if checkOnly {
 					return installupdate.RunCheck(manifest, jsonOutput, cmd.OutOrStdout(), cmd.ErrOrStderr())
 				}
-				if err := installupdate.StartDetached(manifest, true); err != nil {
-					return err
-				}
-				return writeResult(cmd, jsonOutput, result{
-					Status:       "scheduled",
-					Distribution: "npm-bootstrap",
-					Current:      manifest.Version,
-					Message:      "Update scheduled; the new stable version will be used on the next launch.",
-				})
+				return runBootstrapUpdate(cmd, manifest, jsonOutput)
 			}
 
-			distribution := os.Getenv("GITCODE_CLI_DISTRIBUTION")
-			if distribution == "" {
-				distribution = "archive-or-source"
-			}
+			distribution := detectDistribution()
 			message := managerMessage(distribution)
 			return writeResult(cmd, jsonOutput, result{Status: "manual", Distribution: distribution, Message: message})
 		},
@@ -61,16 +61,94 @@ managers remain user-controlled and are never invoked or removed implicitly.`,
 	return cmd
 }
 
+// runBootstrapUpdate checks the registry in the foreground, then schedules the
+// detached replacement only when a newer stable version exists. Check failures
+// surface the helper's error message with a non-zero exit code.
+func runBootstrapUpdate(cmd *cobra.Command, manifest *installupdate.Manifest, jsonOutput bool) error {
+	check, err := checkNow(manifest)
+	if err != nil {
+		writeFailure(cmd, manifest, err, jsonOutput)
+		return err
+	}
+	if check.Status == "available" {
+		if err := startDetached(manifest, true); err != nil {
+			writeFailure(cmd, manifest, err, jsonOutput)
+			return err
+		}
+		return writeResult(cmd, jsonOutput, result{
+			Status:       "scheduled",
+			Distribution: "npm-bootstrap",
+			Current:      manifest.Version,
+			Latest:       check.Latest,
+			Message:      "Update scheduled; the new stable version will be used on the next launch.",
+		})
+	}
+	return writeResult(cmd, jsonOutput, result{
+		Status:       check.Status,
+		Distribution: "npm-bootstrap",
+		Current:      manifest.Version,
+		Latest:       check.Latest,
+		Message:      check.Message,
+	})
+}
+
+// writeFailure emits the JSON error object for --json consumers; text mode
+// relies on the returned error so the exit code stays non-zero.
+func writeFailure(cmd *cobra.Command, manifest *installupdate.Manifest, failure error, jsonOutput bool) {
+	if !jsonOutput {
+		return
+	}
+	_ = writeResult(cmd, true, result{
+		Status:       "error",
+		Distribution: "npm-bootstrap",
+		Current:      manifest.Version,
+		Message:      failure.Error(),
+	})
+}
+
+// detectDistribution resolves the installation channel from the process
+// environment and the running binary's location so channel-specific upgrade
+// guidance (Homebrew, deb/rpm, npm) reaches users who do not run through an
+// npm wrapper.
+func detectDistribution() string {
+	binary := os.Getenv("GITCODE_CLI_BINARY")
+	if binary == "" {
+		if resolved, err := os.Executable(); err == nil {
+			binary = resolved
+		}
+	}
+	env := make(map[string]string)
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			env[strings.ToUpper(key)] = value
+		}
+	}
+	return installupdate.DetectDistribution(env, binary)
+}
+
 func managerMessage(distribution string) string {
 	switch distribution {
 	case "pypi":
 		return "This installation is managed by Python; upgrade it explicitly with pipx or pip in its environment."
+	case "uv":
+		// The tool name is the install requirement (gitcode-cli); a
+		// `uv tool install --from gitcode-cli <alias>` install would need
+		// its custom name.
+		return "This installation is managed by uv; run \"uv tool upgrade gitcode-cli\"."
 	case "homebrew":
 		return "This installation is managed by Homebrew; run brew upgrade gc."
 	case "deb", "rpm", "system-package":
 		return "This installation is managed by the operating-system package manager; use apt, dnf, or rpm explicitly."
-	case "npm":
+	case "npm", "pnpm", "npm-local":
+		// The npm wrapper intercepts "update" itself; if the Go binary is
+		// reached with these channels, the wrapper (which owns the npm
+		// updater and its pnpm refusal guidance) is still the right entry.
 		return "Run update through the npm gitcode wrapper so it can safely replace its bundled binary."
+	case "npm-bootstrap":
+		// A damaged manifest (missing targetDir/helper) reaches the Go binary
+		// directly; the bootstrap layout is repaired by rerunning the install.
+		return `This installation was bootstrapped by npm; repair it by rerunning "npx --yes --package=<coordinate>@latest gitcode install".`
 	default:
 		return "Download and verify a newer release archive, or rebuild from the desired source tag."
 	}

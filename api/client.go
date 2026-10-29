@@ -17,7 +17,19 @@ const (
 	DefaultHost = "api.gitcode.com"
 	// DefaultAPIVersion is the default API version
 	DefaultAPIVersion = "v5"
+	// WebAPIHost is the host for GitCode web API (v2) endpoints such as the
+	// Actions plugin directory. It is separate from the default REST host and
+	// is whitelisted so that RawRESTToHost can target it safely.
+	WebAPIHost = "web-api.gitcode.com"
 )
+
+// allowedGitCodeHosts is the whitelist of GitCode API hosts that may be
+// targeted explicitly via RawRESTToHost. This preserves SSRF protection for
+// arbitrary hosts while enabling access to known GitCode API surfaces.
+var allowedGitCodeHosts = map[string]bool{
+	DefaultHost: true,
+	WebAPIHost:  true,
+}
 
 // Client is a GitCode API client
 type Client struct {
@@ -174,6 +186,69 @@ func (c *Client) RawREST(method, endpoint string, body io.Reader, headers map[st
 	}
 	if resp.StatusCode >= 400 {
 		return nil, decodeAPIError(respBody, resp.StatusCode, resp.Status)
+	}
+
+	return &RawResponse{
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header.Clone(),
+		Body:       respBody,
+	}, nil
+}
+
+// RawRESTToHost performs a REST request to a specific GitCode API host.
+// The host must be in the allowedGitCodeHosts whitelist, which preserves
+// SSRF protection for arbitrary hosts while enabling access to known GitCode
+// API surfaces that live on separate hosts (e.g. web-api.gitcode.com).
+// The endpoint should be a relative path beginning with "/".
+func (c *Client) RawRESTToHost(method, host, endpoint string, body io.Reader, headers map[string]string) (*RawResponse, error) {
+	if !allowedGitCodeHosts[host] {
+		return nil, fmt.Errorf("host %s is not a known GitCode API host", host)
+	}
+	if !strings.HasPrefix(endpoint, "/") {
+		endpoint = "/" + endpoint
+	}
+	reqURL := fmt.Sprintf("https://%s%s", host, endpoint)
+	req, err := http.NewRequest(strings.ToUpper(method), reqURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(key) != "" {
+			req.Header.Set(strings.TrimSpace(key), value)
+		}
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.token))
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		err := decodeAPIError(respBody, resp.StatusCode, resp.Status)
+		// Endpoints on the web API host authenticate with the browser session
+		// JWT, so the generic "run gc auth login" advice would send the user
+		// after a credential that cannot work here. Replace that advice instead
+		// of appending a second, contradictory instruction.
+		if resp.StatusCode == http.StatusUnauthorized && host == WebAPIHost {
+			if apiErr, ok := err.(*APIError); ok {
+				apiErr.Guidance = fmt.Sprintf("The %s web API rejected the credential. This host authenticates with the gitcode.com web session JWT, not a classic personal access token: refresh gitcode.com, run copy(localStorage.getItem('access_token')) in the browser Console, and pass the value with --with-token.", host)
+				return nil, apiErr
+			}
+		}
+		return nil, err
 	}
 
 	return &RawResponse{
@@ -347,12 +422,15 @@ func (c *Client) PatchForm(path string, formValues url.Values, response interfac
 	return nil
 }
 
-// UploadToURL uploads a file to an external URL with custom headers
-func (c *Client) UploadToURL(uploadURL, filename string, content []byte, contentType string, headers map[string]string) error {
-	req, err := http.NewRequest("PUT", uploadURL, bytes.NewReader(content))
+// UploadToURL uploads a file to an external URL with custom headers. The
+// content streams from the reader; contentLength is set explicitly because
+// presigned upload URLs (S3/OSS style) reject chunked PUTs without a length.
+func (c *Client) UploadToURL(uploadURL, filename string, content io.Reader, contentLength int64, contentType string, headers map[string]string) error {
+	req, err := http.NewRequest("PUT", uploadURL, content)
 	if err != nil {
 		return fmt.Errorf("failed to create upload request: %w", err)
 	}
+	req.ContentLength = contentLength
 
 	// Set Content-Type
 	req.Header.Set("Content-Type", contentType)
@@ -442,6 +520,12 @@ type APIError struct {
 	ErrorMessage  string `json:"error_message"`
 	ErrorName     string `json:"error"`
 	ErrorCodeName string `json:"error_code_name"`
+
+	// Guidance replaces the status-specific guidance that Error appends. A
+	// caller sets it when the generic advice would be wrong for the endpoint,
+	// for example the personal-access-token hint on a 401 from a host that
+	// authenticates with a browser session JWT.
+	Guidance string `json:"-"`
 }
 
 func (e *APIError) Error() string {
@@ -452,6 +536,12 @@ func (e *APIError) Error() string {
 		msg = e.ErrorMessage
 	} else {
 		msg = "unknown error"
+	}
+
+	// Caller-supplied guidance replaces the generic status guidance so the two
+	// never contradict each other.
+	if e.Guidance != "" {
+		return fmt.Sprintf("HTTP %d: %s\n\n%s", e.StatusCode, msg, e.Guidance)
 	}
 
 	// Add actionable guidance for permission errors

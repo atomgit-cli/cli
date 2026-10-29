@@ -1,18 +1,18 @@
 name: "gc"
 arch: "arm64"
 platform: "linux"
-version: "0.12.0"
+version: "0.15.0"
 section: "default"
 priority: "extra"
-maintainer: "gitcode-cli contributors"
+maintainer: "atomgit-cli contributors"
 description: |
   GitCode CLI - Command line tool for GitCode
   Provides convenient access to GitCode features including:
   - Authentication management
   - Repository operations
   - Issue and PR management
-vendor: "gitcode-cli"
-homepage: "https://gitcode.com/gitcode-cli/cli"
+vendor: "atomgit-cli"
+homepage: "https://gitcode.com/atomgit-cli/cli"
 license: "MIT"
 scripts:
   postinstall: ./build/scripts/postinstall.sh

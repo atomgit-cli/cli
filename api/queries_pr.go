@@ -723,3 +723,33 @@ func AddPRTesters(client *Client, owner, repo string, number int, users []string
 func RemovePRTesters(client *Client, owner, repo string, number int, users []string) error {
 	return client.REST("DELETE", escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/testers", &TesterRequest{Testers: strings.Join(users, ",")}, nil)
 }
+
+// PRMerger represents a user set as a pull request merger. Field shapes follow
+// the official GitCode OpenAPI for PUT /repos/{owner}/{repo}/pulls/{number}/mergers.
+type PRMerger struct {
+	ID        int    `json:"id"`
+	Login     string `json:"login"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	ObjectID  string `json:"object_id"`
+}
+
+// MergerRequest is the body for setting PR mergers. Per the official OpenAPI
+// the mergers field is a comma-separated list of user login names.
+type MergerRequest struct {
+	Mergers string `json:"mergers"`
+}
+
+// SetPRMergers sets the mergers of a pull request, replacing any previous set.
+//
+// It calls PUT /repos/{owner}/{repo}/pulls/{number}/mergers with a body of
+// {"mergers": "user1,user2"} and returns the resulting merger list.
+func SetPRMergers(client *Client, owner, repo string, number int, users []string) ([]*PRMerger, error) {
+	var mergers []*PRMerger
+	err := client.Put(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/mergers",
+		&MergerRequest{Mergers: strings.Join(users, ",")}, &mergers)
+	if err != nil {
+		return nil, err
+	}
+	return mergers, nil
+}

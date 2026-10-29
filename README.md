@@ -1,12 +1,12 @@
-# GitCode CLI
+# AtomGit CLI（原 GitCode CLI）
 
 [![AI 操作指南](https://img.shields.io/badge/📖_使用_AI_操作_GitCode_指南-点击查看-FF6B6B?style=for-the-badge)](./docs/AI-GUIDE.md)
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-latest-blue)](https://gitcode.com/gitcode-cli/cli/releases)
+[![Release](https://img.shields.io/badge/Release-latest-blue)](https://gitcode.com/atomgit-cli/cli/releases)
 
-GitCode CLI 把仓库、Issue、PR、Release 和 Actions 带回终端，让开发者减少页面切换，也让脚本与 AI 获得结构化、可审计、带安全边界的 GitCode 执行入口。
+AtomGit CLI（原 GitCode CLI）把仓库、Issue、PR、Release 和 Actions 带回终端，让开发者减少页面切换，也让脚本与 AI 获得结构化、可审计、带安全边界的 GitCode 执行入口。
 
 [快速了解核心价值与应用场景，并在五分钟内开始使用](./docs/INTRODUCTION.md)。
 
@@ -38,33 +38,39 @@ GitCode CLI 把仓库、Issue、PR、Release 和 Actions 带回终端，让开�
 
 ## 安装
 
-推荐只让一个全局安装渠道拥有 `gc` / `gitcode`。已安装 Node.js/npm 的 Windows、Linux、macOS 与 AI 环境优先使用下方 npm bootstrap；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。CI 建议固定版本并校验 checksum。
+推荐只让一个全局安装渠道拥有 `gc` / `gitcode`。已安装 Node.js/npm 的 Windows、Linux、macOS、OpenHarmony（arm64）与 AI 环境优先使用下方 npm bootstrap；没有 Node.js 时再选择 Homebrew、DEB/RPM 或隔离的 Python wheel。CI 建议固定版本并校验 checksum。
 
 ### 推荐：npm 一行 bootstrap（跨平台）
 
-已安装 Node.js/npm 时，安装或升级 CLI 的首选入口是：
+已安装 Node.js/npm 时，安装或升级 CLI 的首选入口（推荐坐标 `atomgit-cli`）：
 
 ```bash
-npx -y @gitcode-cli/cli@latest install
+npx -y atomgit-cli@latest install
 gitcode version
 ```
+
+等价坐标：`npx -y @gitcode-cli/cli@latest install`（与 `@atomgit-cli/cli` 并行等价，旧坐标长期可用，存量安装无需迁移）。npm 上的裸名 `gitcode-cli` 为第三方无关项目，请勿安装。
 
 短命令适合用户主目录等可信环境，会继承当前目录与用户的 npm 配置。CI、审计、不可信项目目录或自定义 npm registry 环境请使用完整加固命令：
 
 ```bash
-npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install
+npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest install
 ```
+
+（scoped 坐标加固形式：`npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest install`）
 
 CI、审计或版本复现可固定版本：
 
 ```bash
-npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@0.12.0 install
+npx --yes --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@0.15.0 install
 ```
 
-不要使用 `npm i @gitcode-cli/cli` 或 `npm install @gitcode-cli/cli` 安装全局 CLI；这两条命令只会把包加入当前项目的 `node_modules`，不会更新 PATH 中已有的 `gitcode`。需要由 npm global prefix 管理入口时，可改用：
+（scoped 坐标锁定形式：`npx --yes --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@0.15.0 install`）
+
+不要使用 `npm i atomgit-cli` 或 `npm install atomgit-cli` 安装全局 CLI；这两条命令只会把包加入当前项目的 `node_modules`，不会更新 PATH 中已有的 `gitcode`。需要由 npm global prefix 管理入口时，可改用：
 
 ```bash
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org --@gitcode-cli:registry=https://registry.npmjs.org @gitcode-cli/cli@latest
+npm install -g --ignore-scripts --registry=https://registry.npmjs.org atomgit-cli@latest
 gitcode version
 ```
 
@@ -88,7 +94,7 @@ gitcode doctor install --json
 
 ```bash
 # 克隆仓库（需要 git clone 才能获取版本信息）
-git clone https://gitcode.com/gitcode-cli/cli.git
+git clone https://gitcode.com/atomgit-cli/cli.git
 cd cli
 
 # 方式一：使用 go build（推荐）
@@ -114,10 +120,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 # 从 Releases 下载 .deb 包
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc_0.12.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_0.15.0_amd64.deb
 
 # 安装
-sudo dpkg -i gc_0.12.0_amd64.deb
+sudo dpkg -i gc_0.15.0_amd64.deb
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -126,10 +132,10 @@ DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
 
 ```bash
 # 从 Releases 下载 .rpm 包
-wget https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gc-0.12.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc-0.15.0-1.x86_64.rpm
 
 # 安装
-sudo rpm -i gc-0.12.0-1.x86_64.rpm
+sudo rpm -i gc-0.15.0-1.x86_64.rpm
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -145,7 +151,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 安装（一行命令）
-pip install https://gitcode.com/gitcode-cli/cli/releases/download/v0.12.0/gitcode_cli-0.12.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gitcode_cli-0.15.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode，避免 gc 被内置 Get-Content 别名覆盖
 gitcode version
@@ -175,7 +181,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 固定版本安装，避免 PyPI 尚未同步时安装旧版本
-python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.12.0
+python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.15.0
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
@@ -190,7 +196,7 @@ gitcode version
 | Linux x64 | `gc_linux_amd64` |
 | Linux ARM64 | `gc_linux_arm64` |
 
-下载地址: https://gitcode.com/gitcode-cli/cli/releases
+下载地址: https://gitcode.com/atomgit-cli/cli/releases
 
 下载后赋予可执行权限，并放到 PATH 目录：
 
@@ -232,7 +238,7 @@ unset GC_TOKEN
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install gitcode-cli/homebrew-tap/gc
+brew install atomgit-cli/homebrew-tap/gc
 ```
 
 更新到最新版本：
@@ -242,7 +248,7 @@ brew upgrade gc
 ```
 
 shell 补全（bash/zsh/fish）随安装自动配置，无需额外操作。
-Homebrew 同时提供 `gc` 与 `gitcode`；升级后可运行 `gitcode doctor install` 检查是否仍被 pip/npm 旧入口遮蔽。
+Homebrew 同时提供 `gc` 与 `gitcode`；升级后可运行 `gitcode doctor install` 检查是否仍被 pip/npm 旧入口遮蔽。渠道检测会先解析 `gc`/`gitcode` 的软链再匹配 Homebrew 布局（Apple Silicon `/opt/homebrew`、Intel Mac `/usr/local`、Linuxbrew `/home/linuxbrew/.linuxbrew`），bin 目录软链与 Cellar 实路径均可识别。
 
 ### npm 更新与 PATH 诊断
 
@@ -390,6 +396,12 @@ gitcode precommit check
 # 查看流水线运行记录
 gitcode actions run list -R owner/repo --status FAILED
 
+# 启用单个仓库的 Actions（交互确认）
+gitcode actions setting enable -R owner/repo
+
+# 启用组织下全部仓库的 Actions（非交互）
+gitcode actions setting enable --org my-org --yes
+
 # 查看流水线运行详情
 gitcode actions run view <run-id> -R owner/repo
 
@@ -461,15 +473,15 @@ source ~/.config/fish/config.fish
 补充说明：
 
 - `docs/AI-GUIDE.md` 只服务外部项目通过 AI 使用 `gitcode`（或源码构建的 `gc`）
-- gitcode-cli 仓库内部 AI 开发请看 `AGENTS.md`、`CLAUDE.md` 和 `spec/workflows/ai-local-development-workflow.md`
+- atomgit-cli 仓库内部 AI 开发请看 `AGENTS.md`、`CLAUDE.md` 和 `spec/workflows/ai-local-development-workflow.md`
 - `issues-plan/PROGRESS.md` 只作为阶段说明，不作为单个 issue / PR 的实时事实依据
 
 ## 开发
 
 ```bash
 # 克隆仓库
-git clone https://gitcode.com/gitcode-cli/cli.git
-cd gitcode-cli
+git clone https://gitcode.com/atomgit-cli/cli.git
+cd cli
 
 # 安装依赖
 make deps
@@ -503,4 +515,4 @@ make run
 
 - [GitCode](https://gitcode.com) - GitCode 平台
 - [API 文档](https://docs.gitcode.com/docs/apis/) - GitCode API 参考
-- [问题反馈](https://gitcode.com/gitcode-cli/cli/issues) - 提交 Bug 或建议
+- [问题反馈](https://gitcode.com/atomgit-cli/cli/issues) - 提交 Bug 或建议

@@ -37,7 +37,7 @@ func NewCmdVersion(ver, commit, date string, commandName ...string) *cobra.Comma
 					Version: ver,
 					Commit:  commit,
 					Built:   date,
-					URL:     "https://gitcode.com/gitcode-cli/cli",
+					URL:     "https://gitcode.com/atomgit-cli/cli",
 				}
 				return cmdutil.WriteJSON(out, info)
 			}
@@ -45,7 +45,7 @@ func NewCmdVersion(ver, commit, date string, commandName ...string) *cobra.Comma
 			fmt.Fprintf(out, "%s version %s\n", displayName, ver)
 			fmt.Fprintf(out, "  commit: %s\n", commit)
 			fmt.Fprintf(out, "  built:  %s\n", date)
-			fmt.Fprintln(out, "https://gitcode.com/gitcode-cli/cli")
+			fmt.Fprintln(out, "https://gitcode.com/atomgit-cli/cli")
 			return nil
 		},
 	}

@@ -15,3 +15,15 @@ tmp_empty_config="$(mktemp -d)"
 trap 'rm -rf "$tmp_empty_config"' RETURN
 run_expect_status unauth_out 4 env GC_CONFIG_DIR="$tmp_empty_config" GC_TOKEN= GITCODE_TOKEN= "$GC_BIN" pr review 1 -R "$SYSTEM_REPO" --approve
 assert_contains "$unauth_out" "not authenticated"
+
+# Mirrors the regression-core.sh "Auth Env Override Guidance" section: with a
+# stub env token, auth status must print the remediation plans instead of the
+# dead-end re-login advice. Reuses the empty config dir above (read-only, so
+# sharing is safe) and keeps the file's single RETURN trap intact — bash
+# replaces same-signal traps, so a second trap would leak the first dir.
+log "auth: env override guidance"
+run_expect_status env_guidance_out 4 env GC_CONFIG_DIR="$tmp_empty_config" GC_HOST= GC_TOKEN="regression-stub-not-a-real-token" GITCODE_TOKEN= "$GC_BIN" auth status
+assert_contains "$env_guidance_out" "仅重新登录不会生效"
+assert_contains "$env_guidance_out" "gc auth login"
+assert_contains "$env_guidance_out" "gc auth status"
+assert_not_contains "$env_guidance_out" "To re-authenticate, run: gc auth login"
