@@ -7,7 +7,7 @@
 
 ## 概述（Summary）
 
-为 GitCode CLI 的 PR 交付链路增加一组可失败、可回滚、可审计的 CI 硬门禁。门禁覆盖覆盖率防回退、真实命令只读验证、跨平台构建证据、新代码严格 lint 和 PR 流程契约，同时继续保留独立执行主体评审与 `risk/high` 人工最终确认。
+为 GitCode CLI 的 PR 交付链路增加一组可失败、可回滚、可审计的 CI 硬门禁。门禁覆盖覆盖率防回退、跨平台构建证据、新代码严格 lint 和 PR 流程契约，同时继续保留独立执行主体评审与 `risk/high` 人工最终确认。
 
 该 RFC 只提出设计。任何 `spec/` 规则变更或 CI workflow 变更必须在 RFC 接受后通过独立 PR 落地。
 
@@ -24,12 +24,12 @@
 但当前仍有几类问题无法在普通 PR 中被机器稳定拦截：
 
 1. **覆盖率要求没有失败门禁**。规范要求新功能覆盖率不低于 70%、核心模块不低于 80%，但两个 CI 只生成和上传覆盖率，未比较阈值。
-2. **真实命令验证不在 CI 中**。`tests/system` 使用 `system` build tag，普通 `go test ./...` 不执行；真实 API 与命令输出回归只能依赖本地自觉。
+2. **认证相关真实命令验证不在 CI 中**。`tests/system` 使用 `system` build tag，普通 `go test ./...` 不执行；真实 API 与命令输出回归目前依赖本地或独立环境验证。
 3. **跨平台验证不是强约束**。当前规则是“有 GitHub 镜像 PR 时验证”，导致一个 GitCode PR 可以只有 Linux 证据就进入评审。
 4. **静态检查存在人为降级**。CI 显式禁用 `errcheck` 和 `staticcheck`。
 5. **PR 证据链缺少机器校验**。作者自检、标签、CI run/head SHA、文档同步等关键信息仍依赖流程自觉，AI 可以提交看起来完整但缺少证据的 PR。
 
-不处理的代价是：AI 交付规模继续扩大后，本地流程可被跳过，CI 只证明“测试运行过”而不是“质量没有回退”；真实平台行为、覆盖率回归和跨平台兼容问题会推迟到评审或发布阶段才暴露。
+不处理的代价是：AI 交付规模继续扩大后，本地流程可被跳过，CI 只证明“测试运行过”而不是“质量没有回退”；覆盖率回归和跨平台兼容问题会推迟到评审或发布阶段才暴露。真实命令验证仍不在普通 PR CI 中，这是本阶段明确接受的残余风险。
 
 ## 设计方案（Proposed Design）
 
@@ -61,25 +61,26 @@ bash scripts/check-coverage.sh
 
 两个 CI 的调用点继续由 `tests/contracts/ci_workflow_test.go` 和 `tests/contracts/mirror_workflow_test.go` 钉住，防止后续静默删除。
 
-### 2. Read-only system test job
+### 2. Authenticated system tests：暂缓
 
-在 GitCode CI 增加 `system-test-read` job，只运行真实 GitCode 命令的只读路径：
+本阶段不把需要认证的真实 GitCode 命令测试加入普通 PR CI。
 
-```bash
-go build -o ./gc ./cmd/gc
-./scripts/regression-core.sh
-go test -tags=system ./tests/system -run TestReadScripts
-```
+`tests/system` 继续作为本地或独立环境中的只读验证入口；写路径继续 opt-in。CI 的常规 `go test ./...` 仍不触发远端认证请求。
 
-依赖：
+暂缓原因：
 
-- 一个低权限 CI bot 账号
-- 一个只能读取 `infra-test/*` 的最小权限 Token
-- Token 通过 CI Secret 注入，不在仓库中保存
-- Job 不设置 `GC_SYSTEM_WRITE`
-- 默认不输出详细命令参数；失败时只输出必要错误
+- GitCode 当前没有公开的 OIDC 机制，用于 CI 向 GitCode API 兑换短时跨仓库 Token
+- `ATOMGIT_TOKEN` 适合当前仓库级操作，但访问 `infra-test/*` 的跨仓库能力尚未确认
+- 专用 bot 的长期 PAT 虽然可降低影响面，但仍存在泄露、轮换和权限颗粒度不清的问题
+- fork PR Secret 隔离需要平台行为实测，不应在未验证时作为 mandatory 门禁
 
-写路径继续人工或独立环境 opt-in，不进入普通 PR CI。
+后续重新评估条件：
+
+1. GitCode 提供组织级或仓库级 short-lived credential
+2. 平台确认 `ATOMGIT_TOKEN` 可以受控访问指定 `infra-test/*`
+3. 专用 CI runner 或 vault 支持自动签发、过期和撤销认证
+
+在满足上述条件前，PR CI 不新增认证类 job，也不引入长期个人 Token。
 
 ### 3. Cross-platform evidence gate
 
@@ -142,8 +143,8 @@ golangci-lint run \
 1. **立即启用全局严格覆盖率下限**
    优点是实现简单；缺点是大量历史包低于 70%，会产生大范围阻塞，或迫使用大量无意义测试提高指标。因此选择 baseline 防回退方案。
 
-2. **把 write-path 系统测试也放入 PR CI**
-   优点是覆盖最完整；缺点是会真实写远端资源、需要更高权限，且并发 PR 容易互相干扰。因此只进只读路径。
+2. **使用专用 bot PAT 把认证系统测试放入 PR CI**
+   优点是能够提供真实命令的机器证据；缺点是长期 Secret 有泄露风险、当前 scope 是否可限制到具体测试仓库尚未确认，且平台跨仓库访问需要单独验证。因此本阶段放弃，改为暂缓。
 
 3. **立即全量启用 `errcheck` 和 `staticcheck`**
    优点是一次清理干净；缺点是历史问题会导致本 RFC 实施前的大规模修复，偏离“先保护新增代码”的目标。
@@ -152,16 +153,16 @@ golangci-lint run \
    优点是使用现成服务；缺点是 GitCode 原生 CI 仍无本地门禁，且门槛规则不能与仓库基线版本化。因此保留 Codecov 上传，同时增加仓库内脚本门禁。
 
 5. **不做任何变化**
-   优点是零实施成本；缺点是真实命令验证和覆盖率回退仍可被静默绕过，AI 交付质量依赖代理自觉而非机器证据。
+   优点是零实施成本；缺点是覆盖率回退、跨平台证据缺失和 PR 证据不完整仍可被静默绕过。
 
 ## 缺点与风险（Drawbacks）
 
-- CI 运行时间增加，尤其 system-test-read 和 coverage 解析会延长反馈周期
-- CI bot Token 是新的凭证面，必须严格控制权限和日志输出
+- CI 运行时间增加，尤其 coverage 解析和新增契约检查会延长反馈周期
 - baseline 文件可能引发“为更新 baseline 而更新”的博弈，需要评审约定
 - `--new-from-rev` 的 PR 合并、rebase 或 GitHub/GitCode diff 语义需要验证
 - 跨平台强约束会增加 PR 准备成本；镜像仓同步失败时可能成为阻塞点
 - 新门禁可能产生环境偶发失败，需要区分“代码失败”与“平台失败”
+- 认证相关真实命令验证仍不在 CI，这是本阶段明确保留的未覆盖项
 
 ## 回滚策略（Rollout / Rollback）
 
@@ -175,13 +176,12 @@ golangci-lint run \
 
 - 单次失败：允许记录平台偶发原因后有限重试
 - 系统性误报：将对应 job 降回 soft mode
-- 凭证风险：立即轮换并撤销 CI bot Token
 - 设计失效：关闭 RFC 追踪 issue，删除新增 job 和脚本，保留原有 CI 行为
 
 ## 未决问题（Unresolved Questions）
 
 - GitCode Actions 是否具备 macOS/Windows runner 或等价矩阵能力
-- CI bot 的 Token scope 在平台侧具体如何最小化
+- GitCode 何时提供可安全用于 `infra-test/*` 的短期认证能力
 - GitHub 镜像 PR 应由人工创建、自动同步还是通过 GitCode workflow 创建
 - baseline 文件按包、按目录还是按文件维护最合适
 - `pr-contract` 的平台 API 是否稳定支持读取 PR body、labels 与 CI 状态
@@ -190,11 +190,12 @@ golangci-lint run \
 ## 实施计划（Implementation Plan）
 
 1. PR A：新增 coverage baseline 与共享检查脚本，并更新 CI 契约测试
-2. PR B：新增只读 system-test job 与最小权限 CI bot 配置
-3. PR C：跨平台证据规则落地，先写入流程文档，再由 PR contract 校验
-4. PR D：新增 `lint-new` job，验证 `--new-from-rev`
-5. PR E：新增 PR contract job，并更新 AI 本地开发流程文档
-6. PR F：soft mode 数据观察与误报修复
-7. PR G：所有新增门禁转为 mandatory，并同步 `spec/` 正式规则
+2. PR B：跨平台证据规则落地，先写入流程文档，再由 PR contract 校验
+3. PR C：新增 `lint-new` job，验证 `--new-from-rev`
+4. PR D：新增 PR contract job，并更新 AI 本地开发流程文档
+5. PR E：soft mode 数据观察与误报修复
+6. PR F：所有新增门禁转为 mandatory，并同步 `spec/` 正式规则
+
+认证相关真实命令测试不进入第一阶段实施计划；在平台认证能力成熟后，通过新的 RFC 或追踪 issue 重新评估。
 
 RFC 接受不自动实施；实施由维护者或认领者按上述顺序推进，作者不强制自己实施。
