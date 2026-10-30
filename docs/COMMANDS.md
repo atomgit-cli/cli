@@ -551,12 +551,15 @@ gc repo pr-settings update --no-self-merge -R owner/repo
 # 设置合并模式为 fast-forward
 gc repo pr-settings update --merge-method ff -R owner/repo
 
+# 合并后关闭 PR 引用的 issue
+gc repo pr-settings update --close-issue-on-merge -R owner/repo
+
 # JSON 输出
 gc repo pr-settings update --pipeline-required -R owner/repo --json
 ```
 
 说明：
-- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--merge-method`（merge/rebase_merge/ff）。
+- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--close-issue-on-merge`（可用 `--close-issue-on-merge=false` 关闭）、`--merge-method`（merge/rebase_merge/ff）。
 - 至少提供一个字段。
 - `--json` 输出更新后的完整设置对象。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 仓库不存在；`4` 认证错误。

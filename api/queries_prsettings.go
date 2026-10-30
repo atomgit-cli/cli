@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // PRSettings represents the pull request settings for a repository.
 type PRSettings struct {
 	ApprovalRequiredReviewersEnable        bool   `json:"approval_required_reviewers_enable"`
@@ -26,6 +28,39 @@ type PRSettings struct {
 	LiteMergeRequestPrefixTitle            string `json:"lite_merge_request_prefix_title"`
 	CloseIssueWhenMrMerged                 bool   `json:"close_issue_when_mr_merged"`
 	ForbiddenPrRelatedIssueClosed          bool   `json:"forbidden_pr_related_issue_closed"`
+}
+
+// UnmarshalJSON accepts every response shape served for
+// /repos/{owner}/{repo}/pull_request_settings. GitCode nests most merge
+// gate fields inside a "merge_request_setting" object and repeats only a few
+// of them at the top level; older or mirrored shapes flatten every field, and
+// mixed shapes split fields between the two places. Decoding any of those
+// into the flat struct above would silently leave the misplaced fields at
+// their zero value, so the flat fields are decoded first and the wrapped
+// fields are overlaid on top. A field carried in both places keeps the
+// wrapped value.
+func (s *PRSettings) UnmarshalJSON(data []byte) error {
+	type plain PRSettings
+
+	var base plain
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+
+	var wrapper struct {
+		MergeRequestSetting json.RawMessage `json:"merge_request_setting"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return err
+	}
+	if len(wrapper.MergeRequestSetting) > 0 && string(wrapper.MergeRequestSetting) != "null" {
+		if err := json.Unmarshal(wrapper.MergeRequestSetting, &base); err != nil {
+			return err
+		}
+	}
+
+	*s = PRSettings(base)
+	return nil
 }
 
 // GetPRSettings fetches the pull request settings for a repository.
