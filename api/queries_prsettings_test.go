@@ -152,3 +152,31 @@ func TestGetPRSettingsNullWrapperKeepsFlatFields(t *testing.T) {
 		t.Errorf("MergeMethod = %q, want %q", settings.MergeMethod, "ff")
 	}
 }
+
+// The decoder declares that a field carried in both the wrapper and the top
+// level keeps the wrapped value. Pin that contract so a decode-order swap
+// cannot flip the winner silently.
+func TestGetPRSettingsConflictKeepsWrappedValue(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"merge_request_setting": {
+				"can_force_merge": true,
+				"close_issue_when_mr_merged": true
+			},
+			"can_force_merge": false,
+			"close_issue_when_mr_merged": false
+		}`))
+	})
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(handler))
+
+	settings, err := GetPRSettings(client, "owner", "repo")
+	if err != nil {
+		t.Fatalf("GetPRSettings() error = %v", err)
+	}
+	if !settings.CanForceMerge {
+		t.Errorf("CanForceMerge = false, want true (wrapped value must win over the top-level copy)")
+	}
+	if !settings.CloseIssueWhenMrMerged {
+		t.Errorf("CloseIssueWhenMrMerged = false, want true (wrapped value must win over the top-level copy)")
+	}
+}

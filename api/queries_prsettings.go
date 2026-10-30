@@ -53,6 +53,10 @@ func (s *PRSettings) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wrapper); err != nil {
 		return err
 	}
+	// encoding/json already treats a null unmarshaled into a struct as a
+	// no-op, so the null check below is belt-and-braces: it keeps a future
+	// decode-replace refactor (decode into a fresh struct, then assign) from
+	// letting a null wrapper clobber the flat fields.
 	if len(wrapper.MergeRequestSetting) > 0 && string(wrapper.MergeRequestSetting) != "null" {
 		if err := json.Unmarshal(wrapper.MergeRequestSetting, &base); err != nil {
 			return err

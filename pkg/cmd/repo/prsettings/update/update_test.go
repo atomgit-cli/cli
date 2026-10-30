@@ -130,6 +130,40 @@ func TestUpdateRunCloseIssueOnMerge(t *testing.T) {
 	}
 }
 
+func TestUpdateRunCloseIssueOnMergeDisable(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	streams, _, _, errOut := iostreams.Test()
+	var putBody string
+	opts := &UpdateOptions{
+		IO: streams,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method == "PUT" {
+					b, err := io.ReadAll(req.Body)
+					if err != nil {
+						t.Fatalf("read PUT body: %v", err)
+					}
+					putBody = string(b)
+					return updateResp(http.StatusOK, `{}`), nil
+				}
+				return updateResp(http.StatusOK, `{}`), nil
+			})}, nil
+		},
+		Repository:    "owner/repo",
+		CloseIssue:    false,
+		CloseIssueSet: true,
+	}
+	if err := updateRun(opts); err != nil {
+		t.Fatalf("updateRun() error = %v", err)
+	}
+	if !strings.Contains(putBody, `"close_issue_when_mr_merged":false`) {
+		t.Fatalf("PUT body missing explicit close_issue_when_mr_merged=false: %s", putBody)
+	}
+	if !strings.Contains(errOut.String(), "Updated PR settings") {
+		t.Fatalf("stderr: %s", errOut.String())
+	}
+}
+
 func TestUpdateRunError(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 	io, _, _, _ := iostreams.Test()
