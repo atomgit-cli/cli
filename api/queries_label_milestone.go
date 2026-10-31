@@ -53,17 +53,6 @@ func CreateLabel(client *Client, owner, repo string, opts *CreateLabelOptions) (
 	return &label, nil
 }
 
-// GetLabel fetches a label by name
-func GetLabel(client *Client, owner, repo, name string) (*Label, error) {
-	escapedName := url.PathEscape(name)
-	var label Label
-	err := client.Get(escapedRepoPath(owner, repo)+"/labels/"+escapedName, &label)
-	if err != nil {
-		return nil, err
-	}
-	return &label, nil
-}
-
 // UpdateLabel updates an existing label.
 //
 // Per api-doc/openapi.json, PATCH /repos/{owner}/{repo}/labels/{original_name}
