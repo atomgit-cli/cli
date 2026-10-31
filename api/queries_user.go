@@ -99,13 +99,3 @@ func ResolveUserIDs(client *Client, usernames []string) ([]string, error) {
 
 	return ids, nil
 }
-
-// ClientFromToken creates a client with the given token
-func ClientFromToken(token string) *Client {
-	return NewClient(DefaultHTTPClient(), DefaultHost, token)
-}
-
-// ClientFromTokenAndHost creates a client with the given token and host
-func ClientFromTokenAndHost(token, host string) *Client {
-	return NewClient(DefaultHTTPClient(), host, token)
-}
