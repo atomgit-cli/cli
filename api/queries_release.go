@@ -146,22 +146,6 @@ func UpdateRelease(client *Client, owner, repo string, id int64, opts *UpdateRel
 	return &release, nil
 }
 
-// UpdateReleaseByTag updates a release by tag name
-func UpdateReleaseByTag(client *Client, owner, repo, tag string, opts *UpdateReleaseOptions) (*Release, error) {
-	// First get the release to find its ID
-	release, err := GetRelease(client, owner, repo, tag)
-	if err != nil {
-		return nil, err
-	}
-
-	id, err := release.GetID()
-	if err != nil {
-		return nil, err
-	}
-
-	return UpdateRelease(client, owner, repo, id, opts)
-}
-
 // UpdateReleaseByTagDirect updates a release using GitCode's tag-based PATCH endpoint
 // This bypasses the need for release ID which GitCode API doesn't return
 func UpdateReleaseByTagDirect(client *Client, owner, repo, tag string, opts *GitCodeUpdateReleaseOptions) (*Release, error) {
@@ -182,32 +166,6 @@ func DeleteRelease(client *Client, owner, repo string, id int64) error {
 	return client.Delete(escapedRepoPath(owner, repo) + "/releases/" + strconv.FormatInt(id, 10))
 }
 
-// DeleteReleaseByTag deletes a release by tag name.
-// It first tries the tag-based DELETE endpoint; if the API does not support it (404),
-// it falls back to the ID-based flow (get release → extract ID → delete by ID).
-func DeleteReleaseByTag(client *Client, owner, repo, tag string) error {
-	err := DeleteReleaseByTagDirect(client, owner, repo, tag)
-	if err == nil {
-		return nil
-	}
-	// If the tag endpoint isn't available, fall back to ID-based deletion
-	if !isNotFoundError(err) {
-		return err
-	}
-
-	release, err := GetRelease(client, owner, repo, tag)
-	if err != nil {
-		return err
-	}
-
-	id, err := release.GetID()
-	if err != nil {
-		return err
-	}
-
-	return DeleteRelease(client, owner, repo, id)
-}
-
 // DeleteReleaseByTagDirect deletes a release by tag name directly.
 // This bypasses the need for release ID which GitCode API may not return.
 func DeleteReleaseByTagDirect(client *Client, owner, repo, tag string) error {
@@ -215,7 +173,7 @@ func DeleteReleaseByTagDirect(client *Client, owner, repo, tag string) error {
 	return client.Delete(escapedRepoPath(owner, repo) + "/releases/" + escapedTag)
 }
 
-// DeleteReleaseByTagKnown is like DeleteReleaseByTag but uses a previously
+// DeleteReleaseByTagKnown deletes a release by tag using a previously
 // fetched release to avoid an extra GetRelease call in the fallback path.
 // Callers that already have the release (e.g. for pre-confirm) should use
 // this to skip the redundant API round-trip.

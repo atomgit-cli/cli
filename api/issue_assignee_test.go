@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 )
 
@@ -221,27 +220,5 @@ func TestUpdateIssueUsesAssigneeUsernames(t *testing.T) {
 	}
 	if gotBody.Get("assignee_id") != "" || len(gotBody["assignee_ids[]"]) != 0 {
 		t.Fatalf("legacy assignee ID fields unexpectedly sent: %v", gotBody)
-	}
-}
-
-func TestResolveUserIDs(t *testing.T) {
-	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
-		switch req.URL.Path {
-		case "/api/v5/users/alice":
-			return authTestResponse(http.StatusOK, `{"id":"101","login":"alice"}`), nil
-		case "/api/v5/users/bob":
-			return authTestResponse(http.StatusOK, `{"id":202,"login":"bob"}`), nil
-		default:
-			return authTestResponse(http.StatusNotFound, `{"message":"not found"}`), nil
-		}
-	})
-	client.SetToken("test-token", "test")
-
-	got, err := ResolveUserIDs(client, []string{"alice", "bob"})
-	if err != nil {
-		t.Fatalf("ResolveUserIDs() error = %v", err)
-	}
-	if strings.Join(got, ",") != "101,202" {
-		t.Fatalf("ResolveUserIDs() = %v, want %v", got, []string{"101", "202"})
 	}
 }
