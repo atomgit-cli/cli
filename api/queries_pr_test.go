@@ -584,7 +584,7 @@ func TestClosePullRequestErrorsWhenVerificationStillOpen(t *testing.T) {
 	}
 }
 
-func TestPRCommentAndReviewUnmarshal(t *testing.T) {
+func TestPRCommentUnmarshal(t *testing.T) {
 	commentJSON := `{
 		"id": 1,
 		"discussion_id": "thread-1",
@@ -595,13 +595,6 @@ func TestPRCommentAndReviewUnmarshal(t *testing.T) {
 		"diff_file": "pkg/cmd/pr/view/view.go",
 		"created_at": "2026-04-07T10:20:21+08:00"
 	}`
-	reviewJSON := `{
-		"id": 2,
-		"user": {"login": "reviewer2"},
-		"body": "LGTM",
-		"state": "approved",
-		"submitted_at": "2026-04-07T10:30:21+08:00"
-	}`
 
 	var comment PRComment
 	if err := json.Unmarshal([]byte(commentJSON), &comment); err != nil {
@@ -609,14 +602,6 @@ func TestPRCommentAndReviewUnmarshal(t *testing.T) {
 	}
 	if comment.DiscussionID != "thread-1" || comment.User == nil || comment.User.Login != "reviewer1" {
 		t.Fatalf("Unexpected comment payload: %#v", comment)
-	}
-
-	var review PRReview
-	if err := json.Unmarshal([]byte(reviewJSON), &review); err != nil {
-		t.Fatalf("Failed to unmarshal PRReview: %v", err)
-	}
-	if review.State != "approved" || review.User == nil || review.User.Login != "reviewer2" {
-		t.Fatalf("Unexpected review payload: %#v", review)
 	}
 }
 

@@ -144,17 +144,6 @@ func MockAPIHandler() http.Handler {
 		_, _ = w.Write([]byte(`{"id": "1", "number": 1, "merged": true}`))
 	})
 
-	mux.HandleFunc("/api/v5/repos/owner/test-repo/pulls/1/reviews", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == "GET" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"id": "1", "state": "APPROVED", "body": "LGTM"}]`))
-		} else if r.Method == "POST" {
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id": "1", "state": "APPROVED", "body": "Approved"}`))
-		}
-	})
-
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/pulls/1/comments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == "POST" {
