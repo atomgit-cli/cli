@@ -91,36 +91,6 @@ func ViewActionsPlugin(client *Client, project, name string) ([]byte, error) {
 	return resp.Body, nil
 }
 
-// ParseActionsPluginsList parses the raw list response into typed plugin
-// entries. It handles both a plain JSON array and a paginated wrapper object
-// with common field names ("content", "plugins", "list", or "data").
-func ParseActionsPluginsList(raw []byte) ([]ActionsPlugin, error) {
-	entries, err := ParseActionsPluginsListRaw(raw)
-	if err != nil {
-		return nil, err
-	}
-	plugins := make([]ActionsPlugin, 0, len(entries))
-	for _, entry := range entries {
-		var plugin ActionsPlugin
-		if err := json.Unmarshal(entry, &plugin); err != nil {
-			return nil, fmt.Errorf("failed to parse plugin entry: %w", err)
-		}
-		plugins = append(plugins, plugin)
-	}
-	return plugins, nil
-}
-
-// ParseActionsPluginsListRaw parses the raw list response into raw JSON
-// entries, preserving full API fields for --json output. It handles both a
-// plain JSON array and a paginated wrapper object with server metadata.
-func ParseActionsPluginsListRaw(raw []byte) ([]json.RawMessage, error) {
-	page, err := ParseActionsPluginsPage(raw)
-	if err != nil {
-		return nil, err
-	}
-	return page.Entries, nil
-}
-
 // ParseActionsPluginsPage parses a plain or paginated Actions plugin list
 // response and retains the server pagination metadata.
 func ParseActionsPluginsPage(raw []byte) (*ActionsPluginsPage, error) {
@@ -188,14 +158,4 @@ func parsePluginListField(fields map[string]json.RawMessage) ([]json.RawMessage,
 		return []json.RawMessage{}, nil
 	}
 	return nil, fmt.Errorf("failed to parse plugins list response: missing plugin list field")
-}
-
-// CountPluginsEntries returns the number of plugin entries in a raw list
-// response, used to detect short pages during pagination.
-func CountPluginsEntries(raw []byte) int {
-	entries, err := ParseActionsPluginsListRaw(raw)
-	if err != nil {
-		return 0
-	}
-	return len(entries)
 }

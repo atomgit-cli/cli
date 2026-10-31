@@ -526,16 +526,3 @@ func decodeAPIError(respBody []byte, statusCode int, status string) error {
 	}
 	return &APIError{StatusCode: statusCode, Message: status}
 }
-
-// BuildURL builds a URL with path parameters
-func BuildURL(base string, params map[string]string) string {
-	for k, v := range params {
-		base = replacePath(base, k, v)
-	}
-	return base
-}
-
-func replacePath(urlStr, key, value string) string {
-	placeholder := "{" + key + "}"
-	return strings.ReplaceAll(urlStr, placeholder, url.PathEscape(value))
-}

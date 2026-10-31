@@ -128,22 +128,6 @@ func TestNewHTTPClientWithRetry(t *testing.T) {
 	}
 }
 
-func TestNewUploadHTTPClient(t *testing.T) {
-	client := NewUploadHTTPClient()
-
-	if client.Timeout != UploadTimeout {
-		t.Errorf("client.Timeout = %v, want %v", client.Timeout, UploadTimeout)
-	}
-}
-
-func TestNewDownloadHTTPClient(t *testing.T) {
-	client := NewDownloadHTTPClient()
-
-	if client.Timeout != DownloadTimeout {
-		t.Errorf("client.Timeout = %v, want %v", client.Timeout, DownloadTimeout)
-	}
-}
-
 func TestNewDownloadHTTPClientWithEnvTimeout_Default(t *testing.T) {
 	os.Unsetenv("GC_TIMEOUT")
 	defer os.Unsetenv("GC_TIMEOUT")

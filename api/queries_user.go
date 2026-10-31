@@ -74,28 +74,3 @@ func VerifyToken(httpClient *http.Client, host, token string) (*User, error) {
 	client := NewClient(httpClient, host, token)
 	return CurrentUser(client)
 }
-
-// ResolveUserIDs resolves usernames to GitCode user IDs.
-func ResolveUserIDs(client *Client, usernames []string) ([]string, error) {
-	if len(usernames) == 0 {
-		return nil, nil
-	}
-
-	ids := make([]string, 0, len(usernames))
-	for _, username := range usernames {
-		user, err := GetUser(client, username)
-		if err != nil {
-			return nil, fmt.Errorf("resolve user %q: %w", username, err)
-		}
-		if user == nil || user.ID == nil {
-			return nil, fmt.Errorf("resolve user %q: missing user id", username)
-		}
-		id := fmt.Sprint(user.ID)
-		if id == "" || id == "<nil>" {
-			return nil, fmt.Errorf("resolve user %q: missing user id", username)
-		}
-		ids = append(ids, id)
-	}
-
-	return ids, nil
-}

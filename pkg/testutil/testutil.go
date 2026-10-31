@@ -181,10 +181,7 @@ func MockAPIHandler() http.Handler {
 
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/milestones/1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == "PATCH" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":1,"number":1,"title":"v1.1","state":"closed","description":"Updated"}`))
-		} else if r.Method == "DELETE" {
+		if r.Method == "DELETE" {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
 			w.WriteHeader(http.StatusOK)
