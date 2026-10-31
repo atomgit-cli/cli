@@ -116,16 +116,6 @@ func GetRelease(client *Client, owner, repo, tag string) (*Release, error) {
 	return &release, nil
 }
 
-// GetReleaseByID fetches a release by ID
-func GetReleaseByID(client *Client, owner, repo string, id int64) (*Release, error) {
-	var release Release
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(id, 10), &release)
-	if err != nil {
-		return nil, err
-	}
-	return &release, nil
-}
-
 // GetLatestRelease fetches the latest release for a repository
 func GetLatestRelease(client *Client, owner, repo string) (*Release, error) {
 	var release Release
@@ -287,31 +277,6 @@ func (r *Release) GetID() (int64, error) {
 	}
 }
 
-// ListReleaseAssets lists assets for a release
-func ListReleaseAssets(client *Client, owner, repo string, releaseID int64) ([]ReleaseAsset, error) {
-	var assets []ReleaseAsset
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(releaseID, 10)+"/assets", &assets)
-	if err != nil {
-		return nil, err
-	}
-	return assets, nil
-}
-
-// GetReleaseAsset fetches a single release asset
-func GetReleaseAsset(client *Client, owner, repo string, assetID int64) (*ReleaseAsset, error) {
-	var asset ReleaseAsset
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/assets/"+strconv.FormatInt(assetID, 10), &asset)
-	if err != nil {
-		return nil, err
-	}
-	return &asset, nil
-}
-
-// DeleteReleaseAsset deletes a release asset
-func DeleteReleaseAsset(client *Client, owner, repo string, assetID int64) error {
-	return client.Delete(escapedRepoPath(owner, repo) + "/releases/assets/" + strconv.FormatInt(assetID, 10))
-}
-
 // DeleteReleaseAssetByTag deletes a release asset by tag and attach file id.
 //
 // Per api-doc: DELETE /repos/{owner}/{repo}/releases/{tag}/attach_files/{attach_file_id}
@@ -331,14 +296,6 @@ func GetReleaseUploadURL(client *Client, owner, repo, tag, filename string) (*As
 		return nil, err
 	}
 	return &result, nil
-}
-
-// UploadReleaseAsset uploads a file as a release asset
-func UploadReleaseAsset(client *Client, owner, repo string, releaseID int64, filename string, content []byte, contentType string) (*ReleaseAsset, error) {
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	return client.UploadAsset(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(releaseID, 10)+"/assets", filename, content, contentType)
 }
 
 // UploadReleaseAssetByTag uploads a file to a release by tag name using the

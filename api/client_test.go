@@ -348,21 +348,6 @@ func TestUploadToURL(t *testing.T) {
 	}
 }
 
-func TestUploadAsset(t *testing.T) {
-	handler := testutil.MockAPIHandler()
-	mockClient := testutil.NewTestHTTPClient(handler)
-	c := NewClientFromHTTP(mockClient)
-	c.SetToken("test-token", "env")
-
-	asset, err := c.UploadAsset("/repos/owner/test-repo/releases/1/assets", "test.txt", []byte("data"), "text/plain")
-	if err != nil {
-		t.Fatalf("UploadAsset() error = %v", err)
-	}
-	if asset.Name != "test.txt" {
-		t.Errorf("Name = %q, want %q", asset.Name, "test.txt")
-	}
-}
-
 func TestUploadToURL_TruncatesLongErrorBody(t *testing.T) {
 	longBody := strings.Repeat("x", 1024)
 	mockClient := &http.Client{
@@ -449,30 +434,5 @@ func TestGetText_NonJSONErrorReturnsAPIError(t *testing.T) {
 	}
 	if apiErr.StatusCode != 404 {
 		t.Errorf("StatusCode = %d, want 404", apiErr.StatusCode)
-	}
-}
-
-func TestUploadAsset_NonJSONErrorReturnsAPIError(t *testing.T) {
-	mockClient := &http.Client{
-		Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: 500,
-				Status:     "500 Internal Server Error",
-				Header:     make(http.Header),
-				Body:       io.NopCloser(bytes.NewReader([]byte("oops"))),
-			}, nil
-		}),
-	}
-	c := &Client{httpClient: mockClient}
-	_, err := c.UploadAsset("/repos/o/r/releases/1/assets", "f.txt", []byte("data"), "text/plain")
-	if err == nil {
-		t.Fatal("UploadAsset() error = nil, want error")
-	}
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("UploadAsset() error type = %T, want *APIError", err)
-	}
-	if apiErr.StatusCode != 500 {
-		t.Errorf("StatusCode = %d, want 500", apiErr.StatusCode)
 	}
 }
