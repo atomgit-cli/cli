@@ -66,16 +66,6 @@ type CreateReleaseOptions struct {
 	TargetCommitish string `json:"target_commitish,omitempty"`
 }
 
-// UpdateReleaseOptions represents options for updating a release
-type UpdateReleaseOptions struct {
-	TagName         string `json:"tag_name,omitempty"`
-	TargetCommitish string `json:"target_commitish,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Body            string `json:"body,omitempty"`
-	Draft           *bool  `json:"draft,omitempty"`
-	Prerelease      *bool  `json:"prerelease,omitempty"`
-}
-
 // GitCodeUpdateReleaseOptions represents options for GitCode's tag-based update API
 // Required fields: name, body
 // Optional: release_status (pre/latest)
@@ -130,16 +120,6 @@ func GetLatestRelease(client *Client, owner, repo string) (*Release, error) {
 func CreateRelease(client *Client, owner, repo string, opts *CreateReleaseOptions) (*Release, error) {
 	var release Release
 	err := client.Post(escapedRepoPath(owner, repo)+"/releases", opts, &release)
-	if err != nil {
-		return nil, err
-	}
-	return &release, nil
-}
-
-// UpdateRelease updates an existing release by ID
-func UpdateRelease(client *Client, owner, repo string, id int64, opts *UpdateReleaseOptions) (*Release, error) {
-	var release Release
-	err := client.Patch(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(id, 10), opts, &release)
 	if err != nil {
 		return nil, err
 	}
