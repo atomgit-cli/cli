@@ -10,6 +10,8 @@ AtomGit CLI（原 GitCode CLI）把仓库、Issue、PR、Release 和 Actions 带
 
 [快速了解核心价值与应用场景，并在五分钟内开始使用](./docs/INTRODUCTION.md)。
 
+HTTPS Git 操作可在登录后运行 `gc auth setup-git` 复用 CLI 凭证，详见 [认证说明](./docs/AUTH.md#git-credential-helper)。
+
 ## 文档导航
 
 按角色建议从以下入口开始：

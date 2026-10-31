@@ -4,6 +4,7 @@ package auth
 import (
 	"github.com/spf13/cobra"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/gitcredential"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/login"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/logout"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/setupgit"
@@ -23,6 +24,7 @@ func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 
+	cmd.AddCommand(gitcredential.NewCmdGitCredential(f))
 	cmd.AddCommand(login.NewCmdLogin(f, nil))
 	cmd.AddCommand(logout.NewCmdLogout(f, nil))
 	cmd.AddCommand(setupgit.NewCmdSetupGit(f, nil))
