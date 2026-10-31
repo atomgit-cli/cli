@@ -53,9 +53,8 @@ func NewCmdSetupGit(f *cmdutil.Factory, runF func(*SetupGitOptions) error) *cobr
 			This is a client-side command: it does not call the GitCode API
 			and does not read or print tokens.
 
-			The configured helper points to the gc auth git-credential
-			subcommand, which is delivered in a follow-up release. Until then,
-			the helper entry is written but credential filling is not active.
+			The helper reads the current CLI login when Git requests HTTPS credentials.
+			It does not store or erase credentials supplied by Git.
 		`),
 		Example: heredoc.Doc(`
 			# Configure the credential helper for the default host
@@ -117,7 +116,6 @@ func setupGitRun(opts *SetupGitOptions) error {
 	if hasHelperValue(existing, helperValue) {
 		fmt.Fprintf(opts.IO.Out, "%s Credential helper already configured for %s\n", opts.IO.ColorScheme().SuccessIcon(), opts.Hostname)
 		fmt.Fprintf(opts.IO.Out, "  Verify with: git config --global --get-all %s\n", configKey)
-		fmt.Fprintf(opts.IO.Out, "  Note: credential filling requires the gc auth git-credential subcommand (follow-up release).\n")
 		return nil
 	}
 
@@ -127,7 +125,6 @@ func setupGitRun(opts *SetupGitOptions) error {
 
 	fmt.Fprintf(opts.IO.Out, "%s Configured git credential helper for %s\n", opts.IO.ColorScheme().SuccessIcon(), opts.Hostname)
 	fmt.Fprintf(opts.IO.Out, "  Verify with: git config --global --get-all %s\n", configKey)
-	fmt.Fprintf(opts.IO.Out, "  Note: credential filling requires the gc auth git-credential subcommand (follow-up release).\n")
 	return nil
 }
 
