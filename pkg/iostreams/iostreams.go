@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"golang.org/x/term"
 )
 
 // IOStreams holds the standard input, output, and error streams
@@ -178,11 +180,9 @@ func isTerminal(w io.Writer) bool {
 
 func isInputTerminal(r io.Reader) bool {
 	if f, ok := r.(*os.File); ok {
-		fi, err := f.Stat()
-		if err != nil {
-			return false
-		}
-		return (fi.Mode() & os.ModeCharDevice) != 0
+		// A char-device check alone misreads /dev/null (and NUL on Windows)
+		// as a terminal, so confirm with a real TTY ioctl instead.
+		return term.IsTerminal(int(f.Fd()))
 	}
 	return false
 }
@@ -218,11 +218,9 @@ func (s *IOStreams) CanPrompt() bool {
 
 // IsInputTTY returns true if input is from a terminal
 func IsInputTTY() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	// A char-device check alone misreads /dev/null (and NUL on Windows)
+	// as a terminal, so confirm with a real TTY ioctl instead.
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 // CanPromptForInput returns true if we can prompt for input
