@@ -103,7 +103,7 @@ func TestCanPromptNilSafe(t *testing.T) {
 
 func TestIsInputTerminal(t *testing.T) {
 	t.Run("/dev/null is not a terminal", func(t *testing.T) {
-		f, err := os.Open("/dev/null")
+		f, err := os.Open(os.DevNull)
 		if err != nil {
 			t.Skipf("cannot open /dev/null: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestIsInputTerminal(t *testing.T) {
 }
 
 func TestIsInputTTYDevNull(t *testing.T) {
-	f, err := os.Open("/dev/null")
+	f, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Skipf("cannot open /dev/null: %v", err)
 	}
