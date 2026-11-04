@@ -128,6 +128,30 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 	return cmd
 }
 
+// resolveLoginHostname fills an empty --hostname with the same host
+// resolution authenticated commands use (DefaultHost: GC_HOST, then the
+// last logged-in host, then gitcode.com), so a bare login always targets
+// the host the CLI actually consumes (issue 621). The resolved value is
+// validated like an explicit --hostname. The --web flow is unaffected:
+// it pre-fills gitcode.com in validateWebHostname before reaching here.
+func resolveLoginHostname(opts *LoginOptions) error {
+	if opts.Hostname == "" {
+		cfg, err := opts.Config()
+		if err != nil {
+			return fmt.Errorf("failed to read config: %w", err)
+		}
+		if resolved, _ := cfg.Authentication().DefaultHost(); resolved != "" {
+			opts.Hostname = resolved
+		}
+	}
+	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
+	if err != nil {
+		return err
+	}
+	opts.Hostname = hostname
+	return nil
+}
+
 func loginWithToken(opts *LoginOptions) error {
 	// Read token from stdin
 	reader := newInputReader(opts)
@@ -150,12 +174,9 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 		return cmdutil.NewUsageError("no token provided")
 	}
 
-	// Set default hostname
-	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
-	if err != nil {
+	if err := resolveLoginHostname(opts); err != nil {
 		return err
 	}
-	opts.Hostname = hostname
 
 	// Verify the token
 	httpClient, err := opts.HttpClient()
@@ -266,18 +287,22 @@ func validateWebHostname(opts *LoginOptions) error {
 }
 
 func loginInteractive(opts *LoginOptions) error {
-	// Set default hostname
-	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
-	if err != nil {
+	if err := resolveLoginHostname(opts); err != nil {
 		return err
 	}
-	opts.Hostname = hostname
 
 	cs := opts.IO.ColorScheme()
 
 	fmt.Fprintf(opts.IO.Out, "\n")
 	fmt.Fprintf(opts.IO.Out, "%s Authenticate with GitCode\n", cs.Bold("Tip:"))
 	fmt.Fprintf(opts.IO.Out, "\n")
+
+	// Surface a non-default target before the token prompt, so a GC_HOST or
+	// stale default host rerouting the login is visible before the user
+	// pastes their credential (issue 621 review).
+	if opts.Hostname != "gitcode.com" {
+		fmt.Fprintf(opts.IO.Out, "Target host: %s\n", opts.Hostname)
+	}
 
 	// Prompt for token
 	fmt.Fprintf(opts.IO.Out, "? Paste your authentication token: ")
