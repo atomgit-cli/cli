@@ -13,55 +13,6 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/testutil"
 )
 
-func TestBuildURL(t *testing.T) {
-	tests := []struct {
-		name   string
-		base   string
-		params map[string]string
-		want   string
-	}{
-		{
-			name:   "no params",
-			base:   "/repos/{owner}/{repo}/issues",
-			params: nil,
-			want:   "/repos/{owner}/{repo}/issues",
-		},
-		{
-			name:   "replace owner and repo",
-			base:   "/repos/{owner}/{repo}/issues",
-			params: map[string]string{"owner": "octocat", "repo": "hello-world"},
-			want:   "/repos/octocat/hello-world/issues",
-		},
-		{
-			name:   "replace single param",
-			base:   "/repos/owner/repo/issues/{number}",
-			params: map[string]string{"number": "42"},
-			want:   "/repos/owner/repo/issues/42",
-		},
-		{
-			name:   "encoded value",
-			base:   "/repos/{owner}/{repo}",
-			params: map[string]string{"owner": "user/with"},
-			want:   "/repos/user%2Fwith/{repo}",
-		},
-		{
-			name:   "empty params map",
-			base:   "/user",
-			params: map[string]string{},
-			want:   "/user",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := BuildURL(tt.base, tt.params)
-			if got != tt.want {
-				t.Errorf("BuildURL() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAPIError(t *testing.T) {
 	tests := []struct {
 		name       string

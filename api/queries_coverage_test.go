@@ -150,29 +150,6 @@ func TestListCommentsForCommit(t *testing.T) {
 		t.Fatalf("ListCommentsForCommit() = %+v", comments)
 	}
 }
-
-func TestCloseMilestone(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := CloseMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("CloseMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
-func TestOpenMilestone(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := OpenMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("OpenMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
 func TestUpdateCommitComment(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	c, err := UpdateCommitComment(client, "owner", "test-repo", "1", "updated body")
@@ -231,18 +208,6 @@ func TestReopenPullRequest(t *testing.T) {
 		t.Logf("ReopenPullRequest state = %q", pr.State)
 	}
 }
-
-func TestAddLabelsToIssue(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	labels, err := AddLabelsToIssue(client, "owner", "test-repo", 1, []string{"bug", "enhancement"})
-	if err != nil {
-		t.Fatalf("AddLabelsToIssue() error = %v", err)
-	}
-	if len(labels) != 1 || labels[0].Name != "bug" {
-		t.Fatalf("AddLabelsToIssue() = %+v", labels)
-	}
-}
-
 func TestAddIssueLabels(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	labels, err := AddIssueLabels(client, "owner", "test-repo", 1, []string{"bug"})

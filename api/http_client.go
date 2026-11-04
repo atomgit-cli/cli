@@ -72,16 +72,6 @@ func NewHTTPClientWithRetryAndLogger(timeout time.Duration, cfg RetryConfig, log
 	}
 }
 
-// NewUploadHTTPClient returns an HTTP client suitable for file uploads
-func NewUploadHTTPClient() *http.Client {
-	return NewHTTPClientWithRetry(UploadTimeout, DefaultRetryConfig())
-}
-
-// NewDownloadHTTPClient returns an HTTP client suitable for file downloads
-func NewDownloadHTTPClient() *http.Client {
-	return NewHTTPClientWithRetry(DownloadTimeout, DefaultRetryConfig())
-}
-
 // NewDownloadHTTPClientWithEnvTimeout returns an HTTP client for file downloads.
 // If GC_TIMEOUT environment variable is set, uses that value as timeout.
 // Otherwise uses the default DownloadTimeout (10 minutes).
