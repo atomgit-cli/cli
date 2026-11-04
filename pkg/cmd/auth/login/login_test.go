@@ -603,3 +603,98 @@ func TestLoginEnvOverrideGateReadErrorPropagates(t *testing.T) {
 		t.Fatalf("stored token = %q, want empty (nothing saved)", token)
 	}
 }
+
+// --- issue 621: bare login follows the host resolution consumers use ---
+
+// newLoginHostCaptureOpts builds LoginOptions whose token verifies as
+// "tester" against a mocked API, recording the host of every request.
+func newLoginHostCaptureOpts(t *testing.T, io *iostreams.IOStreams, hostname string) (*LoginOptions, *[]string) {
+	t.Helper()
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	var hosts []string
+	opts := &LoginOptions{
+		IO:       io,
+		Hostname: hostname,
+		Token:    "test-token",
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					hosts = append(hosts, req.URL.Host)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"login":"tester"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+	return opts, &hosts
+}
+
+func TestLoginBareHostnameFollowsGCHost(t *testing.T) {
+	t.Setenv("GC_HOST", "enterprise.example.com")
+	t.Setenv("GC_TOKEN", "env-token") // present but irrelevant: env tokens never override a custom host
+
+	io, _, _, errOut := iostreams.Test()
+	opts, hosts := newLoginHostCaptureOpts(t, io, "")
+
+	if err := loginWithTokenFlag(opts); err != nil {
+		t.Fatalf("loginWithTokenFlag() error = %v", err)
+	}
+	if len(*hosts) == 0 || (*hosts)[0] != "api.enterprise.example.com" {
+		t.Fatalf("verify request host = %v, want api.enterprise.example.com (the host consumers route to)", *hosts)
+	}
+	if opts.Hostname != "enterprise.example.com" {
+		t.Fatalf("Hostname = %q, want enterprise.example.com", opts.Hostname)
+	}
+	if token := storedTokenFor(t, "enterprise.example.com"); token != "test-token" {
+		t.Fatalf("stored token for custom host = %q, want test-token", token)
+	}
+	if strings.Contains(errOut.String(), "环境变量") {
+		t.Fatalf("stderr must not carry the env-override warning for a custom host login, got:\n%s", errOut.String())
+	}
+}
+
+func TestLoginBareHostnameFollowsLastLoggedInHost(t *testing.T) {
+	t.Setenv("GC_HOST", "")
+	dir := t.TempDir()
+
+	io, _, _, _ := iostreams.Test()
+	first, _ := newLoginHostCaptureOpts(t, io, "enterprise.example.com")
+	t.Setenv("GC_CONFIG_DIR", dir) // share one config dir across both logins
+
+	if err := loginWithTokenFlag(first); err != nil {
+		t.Fatalf("first login error = %v", err)
+	}
+
+	second, hosts := newLoginHostCaptureOpts(t, io, "")
+	t.Setenv("GC_CONFIG_DIR", dir) // keep the same dir for the bare login
+
+	if err := loginWithTokenFlag(second); err != nil {
+		t.Fatalf("bare login error = %v", err)
+	}
+	if len(*hosts) == 0 || (*hosts)[0] != "api.enterprise.example.com" {
+		t.Fatalf("bare login verify host = %v, want api.enterprise.example.com (last logged-in host)", *hosts)
+	}
+}
+
+func TestLoginBareHostnameDefaultsToGitCodeCom(t *testing.T) {
+	t.Setenv("GC_HOST", "")
+
+	io, _, _, _ := iostreams.Test()
+	opts, hosts := newLoginHostCaptureOpts(t, io, "")
+
+	if err := loginWithTokenFlag(opts); err != nil {
+		t.Fatalf("loginWithTokenFlag() error = %v", err)
+	}
+	if len(*hosts) == 0 || (*hosts)[0] != "api.gitcode.com" {
+		t.Fatalf("verify request host = %v, want api.gitcode.com", *hosts)
+	}
+	if token := storedTokenFor(t, "gitcode.com"); token != "test-token" {
+		t.Fatalf("stored token = %q, want test-token", token)
+	}
+}

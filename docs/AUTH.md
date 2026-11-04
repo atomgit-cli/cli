@@ -65,6 +65,7 @@
 - 默认 `gitcode.com` 下，环境变量 token 仍优先于本地 token。
 - 非默认 host 下，业务命令只使用该 host 本地登录保存的 token，不会把通用 `GC_TOKEN` / `GITCODE_TOKEN` 转发到自定义 host。
 - 如果需要使用非默认 host，请先使用 `gc auth login --hostname <host>` 为该 host 建立本地认证。
+- 不带 `--hostname` 的 `gc auth login` 按同一主机解析确定登录目标（`GC_HOST` > 上次登录主机 > `gitcode.com`）；设置 `GC_HOST` 后裸登录即为该主机建立本地认证。`--web` 流程固定 `gitcode.com`。
 - 显式支持 `--hostname` 的 auth 子命令仍按该参数读取目标主机认证信息。
 
 ## 各命令统一语义
