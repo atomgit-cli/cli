@@ -424,7 +424,11 @@ exit 0
     Assert-True ($pathGap.Output -notmatch 'dev environment ready') 'off-PATH check still reported ready'
 
     Write-Host '[test] go mod download failure guidance'
+    # The PowerShell flow lists modules first and only downloads when the
+    # list fails (unlike bash, which downloads directly), so fail both stub
+    # exits to reach the download branch.
     $downloadFail = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -ExtraEnvironment @{
+        GC_TEST_GO_LIST_EXIT = '17'
         GC_TEST_GO_DOWNLOAD_EXIT = '21'
     }
     Assert-Equal 1 $downloadFail.Status "download failure scenario unexpectedly passed`n$($downloadFail.Output)"
