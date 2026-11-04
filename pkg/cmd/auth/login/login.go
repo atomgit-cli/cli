@@ -297,6 +297,13 @@ func loginInteractive(opts *LoginOptions) error {
 	fmt.Fprintf(opts.IO.Out, "%s Authenticate with GitCode\n", cs.Bold("Tip:"))
 	fmt.Fprintf(opts.IO.Out, "\n")
 
+	// Surface a non-default target before the token prompt, so a GC_HOST or
+	// stale default host rerouting the login is visible before the user
+	// pastes their credential (issue 621 review).
+	if opts.Hostname != "gitcode.com" {
+		fmt.Fprintf(opts.IO.Out, "Target host: %s\n", opts.Hostname)
+	}
+
 	// Prompt for token
 	fmt.Fprintf(opts.IO.Out, "? Paste your authentication token: ")
 	reader := newInputReader(opts)

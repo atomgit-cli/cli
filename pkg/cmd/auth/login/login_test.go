@@ -698,3 +698,98 @@ func TestLoginBareHostnameDefaultsToGitCodeCom(t *testing.T) {
 		t.Fatalf("stored token = %q, want test-token", token)
 	}
 }
+
+func TestLoginWithWebPinsGitCodeComUnderGCHost(t *testing.T) {
+	// --web is a gitcode.com-only flow: GC_HOST must not reroute the token
+	// page or the verification target (issue 621, matrix cell five).
+	t.Setenv("GC_HOST", "enterprise.example.com")
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	io, _, out, _ := iostreams.Test()
+	io.In = bytes.NewBufferString("test-token\n")
+
+	var openedURL string
+	var verifyHosts []string
+	opts := &LoginOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					verifyHosts = append(verifyHosts, req.URL.Host)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"login":"tester"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+		OpenBrowser: func(url string) error {
+			openedURL = url
+			return nil
+		},
+		Web: true,
+	}
+
+	if err := loginWithWeb(opts); err != nil {
+		t.Fatalf("loginWithWeb() error = %v", err)
+	}
+	if openedURL != "https://gitcode.com/setting/token-classic/create" {
+		t.Fatalf("opened URL = %q, want the gitcode.com token page", openedURL)
+	}
+	if len(verifyHosts) == 0 || verifyHosts[0] != "api.gitcode.com" {
+		t.Fatalf("verify request host = %v, want api.gitcode.com (web flow pinned)", verifyHosts)
+	}
+	if opts.Hostname != "gitcode.com" {
+		t.Fatalf("Hostname = %q, want gitcode.com", opts.Hostname)
+	}
+	if strings.Contains(out.String(), "Target host:") {
+		t.Fatalf("target host line must not appear for the pinned gitcode.com web flow, got:\n%s", out.String())
+	}
+}
+
+func TestLoginInteractiveShowsTargetHostForCustomHost(t *testing.T) {
+	t.Setenv("GC_HOST", "enterprise.example.com")
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	io, _, out, _ := iostreams.Test()
+	io.In = bytes.NewBufferString("test-token\n")
+
+	opts := &LoginOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"login":"tester"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+
+	if err := loginInteractive(opts); err != nil {
+		t.Fatalf("loginInteractive() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Target host: enterprise.example.com") {
+		t.Fatalf("stdout missing pre-prompt target host line, got:\n%s", out.String())
+	}
+}
+
+func TestLoginBareHostnameRejectsInvalidGCHost(t *testing.T) {
+	t.Setenv("GC_HOST", "https://evil.example.com")
+
+	io, _, _, _ := iostreams.Test()
+	opts, _ := newLoginHostCaptureOpts(t, io, "")
+
+	err := loginWithTokenFlag(opts)
+	if err == nil || !strings.Contains(err.Error(), "invalid host") {
+		t.Fatalf("error = %v, want invalid host rejection for a malformed GC_HOST value", err)
+	}
+}
