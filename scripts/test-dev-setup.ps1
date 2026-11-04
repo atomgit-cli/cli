@@ -206,7 +206,10 @@ if ($Tool -eq 'go') {
         }
         exit [int]$env:GC_TEST_GO_LIST_EXIT
     }
-    if ($Arguments[0] -eq 'mod' -and $Arguments[1] -eq 'download') { exit 0 }
+    if ($Arguments[0] -eq 'mod' -and $Arguments[1] -eq 'download') {
+        if ($env:GC_TEST_GO_DOWNLOAD_EXIT) { exit [int]$env:GC_TEST_GO_DOWNLOAD_EXIT }
+        exit 0
+    }
     if ($Arguments[0] -eq 'install') {
         $spec = $Arguments[1]
         $at = $spec.LastIndexOf('@')
@@ -280,7 +283,11 @@ exit 0
     $installLog = Join-Path $tempRoot 'install.log'
     $first = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog
     Assert-Equal 0 $first.Status "first installation failed`n$($first.Output)"
-    Assert-True ([bool]($first.Output -match [regex]::Escape(
+
+Assert-True ($first.Output -match 'WARNING: managed tools are not on PATH') 'install output missing PATH warning'
+Assert-True ($first.Output -match 'pre-commit / pre-push') 'install warning missing hook consequence'
+Assert-True ($first.Output -match 'gitleaks: command not found') 'install warning missing gitleaks failure text'
+Assert-True ($first.Output -match [regex]::Escape('Add-Content -Path $PROFILE')) 'install warning missing persist example    Assert-True ([bool]($first.Output -match [regex]::Escape(
         "`$env:Path = `"$installTools\bin;`$env:Path`""))) `
         'setup output did not provide the current-shell PATH command'
     $installLines = @(Get-Content -LiteralPath $installLog)
@@ -321,7 +328,8 @@ exit 0
     Set-TestFile (Join-Path $checkDownloadCache 'sentinel') @('read-only-source')
     $checkModCacheEntriesBefore = @(Get-ChildItem -Force -Recurse -LiteralPath $checkModCache).Count
     $expectedLocalProxy = ([Uri]::new([IO.Path]::GetFullPath($checkDownloadCache))).AbsoluteUri
-    $complete = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check -ExtraEnvironment @{
+    $onPathBin = Join-Path $installTools 'bin'
+    $complete = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check -SystemPath "$onPathBin;$stubBin" -ExtraEnvironment @{
         APPDATA = $outsideAppData
         GOENV = 'outside-goenv-sentinel'
         GOPATH = $checkGoPath
@@ -372,7 +380,7 @@ exit 0
     $persistedGoEnvBefore = Get-Content -Raw -LiteralPath $persistedGoEnv
     $beforePersistedCheck = @(Get-Content -LiteralPath $installLog).Count
     $persistedCheck = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check `
-        -ExtraEnvironment @{
+        -SystemPath "$onPathBin;$stubBin" -ExtraEnvironment @{
             GOENV = $persistedGoEnv
             GOPATH = $null
             GOMODCACHE = $null
@@ -387,7 +395,7 @@ exit 0
         'check mode modified the persisted Go env file'
 
     $moduleGap = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check `
-        -ExtraEnvironment @{
+        -SystemPath "$onPathBin;$stubBin" -ExtraEnvironment @{
             GC_TEST_GO_LIST_EXIT = '17'
             GC_TEST_GO_LIST_STDERR = 'module cache miss'
         }
@@ -398,7 +406,7 @@ exit 0
         'module cache miss did not reach the final gap summary'
 
     $raceGap = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check `
-        -ExtraEnvironment @{
+        -SystemPath "$onPathBin;$stubBin" -ExtraEnvironment @{
             GC_TEST_GO_TEST_EXIT = '18'
             GC_TEST_GO_TEST_STDERR = 'race module cache miss'
         }
@@ -407,6 +415,24 @@ exit 0
         'native stderr aborted check mode before the race gap was recorded'
     Assert-True ($raceGap.Output -match 'incomplete: 1 dependency gap') `
         'race failure did not reach the final gap summary'
+
+    Write-Host '[test] PATH gap in check mode'
+    $pathGap = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -Check
+    Assert-Equal 1 $pathGap.Status "off-PATH check mode unexpectedly passed`n$($pathGap.Output)"
+    Assert-True ($pathGap.Output -match 'MISS managed tools on PATH') 'off-PATH check missing PATH gap'
+    Assert-True ($pathGap.Output -match 'incomplete: 1 dependency gap') 'off-PATH check gap count wrong'
+    Assert-True ($pathGap.Output -notmatch 'dev environment ready') 'off-PATH check still reported ready'
+
+    Write-Host '[test] go mod download failure guidance'
+    $downloadFail = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog -ExtraEnvironment @{
+        GC_TEST_GO_DOWNLOAD_EXIT = '21'
+    }
+    Assert-Equal 1 $downloadFail.Status "download failure scenario unexpectedly passed`n$($downloadFail.Output)"
+    Assert-True ($downloadFail.Output -match 'MISS go mod download failed') 'download failure missing gap'
+    Assert-True ($downloadFail.Output -match 'go env GOPROXY') 'download failure missing GOPROXY hint'
+    Assert-True ($downloadFail.Output -match [regex]::Escape('goproxy.cn,direct')) 'download failure missing goproxy.cn example'
+    Assert-True ($downloadFail.Output -match [regex]::Escape('mirrors.aliyun.com/goproxy/')) 'download failure missing aliyun mirror example'
+    Assert-True ($downloadFail.Output -match 'examples only') 'download failure missing examples-only wording'
 
     $missingTools = Join-Path $tempRoot 'missing-tools'
     $missing = Invoke-Setup -ToolsRoot $missingTools -LogPath (Join-Path $tempRoot 'missing.log') `
