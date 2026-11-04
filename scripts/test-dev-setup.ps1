@@ -283,13 +283,13 @@ exit 0
     $installLog = Join-Path $tempRoot 'install.log'
     $first = Invoke-Setup -ToolsRoot $installTools -LogPath $installLog
     Assert-Equal 0 $first.Status "first installation failed`n$($first.Output)"
-
-Assert-True ($first.Output -match 'WARNING: managed tools are not on PATH') 'install output missing PATH warning'
-Assert-True ($first.Output -match 'pre-commit / pre-push') 'install warning missing hook consequence'
-Assert-True ($first.Output -match 'gitleaks: command not found') 'install warning missing gitleaks failure text'
-Assert-True ($first.Output -match [regex]::Escape('Add-Content -Path $PROFILE')) 'install warning missing persist example    Assert-True ([bool]($first.Output -match [regex]::Escape(
+    Assert-True ([bool]($first.Output -match [regex]::Escape(
         "`$env:Path = `"$installTools\bin;`$env:Path`""))) `
         'setup output did not provide the current-shell PATH command'
+    Assert-True ($first.Output -match 'WARNING: managed tools are not on PATH') 'install output missing PATH warning'
+    Assert-True ($first.Output -match 'pre-commit / pre-push') 'install warning missing hook consequence'
+    Assert-True ($first.Output -match 'gitleaks: command not found') 'install warning missing gitleaks failure text'
+    Assert-True ($first.Output -match [regex]::Escape('Add-Content -Path $PROFILE')) 'install warning missing persist example'
     $installLines = @(Get-Content -LiteralPath $installLog)
     Assert-True ([bool]($installLines -match
         '^go\|install github\.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2\.12\.2\|')) `
