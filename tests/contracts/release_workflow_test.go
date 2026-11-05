@@ -483,6 +483,14 @@ func TestReleaseWorkflowDistTagRetryWindowCoverPropagation(t *testing.T) {
 			t.Errorf("release workflow missing dist-tag retry window guard %q", required)
 		}
 	}
+	// Both retry loops must keep the widened interval: one loop alone
+	// regressing to sleep 15 would pass a Contains check.
+	if got := strings.Count(workflow, `sleep 30`); got != 2 {
+		t.Errorf("dist-tag retry sleep-30 count = %d, want 2 (npm job + recovery)", got)
+	}
+	if !strings.Contains(workflow, `unavailable (registry lookup failed after 20 retries)`) {
+		t.Errorf("release workflow missing main-path lookup-failure diagnosis")
+	}
 	// The failure message must distinguish a stale value from a failed lookup
 	// and point propagation delay out to the human deciding on a retry.
 	for _, required := range []string{

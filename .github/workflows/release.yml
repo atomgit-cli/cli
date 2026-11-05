@@ -555,9 +555,13 @@ jobs:
                 echo "::error::existing npm package content differs from the verified release asset (${COORDINATE})"
                 exit 1
               }
-              TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
-              test "${TAG_VERSION}" = "${VERSION_NUM}" || {
-                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} points to ${TAG_VERSION}, expected ${VERSION_NUM}"
+              SKIP_TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
+              test "${SKIP_TAG_VERSION}" = "${VERSION_NUM}" || {
+                if [[ -z "${SKIP_TAG_VERSION}" ]]; then
+                  echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is unavailable (registry lookup failed); expected ${VERSION_NUM}"
+                else
+                  echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} points to ${SKIP_TAG_VERSION}, expected ${VERSION_NUM}. The content matched, so the registry may still be propagating; verify manually (npm view ${COORDINATE} dist-tags) before retrying the workflow."
+                fi
                 exit 1
               }
               echo "npm ${COORDINATE}@${VERSION_NUM} already published with identical content; skipping"
