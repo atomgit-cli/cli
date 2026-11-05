@@ -2744,7 +2744,7 @@ gc actions run watch <run-id> -R owner/repo --json
 
 - TTY 环境：按 `--interval`（默认 3 秒）定时刷新屏幕，展示 run 概要 + stages/jobs/steps 状态；到达终态后停止。
 - 非 TTY 环境（管道输出、`--no-interactive`）：默认输出单次快照后立即退出，不阻塞等待（符合 agent-friendly 契约）。
-- `--wait`：非交互模式下显式要求持续轮询到终态（逐轮输出快照，形成日志流）；配合 `--exit-status` 时与 TTY 行为一致。默认行为不变，脚本按需 opt-in。
+- `--wait`：非交互模式下显式要求持续轮询到终态（逐轮输出快照，形成日志流）；配合 `--exit-status` 时与 TTY 行为一致。默认行为不变，脚本按需 opt-in。`--json` 模式仍为单次输出（`--wait` 对 JSON 输出无效）。
 - `--compact`：仅展示包含失败 job 的 stage 和失败 step。
 - `--exit-status`：run 终态为 `FAILED`/`CANCELED` 时返回退出码 `1`，用于 CI 自动化。
 - 支持 `--json`：输出写入 stdout，原样透传 API 响应（同 `run view --json`）。
