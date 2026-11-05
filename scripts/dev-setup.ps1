@@ -30,6 +30,7 @@ $ToolsRoot = if ($env:GC_DEV_TOOLS_DIR) { $env:GC_DEV_TOOLS_DIR } else {
     Join-Path $env:LOCALAPPDATA 'gitcode-cli\dev-tools'
 }
 $ManagedBin = Join-Path $ToolsRoot 'bin'
+$RawSystemPath = $env:Path
 $PreCommitVenv = Join-Path $ToolsRoot "pre-commit-$PreCommitVersion"
 $ManagedMarker = 'rem Managed by gitcode-cli scripts/dev-setup.ps1'
 $ManagedGoTools = @{
@@ -93,6 +94,20 @@ function Test-IsManagedPath {
     }
     return $candidate.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
         $candidate.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-ManagedBinOnPath {
+    $root = [IO.Path]::GetFullPath($ManagedBin).TrimEnd('\', '/')
+    foreach ($entry in ($RawSystemPath -split ';')) {
+        if (-not $entry) { continue }
+        try {
+            $candidate = [IO.Path]::GetFullPath($entry.Trim('"')).TrimEnd('\', '/')
+        } catch {
+            continue
+        }
+        if ($candidate.Equals($root, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 
 function Get-SystemCommandPath {
@@ -714,7 +729,14 @@ try {
         else {
             & $go mod download
             if ($LASTEXITCODE -eq 0) { Write-Ok 'module dependencies resolved' }
-            else { Write-Gap 'go mod download failed' }
+            else {
+                Write-Gap 'go mod download failed'
+                Write-Info 'hint: check network reachability and go env GOPROXY.'
+                Write-Info 'If proxy.golang.org is unreachable, a public module mirror may help, for example:'
+                Write-Info '  go env -w GOPROXY=https://goproxy.cn,direct'
+                Write-Info '  go env -w GOPROXY=https://mirrors.aliyun.com/goproxy/,direct'
+                Write-Info '(examples only; pick one per your own network environment.)'
+            }
         }
 
         Write-Section 'Verification tools'
@@ -809,6 +831,12 @@ try {
         }
     }
 
+    # In check mode an absent managed bin on PATH is a gap: the pre-commit and
+    # pre-push hooks resolve gitleaks through PATH and would fail on commit.
+    if ($Check -and -not (Test-ManagedBinOnPath)) {
+        Write-Gap 'managed tools on PATH (git hooks depend on it)'
+    }
+
     Write-Host ''
     if ($script:Missing.Count) {
         Write-Host "incomplete: $($script:Missing.Count) dependency gap(s)"
@@ -820,8 +848,18 @@ try {
     } else {
         Write-Host 'dev environment ready.'
         Write-Host "Managed tools: $ManagedBin"
-        Write-Host 'No user PATH was changed. To use managed tools in this shell, run:'
-        Write-Host ('  $env:Path = "{0};$env:Path"' -f $ManagedBin)
+        if (Test-ManagedBinOnPath) {
+            Write-Host 'No user PATH was changed.'
+        } else {
+            Write-Host 'WARNING: managed tools are not on PATH. Git hooks (pre-commit / pre-push)'
+            Write-Host 'will fail with "gitleaks: command not found" until it is on PATH.'
+            Write-Host 'Fix the current shell:'
+            Write-Host ('  $env:Path = "{0};$env:Path"' -f $ManagedBin)
+            Write-Host 'Persist it (PowerShell profile example; pick your own profile file):'
+            $persistExample = "Add-Content -Path `$PROFILE -Value '`$env:Path = `"$ManagedBin;`$env:Path`"'"
+            Write-Host "  $persistExample"
+            Write-Host 'No user PATH was changed by this script.'
+        }
     }
 } finally {
     Remove-CheckEnvironment
