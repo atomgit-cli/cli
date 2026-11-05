@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -69,7 +70,7 @@ func TestNewCmdWatchFlagsExist(t *testing.T) {
 	cmd := NewCmdWatch(cmdutil.TestFactory(), func(opts *WatchOptions) error {
 		return nil
 	})
-	for _, flag := range []string{"repo", "interval", "compact", "exit-status", "json"} {
+	for _, flag := range []string{"repo", "interval", "compact", "exit-status", "wait", "json"} {
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)
@@ -427,11 +428,18 @@ func TestWatchRunNonTTYWaitPollsUntilTerminal(t *testing.T) {
 		Wait:       true,
 	}
 
+	start := time.Now()
 	if err := watchRun(opts); err != nil {
 		t.Fatalf("watchRun() error = %v", err)
 	}
 	if callCount != 3 {
 		t.Fatalf("API call count = %d, want 3 (non-TTY --wait polls until terminal)", callCount)
+	}
+	// Floor on the wall time proves the polling loop actually sleeps
+	// between attempts: without the interval the loop hammers the API
+	// (the sleep-removal mutation otherwise passes all assertions).
+	if elapsed := time.Since(start); elapsed < 2*time.Second {
+		t.Fatalf("watch elapsed %v, want >= 2s (two 1s interval sleeps)", elapsed)
 	}
 	got := out.String()
 	if !strings.Contains(got, "RUNNING") {
