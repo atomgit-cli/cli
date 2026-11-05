@@ -402,3 +402,79 @@ func failedRunJSON() string {
 			{"id":"step-2","name":"build","status":"FAILED"}]}]}]
 	}`
 }
+
+func TestWatchRunNonTTYWaitPollsUntilTerminal(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := iostreams.Test()
+	callCount := 0
+	opts := &WatchOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					if callCount < 3 {
+						return watchTestResponse(http.StatusOK, runningRunJSON()), nil
+					}
+					return watchTestResponse(http.StatusOK, completedRunJSON()), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Interval:   3,
+		Wait:       true,
+	}
+
+	if err := watchRun(opts); err != nil {
+		t.Fatalf("watchRun() error = %v", err)
+	}
+	if callCount != 3 {
+		t.Fatalf("API call count = %d, want 3 (non-TTY --wait polls until terminal)", callCount)
+	}
+	got := out.String()
+	if !strings.Contains(got, "RUNNING") {
+		t.Errorf("output should contain the RUNNING interim snapshot; got: %s", got)
+	}
+	if !strings.Contains(got, "COMPLETED") {
+		t.Errorf("output should contain the COMPLETED terminal snapshot; got: %s", got)
+	}
+}
+
+func TestWatchRunNonTTYWaitExitStatusOnFailed(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	callCount := 0
+	opts := &WatchOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					if callCount < 2 {
+						return watchTestResponse(http.StatusOK, runningRunJSON()), nil
+					}
+					return watchTestResponse(http.StatusOK, failedRunJSON()), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Interval:   3,
+		Wait:       true,
+		ExitStatus: true,
+	}
+
+	err := watchRun(opts)
+	if err == nil {
+		t.Fatal("watchRun() error = nil, want error for failed run with --wait --exit-status")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitError {
+		t.Fatalf("ExitCode = %d, want %d", got, cmdutil.ExitError)
+	}
+	if callCount != 2 {
+		t.Fatalf("API call count = %d, want 2", callCount)
+	}
+}
