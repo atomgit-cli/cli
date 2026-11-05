@@ -466,3 +466,31 @@ func assertOrdered(t *testing.T, content, first, second string) {
 		t.Fatalf("expected %q before %q", first, second)
 	}
 }
+
+// TestReleaseWorkflowDistTagRetryWindowCoverPropagation pins the retry
+// window of the post-publish dist-tag verification. The v0.16.0 release
+// observed roughly six minutes of registry CDN propagation while both the
+// npm job loop and the recovery helper retried for only 12x15s (3 minutes),
+// failing a fully published release (issue 636).
+func TestReleaseWorkflowDistTagRetryWindowCoverPropagation(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		`for ATTEMPT in $(seq 1 20); do`,
+		`for attempt in $(seq 1 20); do`,
+		`sleep 30`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing dist-tag retry window guard %q", required)
+		}
+	}
+	// The failure message must distinguish a stale value from a failed lookup
+	// and point propagation delay out to the human deciding on a retry.
+	for _, required := range []string{
+		`may still be propagating`,
+		`TAG_VERSION:-unavailable`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing dist-tag failure diagnosis %q", required)
+		}
+	}
+}

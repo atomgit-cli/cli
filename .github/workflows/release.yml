@@ -572,22 +572,27 @@ jobs:
           # Long-term parallel distribution invariant (docs/PACKAGING.md): a
           # completed release must leave all three coordinates on the same
           # dist-tag version. Bounded retries absorb registry propagation
-          # delay (observed >35s in the v0.14.1 release); a mismatch after
-          # the retries blocks the release.
+          # delay (observed >35s in v0.14.1 and ~6 minutes in v0.16.0, issue
+          # 636); a mismatch after the retries blocks the release with a
+          # message that separates a stale value from a failed lookup.
           for COORDINATE in "@gitcode-cli/cli" "@atomgit-cli/cli" "atomgit-cli"; do
-            for ATTEMPT in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            for ATTEMPT in $(seq 1 20); do
               # Same normalization as dist_tag_with_retry: a failed lookup is
               # a retry, not a step-killing errexit.
               TAG_VERSION="$(npm view "${COORDINATE}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
               if [[ "${TAG_VERSION}" = "${VERSION_NUM}" ]]; then
                 break
               fi
-              if [[ "${ATTEMPT}" -lt 12 ]]; then
-                sleep 15
+              if [[ "${ATTEMPT}" -lt 20 ]]; then
+                sleep 30
               fi
             done
             test "${TAG_VERSION}" = "${VERSION_NUM}" || {
-              echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; all three coordinates must publish ${VERSION_NUM}"
+              if [[ -z "${TAG_VERSION}" ]]; then
+                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is unavailable (registry lookup failed after 20 retries); all three coordinates must publish ${VERSION_NUM}"
+              else
+                echo "::error::npm dist-tag ${PUBLISH_TAG} for ${COORDINATE} is ${TAG_VERSION}; all three coordinates must publish ${VERSION_NUM}. The package version was published successfully, so the registry may still be propagating; verify manually (npm view ${COORDINATE} dist-tags) before retrying the workflow."
+              fi
               exit 1
             }
           done
@@ -721,18 +726,19 @@ jobs:
           # already produced a false-negative recovery gate in v0.14.0.
           dist_tag_with_retry() {
             local coordinate="$1" attempt tag_version=""
-            # 12x15s matches the main publish path: registry propagation was
-            # observed at >35s in the v0.14.1 release. A failed lookup
-            # (registry hiccup) must consume a retry, not kill the step
-            # through errexit.
-            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            # 20x30s matches the main publish path: registry propagation was
+            # observed at >35s in the v0.14.1 release and at ~6 minutes in
+            # the v0.16.0 release (issue 636). A failed lookup (registry
+            # hiccup) must consume a retry, not kill the step through
+            # errexit.
+            for attempt in $(seq 1 20); do
               tag_version="$(npm view "${coordinate}" "dist-tags.${PUBLISH_TAG}" 2>/dev/null || true)"
               if [[ "${tag_version}" = "${VERSION_NUM}" ]]; then
                 printf '%s' "${tag_version}"
                 return 0
               fi
-              if [[ "${attempt}" -lt 12 ]]; then
-                sleep 15
+              if [[ "${attempt}" -lt 20 ]]; then
+                sleep 30
               fi
             done
             printf '%s' "${tag_version}"
