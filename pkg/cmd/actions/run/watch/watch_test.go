@@ -423,7 +423,7 @@ func TestWatchRunNonTTYWaitPollsUntilTerminal(t *testing.T) {
 		},
 		Repository: "owner/repo",
 		RunID:      "run-1",
-		Interval:   3,
+		Interval:   1,
 		Wait:       true,
 	}
 
@@ -462,7 +462,7 @@ func TestWatchRunNonTTYWaitExitStatusOnFailed(t *testing.T) {
 		},
 		Repository: "owner/repo",
 		RunID:      "run-1",
-		Interval:   3,
+		Interval:   1,
 		Wait:       true,
 		ExitStatus: true,
 	}
