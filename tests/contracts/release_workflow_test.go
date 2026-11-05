@@ -491,6 +491,12 @@ func TestReleaseWorkflowDistTagRetryWindowCoverPropagation(t *testing.T) {
 	if !strings.Contains(workflow, `unavailable (registry lookup failed after 20 retries)`) {
 		t.Errorf("release workflow missing main-path lookup-failure diagnosis")
 	}
+	// The skip path (already-published branch) carries its own copy of the
+	// propagation guidance; pin both occurrences so removing either one
+	// fails this test.
+	if got := strings.Count(workflow, `may still be propagating`); got != 2 {
+		t.Errorf("dist-tag propagation hints = %d, want 2 (main loop + skip path)", got)
+	}
 	// The failure message must distinguish a stale value from a failed lookup
 	// and point propagation delay out to the human deciding on a retry.
 	for _, required := range []string{
