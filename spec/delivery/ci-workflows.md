@@ -106,7 +106,12 @@ GitHub 工作流 `.github/workflows/ci.yml` 保留原有跨平台覆盖：
 
 macOS 标签使用 `macos-latest`：`macos-14` 镜像已被 GitHub Actions 于 2026-11-02 官方退役
 （GitHub actions/runner-images 仓库 15226 号公告，Intel 与 arm64 均不延期），继续使用会使
-macOS 任务在队列阶段即被取消（2026-11-09 实测确认，迁移记录见 issue 639）。
+macOS 任务在队列阶段即被取消（2026-11-09 实测确认，迁移记录见 issue 639）。`macos-latest`
+现指向 macOS 26：其新 dyld 会拒绝加载缺少 LC_UUID 加载命令的 Go 测试二进制（报
+`dyld: missing LC_UUID load command` 后 abort），该链接器修复仅落到 Go 1.25 线（1.25.9
+backport，golang/go 仓库 78056 号 issue），因此镜像仓 CI 全部 job 统一钉
+`go-version: '1.25'`，并有契约测试钉住该版本防静默回退。本地开发与 GitCode 侧 CI 的 Go
+版本下限不变（1.22+，见 build-and-package.md 与 CONTRIBUTING.md）。
 
 GitCode 托管 runner 不提供 Docker daemon，因此 Docker 构建由 GitHub Linux `docker` Job 承担。GitCode
 原生工作流生成 `coverage.out`、Linux 二进制和 wheel，并使用 run ID 隔离制品名称；它不复用 GitHub
