@@ -29,8 +29,10 @@ var mirrorRequiredJobs = []string{"lint", "secret-scan", "test", "build", "docke
 
 // mirrorRequiredOS is the cross-platform coverage matrix: the mirror is the
 // only CI source for macOS and Windows compatibility evidence, so every
-// listed OS must stay in both the test and the build matrix.
-var mirrorRequiredOS = []string{"ubuntu-latest", "macos-14", "windows-latest"}
+// listed OS must stay in both the test and the build matrix. macOS uses
+// macos-latest because the macos-14 image was retired from GitHub Actions
+// on 2026-11-02 (issue 639).
+var mirrorRequiredOS = []string{"ubuntu-latest", "macos-latest", "windows-latest"}
 
 // pinnedActionValuePattern matches a resolved uses value pinned to a full
 // commit SHA. The line-oriented pinnedActionPattern in
@@ -240,7 +242,7 @@ func mutateMirrorDropTestWindows(doc *workflowDocument) {
 }
 
 func mutateMirrorDropBuildMacos(doc *workflowDocument) {
-	dropMirrorOS(doc, "build", "macos-14")
+	dropMirrorOS(doc, "build", "macos-latest")
 }
 
 func mutateMirrorDropBuildNeeds(doc *workflowDocument) {

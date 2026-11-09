@@ -100,9 +100,13 @@ GitHub 工作流 `.github/workflows/ci.yml` 保留原有跨平台覆盖：
 |-----|---------|------|
 | `lint` | ubuntu-latest | golangci-lint |
 | `secret-scan` | ubuntu-latest | gitleaks 全历史密钥扫描（`fetch-depth: 0` + `--redact=100` 脱敏输出） |
-| `test` | ubuntu-latest / macos-14 / windows-latest | release / package 版本校验 + 宿主机 setup 契约 + Go/Node 单元测试 + 竞态检测 + 真实旧 npm→本地新包升级、PATH 遮蔽与 bootstrap 烟测 + Python 单测（wrapper、AI 记录校验器、远端事实核验） + 生成资产 drift 检查（completions/ 先从新构建重新生成再一并校验）（ubuntu） + 覆盖率 |
-| `build` | ubuntu-latest / macos-14 / windows-latest | 跨平台 `go build` + `gc version` |
+| `test` | ubuntu-latest / macos-latest / windows-latest | release / package 版本校验 + 宿主机 setup 契约 + Go/Node 单元测试 + 竞态检测 + 真实旧 npm→本地新包升级、PATH 遮蔽与 bootstrap 烟测 + Python 单测（wrapper、AI 记录校验器、远端事实核验） + 生成资产 drift 检查（completions/ 先从新构建重新生成再一并校验）（ubuntu） + 覆盖率 |
+| `build` | ubuntu-latest / macos-latest / windows-latest | 跨平台 `go build` + `gc version` |
 | `docker` | ubuntu-latest | Docker 构建 + shell 补全 + wheel 入口冒烟 |
+
+macOS 标签使用 `macos-latest`：`macos-14` 镜像已被 GitHub Actions 于 2026-11-02 官方退役
+（GitHub actions/runner-images 仓库 15226 号公告，Intel 与 arm64 均不延期），继续使用会使
+macOS 任务在队列阶段即被取消（2026-11-09 实测确认，迁移记录见 issue 639）。
 
 GitCode 托管 runner 不提供 Docker daemon，因此 Docker 构建由 GitHub Linux `docker` Job 承担。GitCode
 原生工作流生成 `coverage.out`、Linux 二进制和 wheel，并使用 run ID 隔离制品名称；它不复用 GitHub
