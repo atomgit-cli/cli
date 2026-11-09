@@ -40,17 +40,6 @@ func TestListRepoMilestones(t *testing.T) {
 	}
 }
 
-func TestListPRReviews(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	reviews, err := ListPRReviews(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("ListPRReviews() error = %v", err)
-	}
-	if len(reviews) != 1 || reviews[0].State != "APPROVED" {
-		t.Fatalf("ListPRReviews() = %+v, want [APPROVED]", reviews)
-	}
-}
-
 func TestGetIssuePullRequests(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	// The mock handler may not have this endpoint; test that the function runs
@@ -161,29 +150,6 @@ func TestListCommentsForCommit(t *testing.T) {
 		t.Fatalf("ListCommentsForCommit() = %+v", comments)
 	}
 }
-
-func TestCloseMilestone(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := CloseMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("CloseMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
-func TestOpenMilestone(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := OpenMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("OpenMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
 func TestUpdateCommitComment(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	c, err := UpdateCommitComment(client, "owner", "test-repo", "1", "updated body")
@@ -218,18 +184,6 @@ func TestCreatePRComment(t *testing.T) {
 	}
 }
 
-func TestCreatePRReview(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	opts := &CreatePRReviewOptions{Event: "APPROVED", Body: "LGTM"}
-	r, err := CreatePRReview(client, "owner", "test-repo", 1, opts)
-	if err != nil {
-		t.Fatalf("CreatePRReview() error = %v", err)
-	}
-	if r.State != "APPROVED" {
-		t.Errorf("State = %q, want %q", r.State, "APPROVED")
-	}
-}
-
 func TestEditPR(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &UpdatePROptions{Title: "Updated PR"}
@@ -254,18 +208,6 @@ func TestReopenPullRequest(t *testing.T) {
 		t.Logf("ReopenPullRequest state = %q", pr.State)
 	}
 }
-
-func TestAddLabelsToIssue(t *testing.T) {
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	labels, err := AddLabelsToIssue(client, "owner", "test-repo", 1, []string{"bug", "enhancement"})
-	if err != nil {
-		t.Fatalf("AddLabelsToIssue() error = %v", err)
-	}
-	if len(labels) != 1 || labels[0].Name != "bug" {
-		t.Fatalf("AddLabelsToIssue() = %+v", labels)
-	}
-}
-
 func TestAddIssueLabels(t *testing.T) {
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	labels, err := AddIssueLabels(client, "owner", "test-repo", 1, []string{"bug"})

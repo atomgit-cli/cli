@@ -271,6 +271,7 @@ gc auth login --web
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
+- 不带 `--hostname` 时，登录目标与业务命令使用同一主机解析（`GC_HOST` > 上次登录主机 > `gitcode.com`）；设置 `GC_HOST` 后裸登录即为该主机建立本地认证。
 - 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见[认证模型](./AUTH.md)）。
 - 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆（Unix）/删除式（Windows 用户级）停用定义、`unset`、新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
 - 未设置环境变量时，登录成功输出保持安静（不再打印环境变量优先级提示）。
@@ -531,7 +532,7 @@ gc repo pr-settings view -R owner/repo --json
 ```
 
 说明：
-- 显示合并门禁（流水线必过/禁止自合入/强制合入/合并模式/删除源分支）、评审人（最小评审数/批准者/测试人）、Squash 设置、CLA 校验、轻量级 PR 等主要设置。`--json` 输出完整 24 项设置对象。
+- 显示合并门禁（流水线必过/禁止自合入/强制合入/合并模式/删除源分支/合并后关闭 issue）、评审人（最小评审数/批准者/测试人）、Squash 设置、CLA 校验、轻量级 PR 等主要设置。`--json` 输出完整 24 项设置对象。
 - `--json` 输出完整设置对象到 stdout。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 仓库不存在（HTTP 404）；`4` 认证错误。
 
@@ -552,12 +553,15 @@ gc repo pr-settings update --no-self-merge -R owner/repo
 # 设置合并模式为 fast-forward
 gc repo pr-settings update --merge-method ff -R owner/repo
 
+# 合并后关闭 PR 引用的 issue
+gc repo pr-settings update --close-issue-on-merge -R owner/repo
+
 # JSON 输出
 gc repo pr-settings update --pipeline-required -R owner/repo --json
 ```
 
 说明：
-- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--merge-method`（merge/rebase_merge/ff）。
+- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--close-issue-on-merge`（可用 `--close-issue-on-merge=false` 关闭）、`--merge-method`（merge/rebase_merge/ff）。
 - 至少提供一个字段。
 - `--json` 输出更新后的完整设置对象。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 仓库不存在；`4` 认证错误。
@@ -2730,6 +2734,9 @@ gc actions run watch <run-id> -R owner/repo --compact
 # run 失败时返回非零退出码（CI 脚本用）
 gc actions run watch <run-id> -R owner/repo --exit-status
 
+# 非交互环境（脚本/管道）中等待到终态
+gc actions run watch <run-id> -R owner/repo --wait --exit-status
+
 # JSON 输出（单次快照）
 gc actions run watch <run-id> -R owner/repo --json
 ```
@@ -2737,7 +2744,8 @@ gc actions run watch <run-id> -R owner/repo --json
 说明：
 
 - TTY 环境：按 `--interval`（默认 3 秒）定时刷新屏幕，展示 run 概要 + stages/jobs/steps 状态；到达终态后停止。
-- 非 TTY 环境（管道输出、`--no-interactive`）：输出单次快照后立即退出，不阻塞等待（符合 agent-friendly 契约）。
+- 非 TTY 环境（管道输出、`--no-interactive`）：默认输出单次快照后立即退出，不阻塞等待（符合 agent-friendly 契约）。
+- `--wait`：非交互模式下显式要求持续轮询到终态（逐轮输出快照，形成日志流）；配合 `--exit-status` 时与 TTY 行为一致。默认行为不变，脚本按需 opt-in。`--json` 模式仍为单次输出（`--wait` 对 JSON 输出无效）。
 - `--compact`：仅展示包含失败 job 的 stage 和失败 step。
 - `--exit-status`：run 终态为 `FAILED`/`CANCELED` 时返回退出码 `1`，用于 CI 自动化。
 - 支持 `--json`：输出写入 stdout，原样透传 API 响应（同 `run view --json`）。

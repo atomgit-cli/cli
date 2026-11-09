@@ -69,15 +69,6 @@ type PRComment struct {
 	DiffPosition interface{}  `json:"diff_position"`
 }
 
-// PRReview represents a review on a PR
-type PRReview struct {
-	ID          interface{}  `json:"id"`
-	User        *User        `json:"user"`
-	Body        string       `json:"body"`
-	State       string       `json:"state"`
-	SubmittedAt FlexibleTime `json:"submitted_at"`
-}
-
 // PRListOptions represents options for listing PRs
 type PRListOptions struct {
 	State     string `url:"state,omitempty"`
@@ -127,20 +118,6 @@ type CreatePRCommentOptions struct {
 	// side of the diff), not an offset within the diff hunk. The API resolves it
 	// to the diff_position (new_line) of the comment.
 	Position int `json:"position,omitempty"`
-}
-
-// CreatePRReviewOptions represents options for creating a PR review
-type CreatePRReviewOptions struct {
-	Body     string            `json:"body,omitempty"`
-	Event    string            `json:"event"`
-	Comments []PRReviewComment `json:"comments,omitempty"`
-}
-
-// PRReviewComment represents a comment in a review
-type PRReviewComment struct {
-	Path     string `json:"path"`
-	Position int    `json:"position"`
-	Body     string `json:"body"`
 }
 
 // MergePROptions represents options for merging a PR
@@ -441,16 +418,6 @@ func CreatePRComment(client *Client, owner, repo string, number int, opts *Creat
 	return &comment, nil
 }
 
-// CreatePRReview creates a review on a PR
-func CreatePRReview(client *Client, owner, repo string, number int, opts *CreatePRReviewOptions) (*PRReview, error) {
-	var review PRReview
-	err := client.Post(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/reviews", opts, &review)
-	if err != nil {
-		return nil, err
-	}
-	return &review, nil
-}
-
 // ReviewPROptions represents options for reviewing a PR
 type ReviewPROptions struct {
 	Force bool `json:"force,omitempty"` // Force approval (admin only)
@@ -526,16 +493,6 @@ type ResolvePRCommentOptions struct {
 // ResolvePRComment updates the resolution status of a PR comment
 func ResolvePRComment(client *Client, owner, repo string, number int, discussionID string, opts *ResolvePRCommentOptions) error {
 	return client.Put(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/comments/"+discussionID, opts, nil)
-}
-
-// ListPRReviews lists reviews on a PR
-func ListPRReviews(client *Client, owner, repo string, number int) ([]PRReview, error) {
-	var reviews []PRReview
-	err := client.Get(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/reviews", &reviews)
-	if err != nil {
-		return nil, err
-	}
-	return reviews, nil
 }
 
 // ListPRCommits lists commits in a PR

@@ -466,3 +466,45 @@ func assertOrdered(t *testing.T, content, first, second string) {
 		t.Fatalf("expected %q before %q", first, second)
 	}
 }
+
+// TestReleaseWorkflowDistTagRetryWindowCoverPropagation pins the retry
+// window of the post-publish dist-tag verification. The v0.16.0 release
+// observed roughly six minutes of registry CDN propagation while both the
+// npm job loop and the recovery helper retried for only 12x15s (3 minutes),
+// failing a fully published release (issue 636).
+func TestReleaseWorkflowDistTagRetryWindowCoverPropagation(t *testing.T) {
+	workflow := readReleaseWorkflow(t)
+	for _, required := range []string{
+		`for ATTEMPT in $(seq 1 20); do`,
+		`for attempt in $(seq 1 20); do`,
+		`sleep 30`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing dist-tag retry window guard %q", required)
+		}
+	}
+	// Both retry loops must keep the widened interval: one loop alone
+	// regressing to sleep 15 would pass a Contains check.
+	if got := strings.Count(workflow, `sleep 30`); got != 2 {
+		t.Errorf("dist-tag retry sleep-30 count = %d, want 2 (npm job + recovery)", got)
+	}
+	if !strings.Contains(workflow, `unavailable (registry lookup failed after 20 retries)`) {
+		t.Errorf("release workflow missing main-path lookup-failure diagnosis")
+	}
+	// The skip path (already-published branch) carries its own copy of the
+	// propagation guidance; pin both occurrences so removing either one
+	// fails this test.
+	if got := strings.Count(workflow, `may still be propagating`); got != 2 {
+		t.Errorf("dist-tag propagation hints = %d, want 2 (main loop + skip path)", got)
+	}
+	// The failure message must distinguish a stale value from a failed lookup
+	// and point propagation delay out to the human deciding on a retry.
+	for _, required := range []string{
+		`may still be propagating`,
+		`TAG_VERSION:-unavailable`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("release workflow missing dist-tag failure diagnosis %q", required)
+		}
+	}
+}

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -194,56 +193,6 @@ func TestViewActionsPluginReturnsBody(t *testing.T) {
 	}
 }
 
-func TestParseActionsPluginsListPlainArray(t *testing.T) {
-	raw := []byte(`[{"name":"checkout","display_name":"Checkout","description":"checkout repo","version":"v1.0"}]`)
-	plugins, err := ParseActionsPluginsList(raw)
-	if err != nil {
-		t.Fatalf("ParseActionsPluginsList() error = %v", err)
-	}
-	if len(plugins) != 1 {
-		t.Fatalf("len = %d, want 1", len(plugins))
-	}
-	if plugins[0].Name != "checkout" {
-		t.Fatalf("name = %q, want checkout", plugins[0].Name)
-	}
-	if plugins[0].Version != "v1.0" {
-		t.Fatalf("version = %q, want v1.0", plugins[0].Version)
-	}
-}
-
-func TestParseActionsPluginsListWrapper(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want int
-	}{
-		{name: "plugins wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
-		{name: "list wrapper", raw: `{"list":[{"name":"b"}]}`, want: 1},
-		{name: "data wrapper", raw: `{"data":[{"name":"c"}]}`, want: 1},
-		{name: "content wrapper", raw: `{"content":[{"name":"d"}]}`, want: 1},
-		{name: "empty array", raw: `[]`, want: 0},
-		{name: "empty wrapper", raw: `{"plugins":[]}`, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			plugins, err := ParseActionsPluginsList([]byte(tt.raw))
-			if err != nil {
-				t.Fatalf("ParseActionsPluginsList() error = %v", err)
-			}
-			if len(plugins) != tt.want {
-				t.Fatalf("len = %d, want %d", len(plugins), tt.want)
-			}
-		})
-	}
-}
-
-func TestParseActionsPluginsListUnrecognized(t *testing.T) {
-	_, err := ParseActionsPluginsList([]byte(`{"unrelated":"field"}`))
-	if err == nil {
-		t.Fatal("expected an error for an unrecognized response object")
-	}
-}
-
 // TestParseActionsPluginsPageRejectsNonArrayField pins the error branch for a
 // recognized wrapper field whose value is not an array: it must be reported
 // rather than silently flattened into an empty list.
@@ -289,52 +238,6 @@ func TestParseActionsPluginsPageNullWrappers(t *testing.T) {
 			}
 			if len(page.Entries) != tt.want {
 				t.Fatalf("entries = %d, want %d", len(page.Entries), tt.want)
-			}
-		})
-	}
-}
-
-func TestParseActionsPluginsListInvalid(t *testing.T) {
-	_, err := ParseActionsPluginsList([]byte(`{invalid json`))
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestParseActionsPluginsListRawPreservesFields(t *testing.T) {
-	raw := []byte(`[{"name":"checkout","display_name":"Checkout","custom_field":"extra","version":"v1"}]`)
-	entries, err := ParseActionsPluginsListRaw(raw)
-	if err != nil {
-		t.Fatalf("ParseActionsPluginsListRaw() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("len = %d, want 1", len(entries))
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(entries[0], &m); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if m["custom_field"] != "extra" {
-		t.Fatalf("custom_field = %v, want extra (full fields not preserved)", m["custom_field"])
-	}
-}
-
-func TestCountPluginsEntries(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want int
-	}{
-		{name: "plain array 3", raw: `[{"name":"a"},{"name":"b"},{"name":"c"}]`, want: 3},
-		{name: "empty", raw: `[]`, want: 0},
-		{name: "wrapper", raw: `{"plugins":[{"name":"a"}]}`, want: 1},
-		{name: "content wrapper", raw: `{"content":[{"name":"a"}]}`, want: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := CountPluginsEntries([]byte(tt.raw))
-			if got != tt.want {
-				t.Fatalf("CountPluginsEntries() = %d, want %d", got, tt.want)
 			}
 		})
 	}

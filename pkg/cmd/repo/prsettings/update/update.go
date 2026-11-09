@@ -30,6 +30,8 @@ type UpdateOptions struct {
 	ForceMergeSet bool
 	DeleteSrc     bool
 	DeleteSrcSet  bool
+	CloseIssue    bool
+	CloseIssueSet bool
 	MergeMethod   string
 	JSON          bool
 }
@@ -61,6 +63,9 @@ func NewCmdUpdate(f *cmdutil.Factory, runF func(*UpdateOptions) error) *cobra.Co
 
 			# Set merge method to fast-forward
 			$ gc repo pr-settings update --merge-method ff -R owner/repo
+
+			# Close the issues referenced by a merged pull request
+			$ gc repo pr-settings update --close-issue-on-merge -R owner/repo
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,6 +74,7 @@ func NewCmdUpdate(f *cmdutil.Factory, runF func(*UpdateOptions) error) *cobra.Co
 			opts.SelfMergeSet = cmd.Flags().Changed("no-self-merge")
 			opts.ForceMergeSet = cmd.Flags().Changed("force-merge")
 			opts.DeleteSrcSet = cmd.Flags().Changed("delete-source-branch")
+			opts.CloseIssueSet = cmd.Flags().Changed("close-issue-on-merge")
 			if runF != nil {
 				return runF(opts)
 			}
@@ -82,6 +88,7 @@ func NewCmdUpdate(f *cmdutil.Factory, runF func(*UpdateOptions) error) *cobra.Co
 	cmd.Flags().BoolVar(&opts.NoSelfMerge, "no-self-merge", false, "Disable merging own pull requests")
 	cmd.Flags().BoolVar(&opts.ForceMerge, "force-merge", false, "Allow admin force merge")
 	cmd.Flags().BoolVar(&opts.DeleteSrc, "delete-source-branch", false, "Delete source branch on merge")
+	cmd.Flags().BoolVar(&opts.CloseIssue, "close-issue-on-merge", false, "Close the issues referenced by a merged pull request")
 	cmd.Flags().StringVar(&opts.MergeMethod, "merge-method", "", "Merge method (merge/rebase_merge/ff)")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
@@ -106,6 +113,9 @@ func updateRun(opts *UpdateOptions) error {
 	if opts.DeleteSrcSet {
 		req.DeleteSourceBranchWhenMerged = &opts.DeleteSrc
 	}
+	if opts.CloseIssueSet {
+		req.CloseIssueWhenMrMerged = &opts.CloseIssue
+	}
 	if opts.MergeMethod != "" {
 		req.MergeMethod = opts.MergeMethod
 	}
@@ -115,6 +125,7 @@ func updateRun(opts *UpdateOptions) error {
 		req.DisableMergeBySelf == nil &&
 		req.CanForceMerge == nil &&
 		req.DeleteSourceBranchWhenMerged == nil &&
+		req.CloseIssueWhenMrMerged == nil &&
 		req.MergeMethod == "" {
 		return cmdutil.NewUsageError("at least one setting must be provided to update")
 	}

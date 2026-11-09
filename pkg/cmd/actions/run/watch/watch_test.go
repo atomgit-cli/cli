@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"gitcode.com/gitcode-cli/cli/api"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -69,7 +70,7 @@ func TestNewCmdWatchFlagsExist(t *testing.T) {
 	cmd := NewCmdWatch(cmdutil.TestFactory(), func(opts *WatchOptions) error {
 		return nil
 	})
-	for _, flag := range []string{"repo", "interval", "compact", "exit-status", "json"} {
+	for _, flag := range []string{"repo", "interval", "compact", "exit-status", "wait", "json"} {
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)
@@ -401,4 +402,87 @@ func failedRunJSON() string {
 			"status":"FAILED","steps":[{"id":"step-1","name":"checkout","status":"COMPLETED"},
 			{"id":"step-2","name":"build","status":"FAILED"}]}]}]
 	}`
+}
+
+func TestWatchRunNonTTYWaitPollsUntilTerminal(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := iostreams.Test()
+	callCount := 0
+	opts := &WatchOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					if callCount < 3 {
+						return watchTestResponse(http.StatusOK, runningRunJSON()), nil
+					}
+					return watchTestResponse(http.StatusOK, completedRunJSON()), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Interval:   1,
+		Wait:       true,
+	}
+
+	start := time.Now()
+	if err := watchRun(opts); err != nil {
+		t.Fatalf("watchRun() error = %v", err)
+	}
+	if callCount != 3 {
+		t.Fatalf("API call count = %d, want 3 (non-TTY --wait polls until terminal)", callCount)
+	}
+	// Floor on the wall time proves the polling loop actually sleeps
+	// between attempts: without the interval the loop hammers the API
+	// (the sleep-removal mutation otherwise passes all assertions).
+	if elapsed := time.Since(start); elapsed < 2*time.Second {
+		t.Fatalf("watch elapsed %v, want >= 2s (two 1s interval sleeps)", elapsed)
+	}
+	got := out.String()
+	if !strings.Contains(got, "RUNNING") {
+		t.Errorf("output should contain the RUNNING interim snapshot; got: %s", got)
+	}
+	if !strings.Contains(got, "COMPLETED") {
+		t.Errorf("output should contain the COMPLETED terminal snapshot; got: %s", got)
+	}
+}
+
+func TestWatchRunNonTTYWaitExitStatusOnFailed(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, _, _ := iostreams.Test()
+	callCount := 0
+	opts := &WatchOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					callCount++
+					if callCount < 2 {
+						return watchTestResponse(http.StatusOK, runningRunJSON()), nil
+					}
+					return watchTestResponse(http.StatusOK, failedRunJSON()), nil
+				}),
+			}, nil
+		},
+		Repository: "owner/repo",
+		RunID:      "run-1",
+		Interval:   1,
+		Wait:       true,
+		ExitStatus: true,
+	}
+
+	err := watchRun(opts)
+	if err == nil {
+		t.Fatal("watchRun() error = nil, want error for failed run with --wait --exit-status")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitError {
+		t.Fatalf("ExitCode = %d, want %d", got, cmdutil.ExitError)
+	}
+	if callCount != 2 {
+		t.Fatalf("API call count = %d, want 2", callCount)
+	}
 }

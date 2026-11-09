@@ -124,6 +124,16 @@ Project-managed tools are isolated from shared user tool directories:
 Neither script edits shell profiles or the user `PATH`. On Windows, add the
 managed tools for the current shell with
 `$env:Path = "$env:LOCALAPPDATA\gitcode-cli\dev-tools\bin;$env:Path"`.
+If the managed directory is not on `PATH`, the `gitleaks` pre-commit /
+pre-push hooks fail with `gitleaks: command not found` on your first
+`git commit`, because `.pre-commit-config.yaml` resolves gitleaks through
+`PATH`. The dev-setup ending warns about this, and `--check` / `-Check`
+reports the missing directory as a gap; persist the setting in your own
+shell profile (see the pasteable example the script prints).
+If `go mod download` fails, check network reachability and
+`go env GOPROXY`; a public Go module mirror (for example goproxy.cn or the
+Aliyun mirror) can work around an unreachable proxy.golang.org — pick per
+your own network environment.
 Managed wrappers are never written over files outside the dedicated directory,
 and the script refuses to replace an unrecognized wrapper inside it.
 

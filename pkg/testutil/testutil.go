@@ -144,17 +144,6 @@ func MockAPIHandler() http.Handler {
 		_, _ = w.Write([]byte(`{"id": "1", "number": 1, "merged": true}`))
 	})
 
-	mux.HandleFunc("/api/v5/repos/owner/test-repo/pulls/1/reviews", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == "GET" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"id": "1", "state": "APPROVED", "body": "LGTM"}]`))
-		} else if r.Method == "POST" {
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id": "1", "state": "APPROVED", "body": "Approved"}`))
-		}
-	})
-
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/pulls/1/comments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == "POST" {
@@ -192,10 +181,7 @@ func MockAPIHandler() http.Handler {
 
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/milestones/1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == "PATCH" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":1,"number":1,"title":"v1.1","state":"closed","description":"Updated"}`))
-		} else if r.Method == "DELETE" {
+		if r.Method == "DELETE" {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
 			w.WriteHeader(http.StatusOK)
@@ -265,13 +251,6 @@ func MockAPIHandler() http.Handler {
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/labels/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNoContent)
-	})
-
-	// Release asset upload
-	mux.HandleFunc("/api/v5/repos/owner/test-repo/releases/1/assets", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":1,"name":"test.txt","size":1024,"download_count":0}`))
 	})
 
 	// PR test endpoint

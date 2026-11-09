@@ -1,6 +1,8 @@
 package iostreams
 
 import (
+	"bytes"
+	"os"
 	"testing"
 )
 
@@ -96,5 +98,62 @@ func TestCanPromptNilSafe(t *testing.T) {
 	var s *IOStreams
 	if s.CanPrompt() {
 		t.Fatal("nil IOStreams CanPrompt() = true, want false")
+	}
+}
+
+func TestIsInputTerminal(t *testing.T) {
+	t.Run("/dev/null is not a terminal", func(t *testing.T) {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Skipf("cannot open /dev/null: %v", err)
+		}
+		t.Cleanup(func() { f.Close() })
+		if isInputTerminal(f) {
+			t.Fatal("isInputTerminal(/dev/null) = true, want false (/dev/null is a char device but not a terminal)")
+		}
+	})
+
+	t.Run("regular file is not a terminal", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "stdin")
+		if err != nil {
+			t.Fatalf("temp file: %v", err)
+		}
+		t.Cleanup(func() { f.Close() })
+		if isInputTerminal(f) {
+			t.Fatal("isInputTerminal(regular file) = true, want false")
+		}
+	})
+
+	t.Run("pipe is not a terminal", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		t.Cleanup(func() { r.Close(); w.Close() })
+		if isInputTerminal(r) {
+			t.Fatal("isInputTerminal(pipe) = true, want false")
+		}
+	})
+
+	t.Run("non-file reader is not a terminal", func(t *testing.T) {
+		if isInputTerminal(bytes.NewReader(nil)) {
+			t.Fatal("isInputTerminal(bytes.Reader) = true, want false")
+		}
+	})
+}
+
+func TestIsInputTTYDevNull(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skipf("cannot open /dev/null: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
+
+	oldStdin := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	if IsInputTTY() {
+		t.Fatal("IsInputTTY() with /dev/null stdin = true, want false")
 	}
 }

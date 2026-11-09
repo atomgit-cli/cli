@@ -32,7 +32,7 @@ case "$name" in
                 version="$(sed -n 's/^# version=//p' "${3:-}" | head -n 1)"
                 [[ -n "$module" && -n "$version" ]] && printf 'mod\t%s\t%s\n' "$module" "$version"
                 ;;
-            "mod download") ;;
+            "mod download") [[ -z "${MOD_DOWNLOAD_FAIL:-}" ]] || exit 1 ;;
             "list -mod=readonly")
                 printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
                     "${GOCACHE:-}" "${GOTMPDIR:-}" "${HOME:-}" \
@@ -124,6 +124,10 @@ first_status=$?
 set -e
 [[ $first_status -eq 0 ]]
 [[ "$first_output" == *"dev environment ready."* ]]
+[[ "$first_output" == *"WARNING: managed tools are not on PATH"* ]]
+[[ "$first_output" == *"pre-commit / pre-push"* ]]
+[[ "$first_output" == *"gitleaks: command not found"* ]]
+[[ "$first_output" == *">> ~/.bashrc"* ]]
 [[ ! -e "$TOKEN_LEAK" ]]
 [[ -x "$TOOLS_DIR/bin/golangci-lint" ]]
 [[ -x "$TOOLS_DIR/bin/gitleaks" ]]
@@ -145,8 +149,10 @@ set +e
 check_output="$(run_setup --check 2>&1)"
 check_status=$?
 set -e
-[[ $check_status -eq 0 ]]
-[[ "$check_output" == *"dev environment ready."* ]]
+[[ $check_status -eq 1 ]]
+[[ "$check_output" == *"incomplete: 1 dependency gap(s)"* ]]
+[[ "$check_output" == *"MISS managed tools on PATH"* ]]
+[[ "$check_output" != *"dev environment ready."* ]]
 [[ ! -e "$TOKEN_LEAK" ]]
 [[ -s "$CACHE_LOG" ]]
 ! grep -F "$TMP_ROOT/outside-cache" "$CACHE_LOG"
@@ -156,6 +162,18 @@ set -e
 ! grep -F "$TMP_ROOT/outside-gopath" "$CACHE_LOG"
 ! grep -F "$TMP_ROOT/outside-modcache|" "$CACHE_LOG"
 grep -F "file://$TMP_ROOT/outside-modcache/cache/download" "$CACHE_LOG" >/dev/null
+
+: >"$CALL_LOG"
+set +e
+modfail_output="$(MOD_DOWNLOAD_FAIL=1 run_setup 2>&1)"
+modfail_status=$?
+set -e
+[[ $modfail_status -eq 1 ]]
+[[ "$modfail_output" == *"MISS go mod download failed"* ]]
+[[ "$modfail_output" == *"go env GOPROXY"* ]]
+[[ "$modfail_output" == *"goproxy.cn,direct"* ]]
+[[ "$modfail_output" == *"mirrors.aliyun.com/goproxy/"* ]]
+[[ "$modfail_output" == *"examples only"* ]]
 
 PERSISTED_GO_ENV="$TMP_ROOT/go-env"
 PERSISTED_GOPATH="$TMP_ROOT/persisted go#path"
@@ -167,7 +185,7 @@ persisted_go_env_before="$(cat "$PERSISTED_GO_ENV")"
 set +e
 persisted_output="$(
     env -u GOPATH -u GOMODCACHE \
-        PATH="$STUB_BIN:/usr/bin:/bin" \
+        PATH="$TOOLS_DIR/bin:$STUB_BIN:/usr/bin:/bin" \
         GC_DEV_TOOLS_DIR="$TOOLS_DIR" \
         CALL_LOG="$CALL_LOG" TOKEN_LEAK="$TOKEN_LEAK" CACHE_LOG="$CACHE_LOG" \
         HOME="$TMP_ROOT/outside-home" GOENV="$PERSISTED_GO_ENV" \
@@ -177,6 +195,7 @@ persisted_status=$?
 set -e
 [[ $persisted_status -eq 0 ]]
 [[ "$persisted_output" == *"dev environment ready."* ]]
+[[ "$persisted_output" != *"MISS managed tools on PATH"* ]]
 grep -F "file://$TMP_ROOT/persisted%20mod%23cache/cache/download" "$CACHE_LOG" >/dev/null
 [[ "$(cat "$PERSISTED_GO_ENV")" == "$persisted_go_env_before" ]]
 
@@ -202,6 +221,7 @@ hijack_status=$?
 set -e
 [[ $hijack_status -eq 0 ]]
 [[ "$hijack_output" == *"dev environment ready."* ]]
+[[ "$hijack_output" != *"MISS managed tools on PATH"* ]]
 [[ ! -e "$MANAGED_HIJACK" ]]
 rm "$TOOLS_DIR/bin/go" "$MANAGED_BIN_ALIAS"
 
