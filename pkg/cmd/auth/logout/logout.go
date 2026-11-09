@@ -4,10 +4,13 @@ package logout
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
 
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/envtoken"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/config"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
@@ -39,14 +42,19 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			Log out of a GitCode account.
 
 			This removes the stored authentication token.
+			Hostnames are normalized and validated before logout.
+
+			On the default host, token environment variables are not removed.
+			The command prints current-session cleanup guidance on stderr.
 
 				Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
 			# Interactive logout with confirmation
 			$ gc auth logout
-			? Confirm logout of gitcode.com? Yes
-			✓ Logged out of gitcode.com
+			! This will log out of gitcode.com
+			Type the hostname to confirm: gitcode.com
+			✓ Cleared stored authentication for gitcode.com
 
 			# Logout from a specific hostname
 			$ gc auth logout --hostname gitcode.com
@@ -62,7 +70,7 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.Hostname, "hostname", "H", "", "The hostname of the GitCode instance to log out of")
+	cmd.Flags().StringVarP(&opts.Hostname, "hostname", "H", "", "Hostname of the GitCode instance to log out of (hostname only; normalized and validated)")
 	cmd.Flags().StringVarP(&opts.Username, "username", "u", "", "The username to log out of")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation prompt")
 
@@ -79,11 +87,12 @@ func logoutRun(opts *LogoutOptions) error {
 	if opts.Hostname == "" {
 		opts.Hostname, _ = authCfg.DefaultHost()
 	}
+	opts.Hostname, err = config.NormalizeTrustedHost(opts.Hostname)
+	if err != nil {
+		return cmdutil.NewUsageError(err.Error())
+	}
 
 	cs := opts.IO.ColorScheme()
-
-	// Check if there's an active token before prompting
-	_, source := authCfg.ActiveToken(opts.Hostname)
 
 	// Require confirmation before logout
 	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
@@ -100,11 +109,14 @@ func logoutRun(opts *LogoutOptions) error {
 	}
 
 	fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
-	if source == "GC_TOKEN" || source == "GITCODE_TOKEN" {
-		fmt.Fprintf(opts.IO.Out, "\n")
-		fmt.Fprintf(opts.IO.Out, "Environment token is still active. Unset it manually to fully log out:\n")
-		fmt.Fprintf(opts.IO.Out, "  unset GC_TOKEN\n")
-		fmt.Fprintf(opts.IO.Out, "  unset GITCODE_TOKEN\n")
+	if opts.Hostname == "gitcode.com" {
+		envVars := envtoken.SetEnvVars(os.LookupEnv)
+		if len(envVars) > 0 {
+			fmt.Fprint(opts.IO.ErrOut, "\n"+envtoken.ShortWarning(envtoken.Options{
+				EnvVars: envVars,
+				GOOS:    runtime.GOOS,
+			}))
+		}
 	}
 
 	return nil

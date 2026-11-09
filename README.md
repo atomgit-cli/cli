@@ -320,7 +320,7 @@ gitcode auth login
 
 说明：
 - `gc auth login` 会将认证信息持久化到本地配置目录
-- 如果设置了环境变量，环境变量始终覆盖本地配置
+- 默认主机 `gitcode.com` 下，如果设置了环境变量，环境变量会覆盖本地配置；非默认主机使用该主机本地配置
 - `gc auth logout` 只清理本地配置，不会自动取消环境变量
 - 详细规则见 [docs/AUTH.md](./docs/AUTH.md)
 

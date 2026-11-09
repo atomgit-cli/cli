@@ -534,6 +534,45 @@ func TestLoginInteractivePasteTokenAndConfirmation(t *testing.T) {
 	}
 }
 
+// TestLoginWithTokenSharesConfirmationReader guards the same buffered-reader
+// contract when the token itself is read from stdin with --with-token.
+func TestLoginWithTokenSharesConfirmationReader(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantSaved bool
+	}{
+		{name: "token and y pasted together", input: "test-token\ny\n", wantSaved: true},
+		{name: "token and n pasted together", input: "test-token\nn\n", wantSaved: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GC_TOKEN", "env-override")
+			t.Setenv("GITCODE_TOKEN", "")
+
+			io, _, _, errOut := iostreams.TestTTY()
+			io.In = bytes.NewBufferString(tt.input)
+			opts := newLoginTestOpts(t, io, "gitcode.com")
+
+			if err := loginWithToken(opts); err != nil {
+				t.Fatalf("loginWithToken() error = %v, want nil", err)
+			}
+			if !strings.Contains(errOut.String(), "仍要将本次登录保存到本地配置吗") {
+				t.Fatalf("stderr missing confirmation gate:\n%s", errOut.String())
+			}
+
+			token := storedTokenFor(t, "gitcode.com")
+			if tt.wantSaved && token != "test-token" {
+				t.Fatalf("stored token = %q, want test-token", token)
+			}
+			if !tt.wantSaved && token != "" {
+				t.Fatalf("stored token = %q, want empty", token)
+			}
+		})
+	}
+}
+
 // TestLoginEnvOverrideTokenVerifyFailsBeforeGate covers the "env set + invalid
 // token" matrix cell: verification fails first, so the gate never triggers,
 // nothing is saved, and no guidance is printed.
