@@ -105,8 +105,8 @@ func validateMirrorWorkflow(doc workflowDocument) []string {
 
 // validateMirrorGoVersion pins the toolchain floor the macos-latest lane
 // depends on: macOS 26 dyld aborts on Go test binaries that lack LC_UUID,
-// fixed only in the Go 1.25 line, so every setup-go step must stay on
-// mirrorRequiredGoVersion (issue 639).
+// a defect fixed in the 1.25.9 backport and the Go 1.26+ line, so every
+// setup-go step must stay on mirrorRequiredGoVersion (issues 639 and 640).
 func validateMirrorGoVersion(doc workflowDocument) []string {
 	var problems []string
 	for jobID, job := range doc.Jobs {

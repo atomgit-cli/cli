@@ -253,9 +253,19 @@ func TestReleaseWorkflowPinsRunnerAndToolchains(t *testing.T) {
 			t.Errorf("release workflow must not contain floating version %q", forbidden)
 		}
 	}
-	for _, required := range []string{"runs-on: ubuntu-24.04", "go-version: '1.26.10'", "python-version: '3.11.9'"} {
-		if !strings.Contains(workflow, required) {
-			t.Errorf("release workflow missing pinned version %q", required)
+	// Count, not Contains: a bare presence check would stay green when only
+	// one of several pinned jobs regresses to an old toolchain (the
+	// single-side drift observed in the issue 640 review).
+	for _, pin := range []struct {
+		needle string
+		want   int
+	}{
+		{"runs-on: ubuntu-24.04", 8},
+		{"go-version: '1.26.10'", 2},
+		{"python-version: '3.11.9'", 2},
+	} {
+		if got := strings.Count(workflow, pin.needle); got != pin.want {
+			t.Errorf("release workflow pinned %q appears %d times, want %d (single-side regression or new job drift)", pin.needle, got, pin.want)
 		}
 	}
 }
