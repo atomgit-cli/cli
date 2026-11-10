@@ -29,8 +29,18 @@ var mirrorRequiredJobs = []string{"lint", "secret-scan", "test", "build", "docke
 
 // mirrorRequiredOS is the cross-platform coverage matrix: the mirror is the
 // only CI source for macOS and Windows compatibility evidence, so every
-// listed OS must stay in both the test and the build matrix.
-var mirrorRequiredOS = []string{"ubuntu-latest", "macos-14", "windows-latest"}
+// listed OS must stay in both the test and the build matrix. macOS uses
+// macos-latest because the macos-14 image was retired from GitHub Actions
+// on 2026-11-02 (issue 639).
+var mirrorRequiredOS = []string{"ubuntu-latest", "macos-latest", "windows-latest"}
+
+// mirrorRequiredGoVersion is the toolchain every setup-go step in the mirror
+// workflow must pin. macOS 26 (what macos-latest resolves to) hard-rejects
+// Mach-O test binaries without an LC_UUID load command in its new dyld, and
+// the linker fix only reached the Go 1.25 line (1.25.9 backport, golang/go
+// issue 78056), so a downgrade would kill the macos lane with cryptic dyld
+// abort traps (issue 639).
+const mirrorRequiredGoVersion = "1.25"
 
 // pinnedActionValuePattern matches a resolved uses value pinned to a full
 // commit SHA. The line-oriented pinnedActionPattern in
@@ -63,6 +73,7 @@ func TestMirrorWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "gitleaks loses redaction", mutate: mutateMirrorStripRedact, want: "--redact"},
 		{name: "gitleaks redaction zeroed", mutate: mutateMirrorZeroRedact, want: "--redact"},
 		{name: "job-level permission escalation", mutate: mutateMirrorElevateJobPermissions, want: "must not exceed"},
+		{name: "go-version downgraded", mutate: mutateMirrorDowngradeGoVersion, want: "go-version"},
 	}
 
 	for _, tt := range tests {
@@ -86,6 +97,26 @@ func validateMirrorWorkflow(doc workflowDocument) []string {
 	problems = append(problems, validateMirrorPermissions(doc)...)
 	problems = append(problems, validateMirrorActionPinning(doc)...)
 	problems = append(problems, validateMirrorJobPermissions(doc)...)
+	problems = append(problems, validateMirrorGoVersion(doc)...)
+	return problems
+}
+
+// validateMirrorGoVersion pins the toolchain floor the macos-latest lane
+// depends on: macOS 26 dyld aborts on Go test binaries that lack LC_UUID,
+// fixed only in the Go 1.25 line, so every setup-go step must stay on
+// mirrorRequiredGoVersion (issue 639).
+func validateMirrorGoVersion(doc workflowDocument) []string {
+	var problems []string
+	for jobID, job := range doc.Jobs {
+		for _, step := range job.Steps {
+			if !strings.Contains(step.Uses, "setup-go") {
+				continue
+			}
+			if got := stringValue(step.With["go-version"]); got != mirrorRequiredGoVersion {
+				problems = append(problems, fmt.Sprintf("job %q setup-go must pin go-version %q for the macOS 26 lane (got %q)", jobID, mirrorRequiredGoVersion, got))
+			}
+		}
+	}
 	return problems
 }
 
@@ -240,7 +271,7 @@ func mutateMirrorDropTestWindows(doc *workflowDocument) {
 }
 
 func mutateMirrorDropBuildMacos(doc *workflowDocument) {
-	dropMirrorOS(doc, "build", "macos-14")
+	dropMirrorOS(doc, "build", "macos-latest")
 }
 
 func mutateMirrorDropBuildNeeds(doc *workflowDocument) {
@@ -314,4 +345,19 @@ func mutateMirrorUnpinAction(doc *workflowDocument) {
 		}
 	}
 	doc.Jobs["lint"] = job
+}
+
+// mutateMirrorDowngradeGoVersion regresses the toolchain pin on one job back
+// to the 1.22 line that macOS 26 dyld cannot run.
+func mutateMirrorDowngradeGoVersion(doc *workflowDocument) {
+	job := doc.Jobs["test"]
+	for i := range job.Steps {
+		if strings.Contains(job.Steps[i].Uses, "setup-go") {
+			if job.Steps[i].With == nil {
+				job.Steps[i].With = map[string]any{}
+			}
+			job.Steps[i].With["go-version"] = "1.22"
+		}
+	}
+	doc.Jobs["test"] = job
 }
