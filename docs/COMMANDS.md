@@ -350,9 +350,19 @@ gc auth setup-git --hostname gitcode.com
 - `auth setup-git` 将 gc 配置为 git 的 credential helper，使 git 操作（clone/pull/push）自动携带 GitCode 认证。
 - 以 `--add` 追加方式写入 `git config --global credential."https://<host>".helper`，不覆盖已有 credential helper 配置。
 - 幂等：重复运行不产生重复条目，已配置相同 helper 时直接跳过。
-- 配置的 helper 指向 `gc auth git-credential`（credential 协议响应子命令，后续交付）；当前 setup-git 仅完成配置写入。
+- 配置的 helper 指向 `gc auth git-credential`，Git 可通过该命令读取当前 CLI 登录凭证。
 - `--hostname` 支持自定义主机，默认使用配置的默认主机（`gitcode.com`）。
 - 纯客户端命令，不调用 GitCode API，不读取或输出 token。
+
+### auth git-credential - Git credential 协议
+
+由 Git 在配置 `auth setup-git` 后调用：`gc auth git-credential <get|store|erase>`。
+
+- `get` 从 stdin 读取 Git 的 `key=value` 协议，仅为 HTTPS 请求输出 `username` / `password`，无需交互确认。输出是敏感凭证，请勿手工运行并记录到终端或日志。
+- `gitcode.com` 使用 `GC_TOKEN`、`GITCODE_TOKEN`、本地活动用户 token 的优先级；其他主机只使用该主机已有的本地登录，不使用通用环境变量 token。
+- 不支持的主机、协议或未登录的主机无输出；无效、重复或过大的请求报错，错误中不包含输入内容。
+- `store` / `erase` 不修改登录配置；请使用 `auth login` / `auth logout` 管理登录。
+- 输入最多 64 KiB，未知扩展字段会被忽略。不调用 API，不探测远端。
 
 ---
 

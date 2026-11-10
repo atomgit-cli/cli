@@ -141,3 +141,13 @@ export HTTP_PROXY="proxy.example.com:8080"  # ✗
 # 正确：包含完整 URL
 export HTTP_PROXY="http://proxy.example.com:8080"  # ✓
 ```
+
+## Git credential helper
+
+运行 `gc auth setup-git` 将当前可执行文件注册为指定 HTTPS 主机的 Git credential helper。
+Git 通过 `gc auth git-credential get` 的 stdin/stdout 协议获取凭证，不需要交互确认，
+不应将该协议输出记录到日志。`auth token` / `auth status --show-token` 的人工确认要求保持不变。
+
+Helper 对 `gitcode.com` 复用环境变量优先级；自定义主机只读取该主机已有的本地登录，
+不会接收通用环境变量 token。HTTP、非法主机和无凭证请求不返回凭证。
+`store` / `erase` 是 no-op，不会覆盖或删除 CLI 登录。
