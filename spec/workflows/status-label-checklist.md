@@ -29,15 +29,15 @@
 
 ## PR 状态更新时机
 
-**注意**：`gc pr edit --labels` 是替换操作，每次必须携带完整四维标签（已打 `sig/*` 时须一并携带）。
+**注意**：`gc pr edit --replace-labels` 是替换操作，每次必须携带完整四维标签（已打 `sig/*` 时须一并携带）。它带确认门，非交互环境（AI 代理、脚本）执行必须加 `--yes`。不要用 `--labels`——它是增量别名（只添加、不移除未列出的标签），实测会导致 status 标签累积。
 
 | 步骤 | 操作命令 | 状态变化 |
 |------|----------|----------|
-| 创建 PR 后 | `gc pr edit <n> -R owner/repo --labels status/draft,type/*,risk/*,scope/*` | 设置初始四维标签 |
-| 自检完成后 | `gc pr edit <n> -R owner/repo --labels status/self-checked,type/*,risk/*,scope/*` | status: draft → self-checked |
-| 进入评审前 | `gc pr edit <n> -R owner/repo --labels status/ready-for-review,type/*,risk/*,scope/*` | status: self-checked → ready-for-review |
-| 评审通过后 | `gc pr edit <n> -R owner/repo --labels status/approved,type/*,risk/*,scope/*` | status: ready-for-review → approved |
-| 合入主干后 | `gc pr edit <n> -R owner/repo --labels status/merged,type/*,risk/*,scope/*` | status: approved → merged |
+| 创建 PR 后 | `gc pr edit <n> -R owner/repo --replace-labels status/draft,type/*,risk/*,scope/* --yes` | 设置初始四维标签 |
+| 自检完成后 | `gc pr edit <n> -R owner/repo --replace-labels status/self-checked,type/*,risk/*,scope/* --yes` | status: draft → self-checked |
+| 进入评审前 | `gc pr edit <n> -R owner/repo --replace-labels status/ready-for-review,type/*,risk/*,scope/* --yes` | status: self-checked → ready-for-review |
+| 评审通过后 | `gc pr edit <n> -R owner/repo --replace-labels status/approved,type/*,risk/*,scope/* --yes` | status: ready-for-review → approved |
+| 合入主干后 | `gc pr edit <n> -R owner/repo --replace-labels status/merged,type/*,risk/*,scope/* --yes` | status: approved → merged |
 
 ## Label 维度要求
 
@@ -63,14 +63,16 @@ gc issue label 123 --add status/verified --remove status/triage -R owner/repo
 gc issue label 123 --add status/in-progress -R owner/repo
 gc issue label 123 --add status/merged --remove status/in-progress,status/triage -R owner/repo
 
-# PR 状态推进（pr edit --labels 是替换操作，必须携带完整四维标签）
-gc pr edit 456 -R owner/repo --labels status/draft,type/feature,risk/low,scope/pr
-gc pr edit 456 -R owner/repo --labels status/self-checked,type/feature,risk/low,scope/pr
-gc pr edit 456 -R owner/repo --labels status/ready-for-review,type/feature,risk/low,scope/pr
-gc pr edit 456 -R owner/repo --labels status/approved,type/feature,risk/low,scope/pr
-gc pr edit 456 -R owner/repo --labels status/merged,type/feature,risk/low,scope/pr
+# PR 状态推进（pr edit --replace-labels 是替换操作，必须携带完整四维标签；非交互执行需 --yes 跳过确认门）
+gc pr edit 456 -R owner/repo --replace-labels status/draft,type/feature,risk/low,scope/pr --yes
+gc pr edit 456 -R owner/repo --replace-labels status/self-checked,type/feature,risk/low,scope/pr --yes
+gc pr edit 456 -R owner/repo --replace-labels status/ready-for-review,type/feature,risk/low,scope/pr --yes
+gc pr edit 456 -R owner/repo --replace-labels status/approved,type/feature,risk/low,scope/pr --yes
+gc pr edit 456 -R owner/repo --replace-labels status/merged,type/feature,risk/low,scope/pr --yes
 # 已打 sig/* 标签时，状态推进必须携带（替换语义，遗漏即丢失）：
-gc pr edit 456 -R owner/repo --labels status/self-checked,type/feature,risk/low,scope/pr,sig/pr
+gc pr edit 456 -R owner/repo --replace-labels status/self-checked,type/feature,risk/low,scope/pr,sig/pr --yes
+# 只增删个别标签且保留其余时，用增量组合（--labels 也是增量别名，但语义不如显式组合清晰）：
+gc pr edit 456 -R owner/repo --add-label status/merged --remove-label status/approved
 ```
 
 ---

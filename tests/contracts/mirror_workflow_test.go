@@ -39,8 +39,10 @@ var mirrorRequiredOS = []string{"ubuntu-latest", "macos-latest", "windows-latest
 // Mach-O test binaries without an LC_UUID load command in its new dyld, and
 // the linker fix only reached the Go 1.25 line (1.25.9 backport, golang/go
 // issue 78056), so a downgrade would kill the macos lane with cryptic dyld
-// abort traps (issue 639).
-const mirrorRequiredGoVersion = "1.25"
+// abort traps (issue 639). The pin tracks a supported line: 1.25 itself
+// left the support window once 1.27 GA'd, so the floor moved to 1.26
+// (issue 640).
+const mirrorRequiredGoVersion = "1.26"
 
 // pinnedActionValuePattern matches a resolved uses value pinned to a full
 // commit SHA. The line-oriented pinnedActionPattern in
@@ -103,8 +105,8 @@ func validateMirrorWorkflow(doc workflowDocument) []string {
 
 // validateMirrorGoVersion pins the toolchain floor the macos-latest lane
 // depends on: macOS 26 dyld aborts on Go test binaries that lack LC_UUID,
-// fixed only in the Go 1.25 line, so every setup-go step must stay on
-// mirrorRequiredGoVersion (issue 639).
+// a defect fixed in the 1.25.9 backport and the Go 1.26+ line, so every
+// setup-go step must stay on mirrorRequiredGoVersion (issues 639 and 640).
 func validateMirrorGoVersion(doc workflowDocument) []string {
 	var problems []string
 	for jobID, job := range doc.Jobs {
