@@ -253,7 +253,7 @@ func TestReleaseWorkflowPinsRunnerAndToolchains(t *testing.T) {
 			t.Errorf("release workflow must not contain floating version %q", forbidden)
 		}
 	}
-	for _, required := range []string{"runs-on: ubuntu-24.04", "go-version: '1.22.12'", "python-version: '3.11.9'"} {
+	for _, required := range []string{"runs-on: ubuntu-24.04", "go-version: '1.26.10'", "python-version: '3.11.9'"} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing pinned version %q", required)
 		}
@@ -375,7 +375,7 @@ func TestPackageScriptPinsNfpm(t *testing.T) {
 	}
 	script := string(data)
 	if !strings.Contains(script, "nfpm/v2/cmd/nfpm@v2.41.3") || strings.Contains(script, "nfpm@latest") {
-		t.Fatal("package script must recommend the Go 1.22-compatible pinned nfpm version")
+		t.Fatal("package script must recommend the pinned nfpm version")
 	}
 }
 
