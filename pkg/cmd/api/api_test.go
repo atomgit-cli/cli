@@ -700,3 +700,219 @@ func TestRunIncludeWithJQ(t *testing.T) {
 		t.Fatalf("output missing filtered body after header block: %q", got)
 	}
 }
+
+func TestRunSlurpRejectsJQ(t *testing.T) {
+	// gh rejects this combination explicitly; silently ignoring --jq
+	// would hand consumers unfiltered bulk data.
+	ioStreams, _, _, _ := testutil.NewTestIOStreams()
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return http.DefaultClient, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+		Slurp:      true,
+		JQ:         ".[] | .n",
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
+
+func TestRunPaginateSlurpEmptyFirstPageOutputsEmptyArray(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo/issues?per_page=2",
+		Method:     "GET",
+		Paginate:   true,
+		Slurp:      true,
+	})
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if got := out.String(); got != "[]\n" {
+		t.Fatalf("stdout = %q, want %q (empty array, not null)", got, "[]\n")
+	}
+}
+
+func TestRunFieldsRejectsMalformedFieldBeforeAuth(t *testing.T) {
+	// Field format validation must happen before authentication so a
+	// usage error (exit 2) is reported even without any credentials.
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	os.Unsetenv("GC_TOKEN")
+	os.Unsetenv("GITCODE_TOKEN")
+	ioStreams, _, _, _ := testutil.NewTestIOStreams()
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return http.DefaultClient, nil },
+		Endpoint:   "repos/owner/repo",
+		Fields:     []string{"novalue"},
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d (usage before auth)", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
+
+func TestRunPaginateRejectsFields(t *testing.T) {
+	ioStreams, _, _, _ := testutil.NewTestIOStreams()
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return http.DefaultClient, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+		Fields:     []string{"k=v"},
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
+
+func TestRunPaginate304(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Etag", `"x"`)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want 304 error")
+	}
+	if !strings.Contains(err.Error(), "304") {
+		t.Fatalf("error = %q, want 304 mention", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty without --include", out.String())
+	}
+}
+
+func TestRun304ConditionalRequestWithIfNoneMatch(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"abc123"` {
+			w.Header().Set("Etag", `"abc123"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Etag", `"abc123"`)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	// First request: 200 with ETag. Second: conditional request hits 304.
+	first := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo",
+		Method:     "GET",
+		Include:    true,
+	})
+	if first != nil {
+		t.Fatalf("first run() error = %v", first)
+	}
+	ioStreams2, _, out2, _ := testutil.NewTestIOStreams()
+	second := run(&Options{
+		IO:         ioStreams2,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo",
+		Method:     "GET",
+		Headers:    []string{"If-None-Match: \"abc123\""},
+		Include:    true,
+	})
+	if second == nil {
+		t.Fatal("conditional run() error = nil, want 304 error")
+	}
+	if !strings.Contains(second.Error(), "304") {
+		t.Fatalf("error = %q, want 304 mention", second.Error())
+	}
+	if !strings.Contains(out2.String(), "HTTP/1.1 304") || !strings.Contains(out2.String(), "Etag: \"abc123\"") {
+		t.Fatalf("stdout = %q, want 304 headers", out2.String())
+	}
+	_ = out
+}
+
+func TestRunIncludeMultiValueHeader(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "a=1; path=/")
+		w.Header().Add("Set-Cookie", "b=2; path=/")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo",
+		Method:     "GET",
+		Include:    true,
+	})
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Set-Cookie: a=1; path=/\n") || !strings.Contains(got, "Set-Cookie: b=2; path=/\n") {
+		t.Fatalf("output missing multi-value headers: %q", got)
+	}
+}
+
+func TestRunJQObjectResultAsCompactJSON(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"user":{"name":"octo","id":7}}`))
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "user",
+		Method:     "GET",
+		JQ:         ".user",
+	})
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if got := out.String(); got != "{\"id\":7,\"name\":\"octo\"}\n" {
+		t.Fatalf("stdout = %q, want compact JSON object line", got)
+	}
+}
+
+func TestRunBodyWithTrailingNewlineNotDuplicated(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{\"ok\":true}\n"))
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if got := out.String(); got != "{\"ok\":true}\n" {
+		t.Fatalf("stdout = %q, want single trailing newline", got)
+	}
+}

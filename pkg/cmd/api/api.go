@@ -105,9 +105,11 @@ func NewCmdAPI(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use - for stdin)")
 	cmd.Flags().BoolVar(&opts.Include, "include", false, "Include the response status line and headers in the output")
 	cmd.Flags().BoolVar(&opts.Paginate, "paginate", false, "Follow the page query parameter until an empty page")
-	cmd.Flags().BoolVar(&opts.Slurp, "slurp", false, "Merge paginated pages into a single JSON array (requires --paginate)")
+	cmd.Flags().BoolVar(&opts.Slurp, "slurp", false,
+		"Merge paginated pages into a single JSON array (requires --paginate)")
 	cmd.Flags().StringVar(&opts.JQ, "jq", "", "Filter the response body through a jq expression")
-	cmd.Flags().StringArrayVarP(&opts.Fields, "field", "f", nil, "Add a key=value string field; fields are sent as a JSON request body")
+	cmd.Flags().StringArrayVarP(&opts.Fields, "field", "f", nil,
+		"Add a key=value string field; fields are sent as a JSON request body")
 
 	return cmd
 }
@@ -117,7 +119,7 @@ func run(opts *Options) error {
 		return err
 	}
 
-	jqQuery, err := parseJQFilter(opts.JQ)
+	jqCode, err := parseJQFilter(opts.JQ)
 	if err != nil {
 		return err
 	}
@@ -149,18 +151,19 @@ func run(opts *Options) error {
 	}
 
 	if opts.Paginate {
-		return runPaginated(opts, client, headers, jqQuery)
+		return runPaginated(opts, client, headers, jqCode)
 	}
 
 	resp, err := client.RawREST(method, opts.Endpoint, body, headers)
 	if err != nil {
 		return err
 	}
-	return writeResponse(opts, resp, jqQuery)
+	return writeResponse(opts, resp, jqCode)
 }
 
-// validateFlagCombos rejects flag combinations that cannot work together
-// before any network activity happens.
+// validateFlagCombos rejects flag combinations and formats that cannot work
+// together before authentication or any network activity happens, so usage
+// errors are reported with exit 2 even in unauthenticated environments.
 func validateFlagCombos(opts *Options) error {
 	if opts.Paginate {
 		method := strings.ToUpper(strings.TrimSpace(opts.Method))
@@ -176,14 +179,27 @@ func validateFlagCombos(opts *Options) error {
 	} else if opts.Slurp {
 		return cmdutil.NewUsageError("--slurp requires --paginate")
 	}
-	if len(opts.Fields) > 0 && strings.TrimSpace(opts.Input) != "" {
-		return cmdutil.NewUsageError("--field and --input cannot be combined; choose one request body source")
+	if opts.Slurp && strings.TrimSpace(opts.JQ) != "" {
+		// gh rejects this combination too; silently dropping the filter
+		// would hand consumers unfiltered bulk data.
+		return cmdutil.NewUsageError("--slurp cannot be combined with --jq")
+	}
+	if len(opts.Fields) > 0 {
+		if strings.TrimSpace(opts.Input) != "" {
+			return cmdutil.NewUsageError("--field and --input cannot be combined; choose one request body source")
+		}
+		for _, raw := range opts.Fields {
+			key, _, ok := strings.Cut(raw, "=")
+			if !ok || strings.TrimSpace(key) == "" {
+				return cmdutil.NewUsageError("--field must be in 'key=value' format")
+			}
+		}
 	}
 	return nil
 }
 
 // parseJQFilter compiles the --jq expression, or returns nil when unset.
-func parseJQFilter(filter string) (*gojq.Query, error) {
+func parseJQFilter(filter string) (*gojq.Code, error) {
 	if strings.TrimSpace(filter) == "" {
 		return nil, nil
 	}
@@ -191,18 +207,23 @@ func parseJQFilter(filter string) (*gojq.Query, error) {
 	if err != nil {
 		return nil, cmdutil.NewUsageError(fmt.Sprintf("invalid --jq filter: %v", err))
 	}
-	return query, nil
+	// Compile once (pagination reuses it per page). Never pass
+	// WithEnvironLoader(os.Environ) here: it would let --jq expressions
+	// read $ENV.GC_TOKEN and print the token to stdout.
+	code, err := gojq.Compile(query)
+	if err != nil {
+		return nil, cmdutil.NewUsageError(fmt.Sprintf("invalid --jq filter: %v", err))
+	}
+	return code, nil
 }
 
 // buildRequestBody resolves the request body from --field pairs or --input.
+// Field format validation happens earlier in validateFlagCombos.
 func buildRequestBody(opts *Options) (io.Reader, io.Closer, error) {
 	if len(opts.Fields) > 0 {
 		obj := make(map[string]string, len(opts.Fields))
 		for _, raw := range opts.Fields {
-			key, value, ok := strings.Cut(raw, "=")
-			if !ok || strings.TrimSpace(key) == "" {
-				return nil, nil, cmdutil.NewUsageError("--field must be in 'key=value' format")
-			}
+			key, value, _ := strings.Cut(raw, "=")
 			obj[strings.TrimSpace(key)] = value
 		}
 		data, err := json.Marshal(obj)
@@ -228,18 +249,14 @@ func buildRequestBody(opts *Options) (io.Reader, io.Closer, error) {
 // runPaginated fetches pages by injecting the page query parameter until a
 // page comes back empty. Non-slurp output emits each page body as-is (or
 // filtered); --slurp merges all items into one JSON array.
-func runPaginated(opts *Options, client *api.Client, headers map[string]string, jqQuery *gojq.Query) error {
-	var merged []json.RawMessage
+func runPaginated(opts *Options, client *api.Client, headers map[string]string, jqCode *gojq.Code) error {
+	merged := make([]json.RawMessage, 0)
 	var firstResp *api.RawResponse
 	for page := 1; ; page++ {
 		if page > paginatePageLimit {
-			return fmt.Errorf("--paginate exceeded the page limit of %d for %q: narrow the query (per_page, filters) or iterate pages manually", paginatePageLimit, opts.Endpoint)
+			return pageLimitError(opts.Endpoint)
 		}
-		endpoint, err := withPageQuery(opts.Endpoint, page)
-		if err != nil {
-			return err
-		}
-		resp, err := client.RawREST(http.MethodGet, endpoint, nil, headers)
+		resp, err := fetchPage(client, opts.Endpoint, page, headers)
 		if err != nil {
 			return err
 		}
@@ -247,17 +264,12 @@ func runPaginated(opts *Options, client *api.Client, headers map[string]string, 
 			firstResp = resp
 		}
 		if resp.StatusCode == http.StatusNotModified {
-			if opts.Include {
-				if err := writeInclude(opts.IO.Out, resp); err != nil {
-					return err
-				}
-			}
-			return notModifiedError()
+			return handleNotModified(opts, resp)
 		}
 
-		var items []json.RawMessage
-		if err := json.Unmarshal(resp.Body, &items); err != nil {
-			return fmt.Errorf("--paginate requires a JSON array response, got %q: %w", strings.TrimSpace(truncateBody(resp.Body)), err)
+		items, err := decodePageItems(resp)
+		if err != nil {
+			return err
 		}
 		if len(items) == 0 {
 			break
@@ -266,16 +278,7 @@ func runPaginated(opts *Options, client *api.Client, headers map[string]string, 
 			merged = append(merged, items...)
 			continue
 		}
-		if opts.Include {
-			if err := writeInclude(opts.IO.Out, resp); err != nil {
-				return err
-			}
-		}
-		if jqQuery != nil {
-			if err := writeJQ(opts.IO.Out, jqQuery, resp.Body); err != nil {
-				return err
-			}
-		} else if err := writeBody(opts.IO.Out, resp.Body); err != nil {
+		if err := emitPage(opts, resp, jqCode); err != nil {
 			return err
 		}
 	}
@@ -283,6 +286,8 @@ func runPaginated(opts *Options, client *api.Client, headers map[string]string, 
 	if !opts.Slurp {
 		return nil
 	}
+	// The include block for --slurp comes from the first page: it carries
+	// the request-level metadata (e.g. ETag) of the collection start.
 	if firstResp != nil && opts.Include {
 		if err := writeInclude(opts.IO.Out, firstResp); err != nil {
 			return err
@@ -293,6 +298,54 @@ func runPaginated(opts *Options, client *api.Client, headers map[string]string, 
 		return fmt.Errorf("failed to merge paginated pages: %w", err)
 	}
 	return writeBody(opts.IO.Out, mergedBody)
+}
+
+// fetchPage performs one GET for the given page of the endpoint.
+func fetchPage(client *api.Client, endpoint string, page int, headers map[string]string) (*api.RawResponse, error) {
+	pageEndpoint, err := withPageQuery(endpoint, page)
+	if err != nil {
+		return nil, err
+	}
+	return client.RawREST(http.MethodGet, pageEndpoint, nil, headers)
+}
+
+// emitPage writes one non-slurp page honoring --include and --jq.
+func emitPage(opts *Options, resp *api.RawResponse, jqCode *gojq.Code) error {
+	if opts.Include {
+		if err := writeInclude(opts.IO.Out, resp); err != nil {
+			return err
+		}
+	}
+	if jqCode != nil {
+		return writeJQ(opts.IO.Out, jqCode, resp.Body)
+	}
+	return writeBody(opts.IO.Out, resp.Body)
+}
+
+// decodePageItems parses a page body as a JSON array of items.
+func decodePageItems(resp *api.RawResponse) ([]json.RawMessage, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(resp.Body, &items); err != nil {
+		return nil, fmt.Errorf("--paginate requires a JSON array response, got %q: %w", previewBody(resp.Body), err)
+	}
+	return items, nil
+}
+
+// handleNotModified emits the 304 include block when requested and reports
+// the non-zero "resource unchanged" error.
+func handleNotModified(opts *Options, resp *api.RawResponse) error {
+	if opts.Include {
+		if err := writeInclude(opts.IO.Out, resp); err != nil {
+			return err
+		}
+	}
+	return notModifiedError()
+}
+
+// pageLimitError reports the --paginate safety cap.
+func pageLimitError(endpoint string) error {
+	return fmt.Errorf("--paginate exceeded the page limit of %d for %q: narrow the query "+
+		"(per_page, filters) or iterate pages manually", paginatePageLimit, endpoint)
 }
 
 // withPageQuery returns the endpoint with page set and per_page defaulted.
@@ -314,14 +367,9 @@ func withPageQuery(endpoint string, page int) (string, error) {
 }
 
 // writeResponse emits the response honoring --include and --jq.
-func writeResponse(opts *Options, resp *api.RawResponse, jqQuery *gojq.Query) error {
+func writeResponse(opts *Options, resp *api.RawResponse, jqCode *gojq.Code) error {
 	if resp.StatusCode == http.StatusNotModified {
-		if opts.Include {
-			if err := writeInclude(opts.IO.Out, resp); err != nil {
-				return err
-			}
-		}
-		return notModifiedError()
+		return handleNotModified(opts, resp)
 	}
 	if opts.Include {
 		if err := writeInclude(opts.IO.Out, resp); err != nil {
@@ -331,8 +379,8 @@ func writeResponse(opts *Options, resp *api.RawResponse, jqQuery *gojq.Query) er
 	if len(resp.Body) == 0 {
 		return nil
 	}
-	if jqQuery != nil {
-		return writeJQ(opts.IO.Out, jqQuery, resp.Body)
+	if jqCode != nil {
+		return writeJQ(opts.IO.Out, jqCode, resp.Body)
 	}
 	return writeBody(opts.IO.Out, resp.Body)
 }
@@ -340,7 +388,8 @@ func writeResponse(opts *Options, resp *api.RawResponse, jqQuery *gojq.Query) er
 // notModifiedError reports a conditional request hit: non-zero exit with the
 // status visible, so consumers can treat "304 + non-zero" as "no change".
 func notModifiedError() error {
-	return cmdutil.NewCLIError(cmdutil.ExitError, "HTTP 304 Not Modified (resource unchanged; keep the ETag from --include output)", nil)
+	return cmdutil.NewCLIError(cmdutil.ExitError,
+		"HTTP 304 Not Modified (resource unchanged; keep the ETag from --include output)", nil)
 }
 
 // writeInclude prints the status line and response headers (sorted for
@@ -372,12 +421,12 @@ func writeInclude(w io.Writer, resp *api.RawResponse) error {
 // writeJQ applies the compiled jq expression to the response body and writes
 // one result per line; string results are printed raw, everything else as
 // compact JSON.
-func writeJQ(w io.Writer, query *gojq.Query, body []byte) error {
+func writeJQ(w io.Writer, code *gojq.Code, body []byte) error {
 	var value interface{}
 	if err := json.Unmarshal(body, &value); err != nil {
 		return fmt.Errorf("failed to parse response body as JSON for --jq: %w", err)
 	}
-	iter := query.Run(value)
+	iter := code.Run(value)
 	for {
 		result, ok := iter.Next()
 		if !ok {
@@ -417,8 +466,8 @@ func writeBody(w io.Writer, body []byte) error {
 	return nil
 }
 
-// truncateBody shortens a body preview for error messages.
-func truncateBody(body []byte) string {
+// previewBody shortens a body preview for error messages.
+func previewBody(body []byte) string {
 	const max = 80
 	if len(body) > max {
 		return string(body[:max]) + "..."
