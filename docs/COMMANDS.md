@@ -378,13 +378,32 @@ printf '{"title":"New title"}' | gc api repos/infra-test/gctest1/pulls/1 --metho
 
 # 自定义请求头
 gc api repos/infra-test/gctest1 --header 'Accept: application/json'
+
+# 输出响应状态行与响应头（--include），随后是响应体
+gc api repos/infra-test/gctest1 --include
+
+# 用 jq 表达式过滤输出
+gc api user --jq .login
+
+# 自动翻页：跟随 page 参数直到空页；--slurp 把所有页合并为单一 JSON 数组
+gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate
+gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate --slurp
+
+# 用 -f 重复键值字段构造 JSON 请求体（POST 创建评论等简单场景免临时文件）
+gc api repos/infra-test/gctest1/issues/1/comments -f body='评论内容'
 ```
 
 说明：
 - endpoint 可写成 `repos/owner/repo` 或 `/api/v5/repos/owner/repo`；普通相对路径会自动补齐 `/api/v5/`。
 - 认证沿用当前 `gc` 登录态或 `GC_TOKEN` / `GITCODE_TOKEN` 环境变量。
-- 默认方法为 `GET`；传入 `--input` 但未指定 `--method` 时会自动使用 `POST`。
+- 默认方法为 `GET`；传入 `--input` 或 `-f` 但未指定 `--method` 时会自动使用 `POST`。
 - 输出为远端原始响应 body，便于脚本继续交给 `python -m json.tool`、`jq` 或其他工具处理。
+- `--include`：先输出 `HTTP/1.1 <状态码> <状态文本>` 与响应头（按头名排序，注意 Go 客户端会按规范形式显示如 `Etag`），空行后再输出响应体；响应头可用于读取 `Etag`、限流头等元数据。`--include` 与 `--jq` 可组合（先头块后过滤结果）。
+- HTTP 304（条件请求命中）：`gc api` 一律以非零退出码结束（错误消息含 304），配 `--include` 时先输出响应头再报错；消费方可据此把"非零退出 + 304"判定为"资源未变化"。当前 GitCode v5 多数端点不返回 ETag，该路径在无 ETag 的端点不可达。
+- `--jq`：完整 jq 表达式（gojq 实现）；字符串结果按原文输出，其余结果为紧凑 JSON 逐行输出；表达式非法返回 exit 2 用法错误。
+- `--paginate`：仅限 GET，且不能与 `--input` / `-f` 组合；自动注入 `page=1..N`（未指定时补 `per_page=100`，已有则保留），翻到空页终止；安全上限 100 页（超限报错并提示收窄查询）；要求响应为 JSON 数组。非 `--slurp` 模式逐页原样输出（每页一个 JSON 数组），`--jq` 逐页应用。
+- `--slurp`：仅 `--paginate` 下可用，把全部页的条目合并为单一 JSON 数组输出。
+- `-f, --field`：可重复的 `key=value` 字符串字段，组成 JSON 对象作为请求体（同名键后者覆盖前者）；与 `--input` 互斥；不支持类型化字段（`-F`），复杂结构请用 `--input`。
 
 ---
 
