@@ -423,3 +423,15 @@ func TestIsSilent(t *testing.T) {
 		}
 	})
 }
+
+func TestSilentCLIErrorCodeZero(t *testing.T) {
+	// A silent CLIError with Code 0 keeps the silent flag but still exits
+	// with the generic ExitError, mirroring the non-silent zero-code path.
+	err := &CLIError{Code: 0, Message: "zero code", Silent: true}
+	if !IsSilent(err) {
+		t.Fatal("IsSilent(Code=0 silent) = false, want true")
+	}
+	if got := ExitCode(err); got != ExitError {
+		t.Fatalf("ExitCode(Code=0 silent) = %d, want %d", got, ExitError)
+	}
+}

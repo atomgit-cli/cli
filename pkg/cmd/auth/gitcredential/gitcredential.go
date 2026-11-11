@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -37,11 +38,15 @@ var gitCredentialLong = heredoc.Doc(`
 	(useful for multiple accounts on one machine), while the
 	GC_TOKEN/GITCODE_TOKEN environment overrides intentionally do not
 	apply, so the helper's answer is fully determined by the login state
-	of the selected configuration directory.
+	of the selected configuration directory. A GC_CONFIG_DIR that is set
+	to an empty value is treated as no configuration rather than falling
+	back to the default directory.
 `)
 
 var gitCredentialExample = heredoc.Doc(`
 	# Inspect what git would receive for the logged-in account
+	# (the password line is the access token; do not paste it into
+	# logs, screenshots, scripts, or AI agent contexts)
 	$ printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
 
 	# Configure git to use gc as a credential helper
@@ -69,7 +74,7 @@ func NewCmdGitCredential(f *cmdutil.Factory, runF func(*GitCredentialOptions) er
 	}
 
 	cmd := &cobra.Command{
-		Use:     "git-credential",
+		Use:     "git-credential [operation]",
 		Short:   "Provide stored GitCode credentials to git (helper protocol)",
 		Long:    gitCredentialLong,
 		Example: gitCredentialExample,
@@ -121,6 +126,15 @@ func getCredential(opts *GitCredentialOptions) error {
 
 	if req.host == "" {
 		return silentNoCredential("")
+	}
+
+	// An explicitly empty GC_CONFIG_DIR is "no configuration" for the
+	// helper: fail closed instead of falling back to the default
+	// directory, so a wrapper whose variable expands to an empty string
+	// never silently serves the primary account's credentials. Other
+	// commands keep the usual empty-equals-unset semantics.
+	if dir, ok := os.LookupEnv("GC_CONFIG_DIR"); ok && dir == "" {
+		return silentNoCredential(req.host)
 	}
 
 	cfg, err := opts.Config()

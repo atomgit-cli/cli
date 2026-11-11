@@ -109,9 +109,11 @@
 ### auth git-credential
 
 - 实现 git credential helper 协议，为 git HTTPS 操作填充已登录账号的凭据（`username=<登录名>`、`password=<访问令牌>`）
-- 与其他命令不同，该子命令**只使用本地已存储的登录态**（`auth.json` 的 active_user 与 token），`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级不适用；因此 `GC_CONFIG_DIR` 的隔离语义在该命令上是完全确定的——空目录即无凭据，不回落默认配置目录，也不受环境 token 影响
-- 一机多账号场景：wrapper 脚本通过 `GC_CONFIG_DIR` 绑定各账号的配置目录（每个目录独立 `gc auth login`），git 凭据请求互不串扰
+- 与其他命令不同，该子命令**只使用本地已存储的登录态**（`auth.json` 的 active_user 与 token），`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级不适用；因此 `GC_CONFIG_DIR` 的隔离语义在该命令上是完全确定的——指向空目录或设为空字符串（视为无配置，不回落默认配置目录）时均无凭据，也不受环境 token 影响
+- 一机多账号场景：wrapper 脚本通过 `GC_CONFIG_DIR` 绑定各账号的配置目录（每个目录独立 `gc auth login`），git 凭据请求互不串扰；排查隔离目录内的登录状态时，用相同的 `GC_CONFIG_DIR` 值运行 `gc auth status`
+- 带端口的 host 请求（如 `host=gitcode.com:443`）不参与匹配，静默未命中
 - 未命中时静默退出（无输出、exit 1），git 会继续询问后续 helper；凭据值只出现在 stdout 协议输出，绝不进入 stderr、日志或错误信息
+- 人工直接运行该命令会把访问令牌明文打到 stdout（这是协议本职输出）；不要在日志、截图、脚本管道或 AI 代理上下文中暴露该输出
 - 通常由 `auth setup-git` 写入 git 配置后由 git 自动调用，`store` / `erase` 操作为无操作；排查登录状态用 `gc auth status`
 
 ### auth logout

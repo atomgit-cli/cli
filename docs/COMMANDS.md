@@ -357,16 +357,19 @@ gc auth setup-git --hostname gitcode.com
 ### auth git-credential - 响应 git credential helper 协议
 
 ```bash
-# 查看 git 会得到什么凭据（password 即访问令牌）
+# 查看 git 会得到什么凭据（password 即访问令牌，人工运行会打印令牌明文）
 printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
 
-# git 实际调用形态（setup-git 写入的 helper 值，操作参数由 git 追加）
+# setup-git 写入 git 配置的 helper 值（不要把下面的 get 一并写进配置，git 会自己追加操作参数）
+!"<gc 路径>" auth git-credential
+
+# git 实际调用的完整命令行（操作参数由 git 追加）
 !"<gc 路径>" auth git-credential get
 ```
 
 说明：
 - 实现 git credential helper 协议：从 stdin 读取 `key=value` 请求（`protocol`、`host`、`username`，也支持 `url=` 整体携带），命中已登录账号的 host 时向 stdout 输出 `username=<登录名>` 与 `password=<访问令牌>`。
-- 只服务本地已存储的登录账号（`gc auth login` 写入的 `auth.json`）；`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级在此不适用，以保证 `GC_CONFIG_DIR` 隔离语义的确定性（一机多账号场景：wrapper 脚本用 `GC_CONFIG_DIR` 绑定各账号的配置目录，见 `docs/AUTH.md` 认证模型）。
+- 只服务本地已存储的登录账号（`gc auth login` 写入的 `auth.json`）；`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级在此不适用，以保证 `GC_CONFIG_DIR` 隔离语义的确定性（一机多账号场景：wrapper 脚本用 `GC_CONFIG_DIR` 绑定各账号的配置目录，见 `docs/AUTH.md` 认证模型）。`GC_CONFIG_DIR` 设为空字符串时视为无配置（静默无凭据，不回落默认目录）；带端口的 host 请求不参与匹配。
 - 未命中时（该 host 未登录、host 不匹配、请求 `username` 与登录名不一致、请求缺 host、存储的登录名或令牌含控制字符）静默退出：无 stdout / stderr 输出、exit 1，git 会继续询问后续 helper。
 - 凭据值只出现在 stdout 协议输出中，绝不写入 stderr、日志或错误信息。
 - 支持 git 传入的操作参数：`get`（缺省等价于无参调用）、`store` / `erase`（无操作，exit 0）；其他操作名返回 exit 2 用法错误。

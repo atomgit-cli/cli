@@ -65,8 +65,8 @@ func TestNewCmdGitCredential(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("NewCmdGitCredential returned nil")
 	}
-	if cmd.Use != "git-credential" {
-		t.Errorf("Use = %q, want git-credential", cmd.Use)
+	if cmd.Use != "git-credential [operation]" {
+		t.Errorf("Use = %q, want git-credential [operation]", cmd.Use)
 	}
 	if cmd.Short == "" {
 		t.Error("Short description is empty")
@@ -489,6 +489,77 @@ func TestGitCredentialRunOperationCaseInsensitive(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "username="+testUser) {
 		t.Fatalf("stdout = %q, want filled credentials for upper-case operation", out.String())
+	}
+}
+
+func TestGitCredentialRunHandlesCRLFLines(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	cfg := newLoggedInConfig(t, testUser, testToken)
+	io, out, _ := newTestIO("protocol=https\r\nhost=gitcode.com\r\n\r\n")
+	opts := &GitCredentialOptions{
+		IO:     io,
+		Config: func() (config.Config, error) { return cfg, nil },
+	}
+	if err := gitCredentialRun(opts); err != nil {
+		t.Fatalf("gitCredentialRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "username="+testUser) {
+		t.Fatalf("stdout = %q, want filled credentials for CRLF request", out.String())
+	}
+}
+
+func TestGitCredentialRunEmptyGCConfigDirValueFailsClosed(t *testing.T) {
+	// An explicitly empty GC_CONFIG_DIR is "no configuration" for the
+	// helper: it must not fall back to the default directory, so a wrapper
+	// whose variable expands to an empty string never silently serves the
+	// primary account's credentials.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	// Seed a login in the HOME default config directory.
+	authCfg := config.New().Authentication()
+	if _, err := authCfg.Login(testHost, testUser, testToken, "https", false); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\n\n")
+	opts := &GitCredentialOptions{
+		IO:     io,
+		Config: func() (config.Config, error) { return config.New(), nil },
+	}
+	assertSilentNoCredential(t, gitCredentialRun(opts), out, errOut)
+}
+
+func TestGitCredentialRunUnsetGCConfigDirUsesHomeDefault(t *testing.T) {
+	// Control case for the empty-value test: with GC_CONFIG_DIR unset, the
+	// HOME default directory is served as usual.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.Unsetenv("GC_CONFIG_DIR")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	authCfg := config.New().Authentication()
+	if _, err := authCfg.Login(testHost, testUser, testToken, "https", false); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	io, out, _ := newTestIO("protocol=https\nhost=gitcode.com\n\n")
+	opts := &GitCredentialOptions{
+		IO:     io,
+		Config: func() (config.Config, error) { return config.New(), nil },
+	}
+	if err := gitCredentialRun(opts); err != nil {
+		t.Fatalf("gitCredentialRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "username="+testUser) {
+		t.Fatalf("stdout = %q, want filled credentials from HOME default config", out.String())
 	}
 }
 
