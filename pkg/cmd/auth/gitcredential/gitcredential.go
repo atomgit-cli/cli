@@ -16,6 +16,38 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 )
 
+var gitCredentialLong = heredoc.Doc(`
+	Implement the git credential helper protocol so that git operations
+	over HTTPS against GitCode use the credentials of the account logged
+	in via gc auth login.
+
+	git invokes this command with an operation argument (get, store or
+	erase) and a key=value request on stdin. Only "get" is meaningful:
+	when the request host matches the logged-in account, the username and
+	the access token are written to stdout in the credential protocol
+	format. store and erase are accepted as no-ops because gc does not
+	cache credentials beyond the login state.
+
+	When no credentials match, the command exits silently with a non-zero
+	status so git can try the next credential helper. Use gc auth status
+	to inspect the login state.
+
+	Credentials are served only from the account stored in the active
+	configuration directory: GC_CONFIG_DIR isolates the configuration
+	(useful for multiple accounts on one machine), while the
+	GC_TOKEN/GITCODE_TOKEN environment overrides intentionally do not
+	apply, so the helper's answer is fully determined by the login state
+	of the selected configuration directory.
+`)
+
+var gitCredentialExample = heredoc.Doc(`
+	# Inspect what git would receive for the logged-in account
+	$ printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
+
+	# Configure git to use gc as a credential helper
+	$ gc auth setup-git
+`)
+
 // GitCredentialOptions holds the configuration for the auth git-credential command.
 type GitCredentialOptions struct {
 	IO     *iostreams.IOStreams
@@ -37,39 +69,11 @@ func NewCmdGitCredential(f *cmdutil.Factory, runF func(*GitCredentialOptions) er
 	}
 
 	cmd := &cobra.Command{
-		Use:   "git-credential",
-		Short: "Provide stored GitCode credentials to git (helper protocol)",
-		Long: heredoc.Doc(`
-			Implement the git credential helper protocol so that git operations
-			over HTTPS against GitCode use the credentials of the account logged
-			in via gc auth login.
-
-			git invokes this command with an operation argument (get, store or
-			erase) and a key=value request on stdin. Only "get" is meaningful:
-			when the request host matches the logged-in account, the username
-			and the access token are written to stdout in the credential
-			protocol format. store and erase are accepted as no-ops because gc
-			does not cache credentials beyond the login state.
-
-			When no credentials match, the command exits silently with a
-			non-zero status so git can try the next credential helper. Use
-			gc auth status to inspect the login state.
-
-			Credentials are served only from the account stored in the active
-			configuration directory: GC_CONFIG_DIR isolates the configuration
-			(useful for multiple accounts on one machine), while the
-			GC_TOKEN/GITCODE_TOKEN environment overrides intentionally do not
-			apply, so the helper's answer is fully determined by the login
-			state of the selected configuration directory.
-		`),
-		Example: heredoc.Doc(`
-			# Inspect what git would receive for the logged-in account
-			$ printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
-
-			# Configure git to use gc as a credential helper
-			$ gc auth setup-git
-		`),
-		Args: cobra.MaximumNArgs(1),
+		Use:     "git-credential",
+		Short:   "Provide stored GitCode credentials to git (helper protocol)",
+		Long:    gitCredentialLong,
+		Example: gitCredentialExample,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				opts.Operation = args[0]
@@ -96,13 +100,13 @@ func gitCredentialRun(opts *GitCredentialOptions) error {
 		drain(opts.IO.In)
 		return nil
 	default:
-		return cmdutil.NewUsageError(fmt.Sprintf("unsupported credential operation %q (supported: get, store, erase)", opts.Operation))
+		return cmdutil.NewUsageError(fmt.Sprintf(
+			"unsupported credential operation %q (supported: get, store, erase)", opts.Operation))
 	}
 }
 
 // credentialRequest is the parsed key=value request from git.
 type credentialRequest struct {
-	protocol string
 	host     string
 	username string
 }
@@ -139,12 +143,22 @@ func getCredential(opts *GitCredentialOptions) error {
 	if req.username != "" && req.username != username {
 		return silentNoCredential(req.host)
 	}
+	if hasControlChars(username) || hasControlChars(token) {
+		// A corrupted login state must not inject extra protocol lines.
+		return silentNoCredential(req.host)
+	}
 
 	// Credential values are only ever written to stdout in the protocol
 	// format; never to stderr, logs, or error messages.
 	fmt.Fprintf(opts.IO.Out, "username=%s\n", username)
 	fmt.Fprintf(opts.IO.Out, "password=%s\n", token)
 	return nil
+}
+
+// hasControlChars reports whether s contains characters that would break the
+// key=value line protocol if written verbatim.
+func hasControlChars(s string) bool {
+	return strings.ContainsAny(s, "\n\r\x00")
 }
 
 // silentNoCredential reports "no credentials for this request" the way the
@@ -159,8 +173,8 @@ func silentNoCredential(host string) error {
 }
 
 // parseRequest reads key=value lines until a blank line or EOF, tolerating
-// unknown keys. A url= key carries protocol and host when git does not split
-// them into separate keys.
+// unknown keys. A url= key carries the host when git does not split it into
+// a separate key.
 func parseRequest(r io.Reader) (*credentialRequest, error) {
 	req := &credentialRequest{}
 	var rawURL string
@@ -176,8 +190,6 @@ func parseRequest(r io.Reader) (*credentialRequest, error) {
 				continue
 			}
 			switch key {
-			case "protocol":
-				req.protocol = value
 			case "host":
 				req.host = value
 			case "username":
@@ -193,9 +205,6 @@ func parseRequest(r io.Reader) (*credentialRequest, error) {
 
 	if req.host == "" && rawURL != "" {
 		if u, err := url.Parse(rawURL); err == nil {
-			if req.protocol == "" {
-				req.protocol = u.Scheme
-			}
 			req.host = u.Hostname()
 		}
 	}

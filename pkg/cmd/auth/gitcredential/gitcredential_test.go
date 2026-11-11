@@ -21,11 +21,11 @@ const (
 
 // newLoggedInConfig creates a config with a stored login for testHost and
 // returns the Config. GC_CONFIG_DIR must be set before calling config.New().
-func newLoggedInConfig(t *testing.T, dir, host, user, token string) config.Config {
+func newLoggedInConfig(t *testing.T, user, token string) config.Config {
 	t.Helper()
 	cfg := config.New()
 	authCfg := cfg.Authentication()
-	if _, err := authCfg.Login(host, user, token, "https", false); err != nil {
+	if _, err := authCfg.Login(testHost, user, token, "https", false); err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
 	return cfg
@@ -93,6 +93,11 @@ func TestGitCredentialCmdAcceptsNoArgsAndOneArg(t *testing.T) {
 func TestGitCredentialCmdRejectsTwoArgs(t *testing.T) {
 	f := cmdutil.TestFactory()
 	cmd := NewCmdGitCredential(f, func(opts *GitCredentialOptions) error { return nil })
+	// Standalone subcommand execution does not inherit the root's
+	// SilenceErrors/SilenceUsage; set them so cobra error/usage output does
+	// not leak to the real stderr as test noise.
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
 	cmd.SetArgs([]string{"get", "extra"})
 	err := cmd.Execute()
 	if err == nil {
@@ -108,7 +113,7 @@ func TestGitCredentialRunFillsStoredCredentials(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\n\n")
 
 	opts := &GitCredentialOptions{
@@ -133,7 +138,7 @@ func TestGitCredentialRunFillsWithoutTrailingBlankLine(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("protocol=https\nhost=gitcode.com\n")
 
 	opts := &GitCredentialOptions{
@@ -182,7 +187,7 @@ func TestGitCredentialRunUnmatchedHostSilent(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("protocol=https\nhost=other.example.com\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -196,7 +201,7 @@ func TestGitCredentialRunHostLookupCaseInsensitive(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("protocol=https\nhost=GITCODE.COM\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -215,7 +220,7 @@ func TestGitCredentialRunUsernameMismatchSilent(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\nusername=someoneelse\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -229,7 +234,7 @@ func TestGitCredentialRunUsernameMatchedFills(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("protocol=https\nhost=gitcode.com\nusername=testuser\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -248,7 +253,7 @@ func TestGitCredentialRunURLKeyParsesHost(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("url=https://gitcode.com/owner/repo.git\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -267,7 +272,7 @@ func TestGitCredentialRunInvalidURLIgnored(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("url=://not-a-url\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -307,7 +312,7 @@ func TestGitCredentialRunStoreOperationNoOp(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\nusername=testuser\npassword=whatever\n\n")
 	opts := &GitCredentialOptions{
 		IO:        io,
@@ -327,7 +332,7 @@ func TestGitCredentialRunEraseOperationNoOp(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\nusername=testuser\npassword=whatever\n\n")
 	opts := &GitCredentialOptions{
 		IO:        io,
@@ -406,18 +411,13 @@ func TestGitCredentialRunCorruptAuthStateSilentAndNoSecretLeak(t *testing.T) {
 	}
 	err := gitCredentialRun(opts)
 
+	// Silent no-credential is the contract for a corrupt auth state; and
+	// whatever is returned must never carry the secret from the file.
+	assertSilentNoCredential(t, err, out, errOut)
 	if err != nil {
-		// Silent no-credential is the expected behavior; if anything is
-		// returned visibly instead, it must not carry the secret.
 		if got := err.Error(); strings.Contains(got, secretMarker) {
 			t.Fatalf("error leaks secret: %q", got)
 		}
-	}
-	if out.Len() != 0 {
-		t.Fatalf("stdout = %q, want empty", out.String())
-	}
-	if errOut.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty (silent exit)", errOut.String())
 	}
 }
 
@@ -426,7 +426,7 @@ func TestGitCredentialRunIgnoresUnknownKeys(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("capability[]=authtype\nprotocol=https\nhost=gitcode.com\npath=/owner/repo.git\nwwwauth[]=Basic realm=x\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
@@ -440,6 +440,58 @@ func TestGitCredentialRunIgnoresUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestGitCredentialRunRejectsNewlineInStoredUsername(t *testing.T) {
+	// A stored username containing a newline would inject extra protocol
+	// lines into the git credential stream; it must be rejected silently.
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	cfg := newLoggedInConfig(t, "bad\nuser", testToken)
+	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\n\n")
+	opts := &GitCredentialOptions{
+		IO:     io,
+		Config: func() (config.Config, error) { return cfg, nil },
+	}
+	assertSilentNoCredential(t, gitCredentialRun(opts), out, errOut)
+}
+
+func TestGitCredentialRunRejectsNewlineInStoredToken(t *testing.T) {
+	// A stored token containing control characters must never reach the
+	// protocol output.
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	cfg := newLoggedInConfig(t, testUser, "bad\ntoken")
+	io, out, errOut := newTestIO("protocol=https\nhost=gitcode.com\n\n")
+	opts := &GitCredentialOptions{
+		IO:     io,
+		Config: func() (config.Config, error) { return cfg, nil },
+	}
+	assertSilentNoCredential(t, gitCredentialRun(opts), out, errOut)
+}
+
+func TestGitCredentialRunOperationCaseInsensitive(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	cfg := newLoggedInConfig(t, testUser, testToken)
+	io, out, _ := newTestIO("protocol=https\nhost=gitcode.com\n\n")
+	opts := &GitCredentialOptions{
+		IO:        io,
+		Config:    func() (config.Config, error) { return cfg, nil },
+		Operation: "GET",
+	}
+	if err := gitCredentialRun(opts); err != nil {
+		t.Fatalf("gitCredentialRun(GET) error = %v", err)
+	}
+	if !strings.Contains(out.String(), "username="+testUser) {
+		t.Fatalf("stdout = %q, want filled credentials for upper-case operation", out.String())
+	}
+}
+
 // TestGitCredentialRunStoresNoExtraKeys verifies the protocol output contains
 // only username and password lines.
 func TestGitCredentialRunOutputsOnlyUsernameAndPassword(t *testing.T) {
@@ -447,7 +499,7 @@ func TestGitCredentialRunOutputsOnlyUsernameAndPassword(t *testing.T) {
 	t.Setenv("GC_TOKEN", "")
 	t.Setenv("GITCODE_TOKEN", "")
 
-	cfg := newLoggedInConfig(t, os.Getenv("GC_CONFIG_DIR"), testHost, testUser, testToken)
+	cfg := newLoggedInConfig(t, testUser, testToken)
 	io, out, _ := newTestIO("protocol=https\nhost=gitcode.com\npath=/owner/repo.git\n\n")
 	opts := &GitCredentialOptions{
 		IO:     io,
