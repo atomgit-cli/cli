@@ -350,9 +350,27 @@ gc auth setup-git --hostname gitcode.com
 - `auth setup-git` 将 gc 配置为 git 的 credential helper，使 git 操作（clone/pull/push）自动携带 GitCode 认证。
 - 以 `--add` 追加方式写入 `git config --global credential."https://<host>".helper`，不覆盖已有 credential helper 配置。
 - 幂等：重复运行不产生重复条目，已配置相同 helper 时直接跳过。
-- 配置的 helper 指向 `gc auth git-credential`（credential 协议响应子命令，后续交付）；当前 setup-git 仅完成配置写入。
+- 配置的 helper 指向 `gc auth git-credential` 子命令，由其在 git 请求凭据时填充已登录账号的用户名和访问令牌（见下节）。
 - `--hostname` 支持自定义主机，默认使用配置的默认主机（`gitcode.com`）。
 - 纯客户端命令，不调用 GitCode API，不读取或输出 token。
+
+### auth git-credential - 响应 git credential helper 协议
+
+```bash
+# 查看 git 会得到什么凭据（password 即访问令牌）
+printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
+
+# git 实际调用形态（setup-git 写入的 helper 值，操作参数由 git 追加）
+!"<gc 路径>" auth git-credential get
+```
+
+说明：
+- 实现 git credential helper 协议：从 stdin 读取 `key=value` 请求（`protocol`、`host`、`username`，也支持 `url=` 整体携带），命中已登录账号的 host 时向 stdout 输出 `username=<登录名>` 与 `password=<访问令牌>`。
+- 只服务本地已存储的登录账号（`gc auth login` 写入的 `auth.json`）；`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级在此不适用，以保证 `GC_CONFIG_DIR` 隔离语义的确定性（一机多账号场景：wrapper 脚本用 `GC_CONFIG_DIR` 绑定各账号的配置目录，见 `docs/AUTH.md` 认证模型）。
+- 未命中时（该 host 未登录、host 不匹配、请求 `username` 与登录名不一致）静默退出：无 stdout / stderr 输出、exit 1，git 会继续询问后续 helper。
+- 凭据值只出现在 stdout 协议输出中，绝不写入 stderr、日志或错误信息。
+- 支持 git 传入的操作参数：`get`（缺省等价于无参调用）、`store` / `erase`（无操作，exit 0）；其他操作名返回 exit 2 用法错误。
+- 该命令通常由 git 经 `auth setup-git` 写入的配置自动调用，无需手工执行；排查登录状态使用 `gc auth status`。
 
 ---
 

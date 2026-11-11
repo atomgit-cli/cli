@@ -44,7 +44,12 @@ func init() {
 func main() {
 	// Execute the root command
 	if err := root.Execute(version, commit, date); err != nil {
-		os.Stderr.WriteString("Error: " + err.Error() + "\n")
+		// Silent protocol errors (credential helper "no credential")
+		// keep their exit code but print nothing, so git can continue
+		// with the next helper without stderr noise.
+		if !cmdutil.IsSilent(err) {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+		}
 		os.Exit(cmdutil.ExitCode(err))
 	}
 }
