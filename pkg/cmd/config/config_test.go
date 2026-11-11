@@ -231,3 +231,13 @@ func TestPluralEntry(t *testing.T) {
 		t.Errorf("pluralEntry(2) = %q, want %q", got, "ies")
 	}
 }
+
+func TestNewCmdConfigHelpDocumentsConfigDir(t *testing.T) {
+	// gc config operates on the directory that GC_CONFIG_DIR overrides;
+	// it must be discoverable from gc config --help.
+	f := cmdutil.TestFactory()
+	cmd := NewCmdConfig(f)
+	if !strings.Contains(cmd.Long, "GC_CONFIG_DIR") {
+		t.Errorf("config Long does not mention GC_CONFIG_DIR: %q", cmd.Long)
+	}
+}

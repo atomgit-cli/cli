@@ -46,6 +46,24 @@
 
 可通过 `GC_CONFIG_DIR` 覆盖配置目录。
 
+### 一机多账号（GC_CONFIG_DIR 隔离）
+
+`GC_CONFIG_DIR` 指向哪个目录，gc 就读写哪个目录的登录态与偏好：空目录等于"未登录"，不会回落到默认目录 `~/.config/gc`。环境变量 token 的优先级（见上文认证来源优先级）对普通命令仍然生效；而 credential helper（`gc auth git-credential`，由 `auth setup-git` 写入 git 配置后自动调用）只读取该目录存储的登录态，不受环境 token 影响，helper 调用链上的配置目录隔离因此是完全确定的。
+
+典型用法是给第二个账号包一个 wrapper：
+
+```sh
+cat > ~/.local/bin/gc-agent <<'EOF'
+#!/bin/sh
+GC_CONFIG_DIR="$HOME/.config/gc-agent" exec gc "$@"
+EOF
+chmod +x ~/.local/bin/gc-agent
+gc-agent auth login   # 在隔离目录登录第二个账号，不影响主配置
+gc-agent auth status  # 查看该账号状态；主 gc 命令仍用主账号
+```
+
+排查隔离目录的登录状态时，用同一个 `GC_CONFIG_DIR` 值运行 `gc auth status`。
+
 凭证文件落盘遵循安全约束（见 `spec/foundations/security.md`）：文件权限 `0600`、目录权限 `0700`、写入时拒绝符号链接（防止凭证重定向攻击）。若 `auth.json` 是符号链接（如某些 dotfiles 管理方案），`auth login` 将拒绝写入并报错，请删除符号链接后重试。
 
 通用偏好配置写入同一配置目录下的：
