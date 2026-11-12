@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,8 +57,9 @@ func NewCmdSwitch(f *cmdutil.Factory, runF func(*SwitchOptions) error) *cobra.Co
 			accounts for the host (the current one is marked). In
 			non-interactive contexts pass the username explicitly.
 
-			Switching is a local operation: it rewrites active_user in the
-			config directory's auth.json and never calls the API. Tokens
+			Switching is a local, scoped operation: it rewrites active_user
+			for the target host in the config directory's auth.json, never
+			calls the API, and does not change the default host. Tokens
 			provided by GC_TOKEN/GITCODE_TOKEN environment variables keep
 			overriding any switched account (see docs/AUTH.md).
 		`),
@@ -119,15 +121,15 @@ func switchRun(opts *SwitchOptions) error {
 	// sequences through them (git-credential applies the same idea to its
 	// protocol output).
 	for _, name := range users {
-		if cmdutil.HasTerminalUnsafeChars(name) {
-			return fmt.Errorf("corrupted login state for %s: stored account name contains control characters; inspect auth.json", hostname)
+		if name == "" || cmdutil.HasTerminalUnsafeChars(name) {
+			return fmt.Errorf("corrupted login state for %s: stored account names are empty or contain control characters; inspect auth.json", hostname)
 		}
 	}
 
 	username := opts.Username
 	if username == "" {
 		if !opts.IO.CanPrompt() {
-			return cmdutil.NewUsageError("interactive switch requires a TTY; pass a username (gc auth switch <username>)")
+			return cmdutil.NewUsageError("interactive switch requires a usable prompt (no TTY or --no-interactive); pass a username (gc auth switch <username>)")
 		}
 		username, err = promptSwitch(opts.IO, authCfg, hostname, users)
 		if err != nil {
@@ -152,6 +154,19 @@ func switchRun(opts *SwitchOptions) error {
 
 	cs := opts.IO.ColorScheme()
 	fmt.Fprintf(opts.IO.Out, "%s Switched to %s on %s\n", cs.Green("✓"), cs.Bold(username), hostname)
+	// The switched account only takes effect for commands that read the
+	// stored state; an environment token keeps overriding them (the git
+	// credential helper is unaffected by design). Same warning family as
+	// login/logout (issue 646 review).
+	envVars := make([]string, 0, 2)
+	for _, name := range []string{"GC_TOKEN", "GITCODE_TOKEN"} {
+		if os.Getenv(name) != "" {
+			envVars = append(envVars, name)
+		}
+	}
+	if len(envVars) > 0 {
+		fmt.Fprintf(opts.IO.ErrOut, "Note: %s is set; business commands keep using the environment token (the git credential helper still serves the switched account).\n", strings.Join(envVars, " / "))
+	}
 	return nil
 }
 

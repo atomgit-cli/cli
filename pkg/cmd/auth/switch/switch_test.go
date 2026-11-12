@@ -280,3 +280,43 @@ func TestSwitchRunNoAccountsTakesPrecedenceOverTTYRequirement(t *testing.T) {
 		t.Fatalf("ExitCode() = %d, want %d (no-accounts takes precedence over the TTY usage error)", cmdutil.ExitCode(err), cmdutil.ExitNotFound)
 	}
 }
+
+func TestSwitchRunDoesNotPromoteDefaultHost(t *testing.T) {
+	// Switching on a non-default host is scoped: it must not move the
+	// default host that bare commands target (UX review S1).
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	auth := cfg.Authentication()
+	// Login the non-default host FIRST so the last login (gitcode.com)
+	// leaves DefaultHost there; the switch must not move it.
+	if _, err := auth.Login("enterprise.example.com", "svc-bot", "tokenS", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	io, _, _, _ := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "svc-bot", Hostname: "enterprise.example.com"})
+	if err != nil {
+		t.Fatalf("switchRun() error = %v", err)
+	}
+	if host, _ := cfg.Authentication().DefaultHost(); host != "gitcode.com" {
+		t.Fatalf("DefaultHost() = %q after a scoped switch, want gitcode.com unchanged", host)
+	}
+}
+
+func TestSwitchRunWarnsWhenEnvTokenOverrides(t *testing.T) {
+	// A switch under GC_TOKEN succeeds but business commands keep using
+	// the environment token; the warning mirrors the login/logout family.
+	cfg := loginTwoAccounts(t)
+	t.Setenv("GC_TOKEN", "env-token-do-not-use")
+	io, _, _, errOut := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "bob", Hostname: "gitcode.com"})
+	if err != nil {
+		t.Fatalf("switchRun() error = %v", err)
+	}
+	if !strings.Contains(errOut.String(), "GC_TOKEN") || !strings.Contains(errOut.String(), "environment token") {
+		t.Fatalf("stderr warning missing: %q", errOut.String())
+	}
+}

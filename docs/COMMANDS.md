@@ -130,6 +130,7 @@ docker compose up gc
 
 当前已支持 `--json` 的写路径命令：
 
+- `auth switch`
 - `issue close`
 - `issue comment`
 - `issue create`
@@ -338,7 +339,8 @@ gc auth switch second-account --json
 ```
 
 说明：
-- 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。在非默认主机上切换会把该主机提升为默认主机（与 `auth login` 同语义，后续裸命令的目标主机随之改变）。
+- 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。切换是作用域内的操作：在非默认主机上切换只改变该主机的活动账号，不改变默认主机（后续裸命令的目标主机不变——与 `auth login` 的"登录即提升默认主机"语义不同）。
+- 未传 `--hostname` 时按默认主机解析（`GC_HOST` > 上次登录主机 > gitcode.com，与 `auth login` 相同）。
 - 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可（序号优先：账号名恰为数字时按序号解析）；非交互环境（无 TTY 或 `--no-interactive`）未传用户名时返回退出码 `2`。
 - 退出码：`0` 切换成功；`1` 非法主机名、登录状态损坏（如账号名含控制字符）、写入失败；`2` 非交互缺用户名、无效选择、超参数；`3` 目标账号未存储（消息列出可用账号）或主机无任何已存储账号（提示 `gc auth login`）——主机无账号时先返回 `3`，与是否传用户名、是否 TTY 无关。
 - `--json` 输出 `{"hostname":..., "active_user":...}`（字段序 hostname → active_user）。

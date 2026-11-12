@@ -215,7 +215,11 @@ func (a *authConfig) SwitchUser(hostname, user string) error {
 	}
 
 	host.ActiveUser = user
-	state.DefaultHost = hostname
+	// Deliberately not touching state.DefaultHost: switching re-selects an
+	// account on one host and must not move the default host that bare
+	// commands target (unlike Login, whose intent is "make this my primary
+	// host"). SwitchUser had no production callers before auth switch, so
+	// this pins the scoped semantics as the method's contract.
 	return a.config.writeAuthState(state)
 }
 
