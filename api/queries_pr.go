@@ -57,16 +57,27 @@ type PRBranch struct {
 
 // PRComment represents a comment on a PR
 type PRComment struct {
-	ID           interface{}  `json:"id"`
-	DiscussionID string       `json:"discussion_id"`
-	Body         string       `json:"body"`
-	User         *User        `json:"user"`
-	CreatedAt    FlexibleTime `json:"created_at"`
-	UpdatedAt    FlexibleTime `json:"updated_at"`
-	CommentType  string       `json:"comment_type"`
-	Resolved     bool         `json:"resolved"`
-	DiffFile     string       `json:"diff_file"`
-	DiffPosition interface{}  `json:"diff_position"`
+	ID           interface{}      `json:"id"`
+	DiscussionID string           `json:"discussion_id"`
+	Body         string           `json:"body"`
+	User         *User            `json:"user"`
+	CreatedAt    FlexibleTime     `json:"created_at"`
+	UpdatedAt    FlexibleTime     `json:"updated_at"`
+	CommentType  string           `json:"comment_type"`
+	Resolved     bool             `json:"resolved"`
+	DiffFile     string           `json:"diff_file"`
+	DiffPosition interface{}      `json:"diff_position"`
+	Reply        []PRCommentReply `json:"reply"`
+}
+
+// PRCommentReply represents a reply nested under a PR comment. Replies
+// carry no discussion_id of their own: the parent comment owns it.
+type PRCommentReply struct {
+	ID        interface{}  `json:"id"`
+	Body      string       `json:"body"`
+	User      *User        `json:"user"`
+	CreatedAt FlexibleTime `json:"created_at"`
+	UpdatedAt FlexibleTime `json:"updated_at"`
 }
 
 // PRListOptions represents options for listing PRs
@@ -468,10 +479,11 @@ type ReplyPRCommentOptions struct {
 	Body string `json:"body"`
 }
 
-// ReplyPRCommentReply represents the response from replying to a PR comment
+// ReplyPRCommentReply represents the response from replying to a PR comment.
+// The API returns the created reply's comment id in note_id (snake_case).
 type ReplyPRCommentReply struct {
 	ID     string `json:"id"`
-	NoteID int    `json:"noteId"`
+	NoteID int64  `json:"note_id"`
 	Body   string `json:"body"`
 }
 

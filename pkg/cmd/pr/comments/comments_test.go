@@ -4,6 +4,7 @@ package comments
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmdutil"
@@ -328,4 +329,77 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestCommentsRunJSONIncludesReplies(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":169489896,"discussion_id":"ebeb577","body":"parent","comment_type":"pr_comment","resolved":false,
+"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}}]},{"id":2,"body":"no replies","reply":null}]`))
+	}))
+
+	err := commentsRun(&CommentsOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		Number:     123,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("commentsRun() error = %v", err)
+	}
+
+	var comments []map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &comments); err != nil {
+		t.Fatalf("output is not valid JSON: %v; output=%q", err, out.String())
+	}
+	reply, ok := comments[0]["reply"].([]interface{})
+	if !ok || len(reply) != 1 {
+		t.Fatalf("comment 0 reply = %#v, want one reply entry", comments[0]["reply"])
+	}
+	first := reply[0].(map[string]interface{})
+	if first["body"] != "the nested reply" {
+		t.Fatalf("reply body = %#v", first["body"])
+	}
+	if first["id"].(float64) != 200021583 {
+		t.Fatalf("reply id = %#v", first["id"])
+	}
+}
+
+func TestCommentsRunTextShowsReplies(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":169489896,"discussion_id":"ebeb577","body":"parent body","comment_type":"pr_comment","resolved":false,
+"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}}]}]`))
+	}))
+
+	err := commentsRun(&CommentsOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Repository: "owner/repo",
+		Number:     123,
+	})
+	if err != nil {
+		t.Fatalf("commentsRun() error = %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Replies (1)") {
+		t.Fatalf("text output missing reply count: %q", got)
+	}
+	if !strings.Contains(got, "the nested reply") {
+		t.Fatalf("text output missing reply body: %q", got)
+	}
+	if !strings.Contains(got, "aflyingto") {
+		t.Fatalf("text output missing reply author: %q", got)
+	}
+	if !strings.Contains(got, "200021583") {
+		t.Fatalf("text output missing reply id: %q", got)
+	}
 }

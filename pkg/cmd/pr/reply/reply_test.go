@@ -2,11 +2,14 @@
 package reply
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
+	"gitcode.com/gitcode-cli/cli/pkg/testutil"
 )
 
 func TestNewCmdReply(t *testing.T) {
@@ -228,4 +231,73 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestReplyRunJSONOutput(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v5/repos/owner/repo/pulls/123/discussions/abc123/comments" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"abc123","body":"hello reply","note_id":200021622}`))
+	}))
+
+	err := replyRun(&ReplyOptions{
+		IO:           io,
+		HttpClient:   func() (*http.Client, error) { return client, nil },
+		BaseRepo:     func() (string, error) { return "owner/repo", nil },
+		Repository:   "owner/repo",
+		Number:       123,
+		DiscussionID: "abc123",
+		Body:         "hello reply",
+		JSON:         true,
+	})
+	if err != nil {
+		t.Fatalf("replyRun() error = %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v; output=%q", err, out.String())
+	}
+	if result["discussion_id"] != "abc123" {
+		t.Fatalf("discussion_id = %#v, want abc123", result["discussion_id"])
+	}
+	if result["note_id"].(float64) != 200021622 {
+		t.Fatalf("note_id = %#v, want 200021622", result["note_id"])
+	}
+	if result["body"] != "hello reply" {
+		t.Fatalf("body = %#v", result["body"])
+	}
+}
+
+func TestReplyRunTextShowsCommentID(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	io, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"abc123","body":"hello reply","note_id":200021622}`))
+	}))
+
+	err := replyRun(&ReplyOptions{
+		IO:           io,
+		HttpClient:   func() (*http.Client, error) { return client, nil },
+		BaseRepo:     func() (string, error) { return "owner/repo", nil },
+		Repository:   "owner/repo",
+		Number:       123,
+		DiscussionID: "abc123",
+		Body:         "hello reply",
+	})
+	if err != nil {
+		t.Fatalf("replyRun() error = %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "200021622") {
+		t.Fatalf("text output missing parsed note id: %q", got)
+	}
 }
