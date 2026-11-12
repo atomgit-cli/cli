@@ -23,6 +23,19 @@ func TestNewCmdSetupGit(t *testing.T) {
 	}
 }
 
+func TestNewCmdSetupGitHelpDocumentsDeliveredHelper(t *testing.T) {
+	// The git-credential subcommand is delivered; the help text must not
+	// claim a follow-up release is still pending.
+	f := cmdutil.TestFactory()
+	cmd := NewCmdSetupGit(f, nil)
+	if strings.Contains(cmd.Long, "follow-up") {
+		t.Errorf("Long still mentions a follow-up release: %q", cmd.Long)
+	}
+	if !strings.Contains(cmd.Long, "git-credential") {
+		t.Errorf("Long does not mention the git-credential subcommand: %q", cmd.Long)
+	}
+}
+
 func TestSetupGitRunConfiguresDefaultHost(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_TOKEN", "")
@@ -63,6 +76,9 @@ func TestSetupGitRunConfiguresDefaultHost(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Configured git credential helper") {
 		t.Fatalf("output = %q", out.String())
+	}
+	if strings.Contains(out.String(), "follow-up") {
+		t.Fatalf("output still mentions a follow-up release: %q", out.String())
 	}
 }
 
@@ -126,6 +142,9 @@ func TestSetupGitRunIdempotentSkipsExisting(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "already configured") {
 		t.Fatalf("output = %q", out.String())
+	}
+	if strings.Contains(out.String(), "follow-up") {
+		t.Fatalf("output still mentions a follow-up release: %q", out.String())
 	}
 }
 

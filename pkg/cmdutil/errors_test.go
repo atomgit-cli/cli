@@ -365,3 +365,73 @@ func TestFormatAPIID(t *testing.T) {
 		})
 	}
 }
+
+func TestNewSilentError(t *testing.T) {
+	t.Run("silent error carries code and silent flag", func(t *testing.T) {
+		err := NewSilentError(ExitError, "no credential available")
+		var cliErr *CLIError
+		if !errors.As(err, &cliErr) {
+			t.Fatalf("NewSilentError returns %T, want *CLIError", err)
+		}
+		if !cliErr.Silent {
+			t.Fatal("Silent = false, want true")
+		}
+		if cliErr.Code != ExitError {
+			t.Fatalf("Code = %d, want %d", cliErr.Code, ExitError)
+		}
+		if cliErr.Error() != "no credential available" {
+			t.Fatalf("Error() = %q, want %q", cliErr.Error(), "no credential available")
+		}
+	})
+
+	t.Run("exit code maps through ExitCode", func(t *testing.T) {
+		if got := ExitCode(NewSilentError(ExitError, "quiet")); got != ExitError {
+			t.Fatalf("ExitCode(silent) = %d, want %d", got, ExitError)
+		}
+	})
+}
+
+func TestIsSilent(t *testing.T) {
+	t.Run("nil error is not silent", func(t *testing.T) {
+		if IsSilent(nil) {
+			t.Fatal("IsSilent(nil) = true, want false")
+		}
+	})
+
+	t.Run("plain error is not silent", func(t *testing.T) {
+		if IsSilent(errors.New("boom")) {
+			t.Fatal("IsSilent(plain) = true, want false")
+		}
+	})
+
+	t.Run("regular CLIError is not silent", func(t *testing.T) {
+		if IsSilent(NewUsageError("bad args")) {
+			t.Fatal("IsSilent(usage) = true, want false")
+		}
+	})
+
+	t.Run("silent CLIError is silent", func(t *testing.T) {
+		if !IsSilent(NewSilentError(ExitError, "quiet")) {
+			t.Fatal("IsSilent(silent) = false, want true")
+		}
+	})
+
+	t.Run("wrapped silent error is silent", func(t *testing.T) {
+		wrapped := fmt.Errorf("context: %w", NewSilentError(ExitError, "quiet"))
+		if !IsSilent(wrapped) {
+			t.Fatal("IsSilent(wrapped) = false, want true")
+		}
+	})
+}
+
+func TestSilentCLIErrorCodeZero(t *testing.T) {
+	// A silent CLIError with Code 0 keeps the silent flag but still exits
+	// with the generic ExitError, mirroring the non-silent zero-code path.
+	err := &CLIError{Code: 0, Message: "zero code", Silent: true}
+	if !IsSilent(err) {
+		t.Fatal("IsSilent(Code=0 silent) = false, want true")
+	}
+	if got := ExitCode(err); got != ExitError {
+		t.Fatalf("ExitCode(Code=0 silent) = %d, want %d", got, ExitError)
+	}
+}
