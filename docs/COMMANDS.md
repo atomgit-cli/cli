@@ -1719,6 +1719,7 @@ gc pr comments 1 -R infra-test/gctest1 --json
 `--json` 输出评论对象数组；无评论时输出 `[]`，不会混入文本提示。
 可通过 `gc pr comment resolve` 和 `gc pr comment unresolve` 标记评论讨论的解决状态。
 inline comment 会显示文件路径和所在行号（新版本文件的行号）。
+每条评论对象含 `reply` 数组（该讨论的回复列表，官方 API 嵌套返回；无回复时为 `null`）：文本模式以 "Replies (N)" 在父评论下渲染，每个回复元素含 `id`/`body`/`user`/`created_at`/`updated_at`，回复自身不带 `discussion_id`（由父评论携带）。文本模式回复行格式为 `↳ ID: <回复id>, <作者> at <时间>`，回复 id 可用于 `gc pr comment delete` 或单条读取（`gc api repos/<owner>/<repo>/pulls/comments/<id>`）。
 
 ### pr comment - 添加 PR 评论
 
@@ -1796,7 +1797,15 @@ gc pr reply 1 --discussion <discussion_id> --body "回复内容" -R infra-test/g
 
 # 使用简写
 gc pr reply 1 -d <discussion_id> -b "回复内容" -R owner/repo
+
+# JSON 输出（返回 note_id 可用于回读与幂等校验）
+gc pr reply 1 --discussion <discussion_id> --body "回复内容" -R infra-test/gctest1 --json
 ```
+
+说明：
+- 成功输出包含 Comment ID（即 `note_id`，新回复的评论 id）：凭它可经 `gc api repos/<owner>/<repo>/pulls/comments/<note_id>` 单条读回（含 body 与所属 discussion_id），也可在 `gc pr comments` 的父评论 `reply` 数组中看到该回复。
+- `--json` 输出 `{"discussion_id":..., "note_id":..., "body":...}`。
+- 回复不在评论列表的顶层（列表只含根评论，回复嵌套在父评论的 `reply` 字段内）。
 
 ### pr diff - 查看 PR 差异
 
