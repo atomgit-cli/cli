@@ -64,6 +64,7 @@
 典型用法是给第二个账号包一个 wrapper：
 
 ```sh
+mkdir -p ~/.local/bin
 cat > ~/.local/bin/gc-agent <<'WRAP'
 #!/bin/sh
 GC_CONFIG_DIR="$HOME/.config/gc-agent" exec gc "$@"
@@ -73,7 +74,7 @@ gc-agent auth login   # 在隔离目录登录第二个账号，不影响主配�
 gc-agent auth status  # 查看该账号状态；主 gc 命令仍用主账号
 ```
 
-排查隔离目录的登录状态时，用同一个 `GC_CONFIG_DIR` 值运行 `gc auth status`。要让 git 操作（HTTPS clone/push 等）也使用该账号，需在运行 git 的环境中导出同一个 `GC_CONFIG_DIR`：wrapper 只覆盖 gc 命令，`auth setup-git` 写入 git 配置的 helper 条目不携带该变量。
+排查隔离目录的登录状态时，用同一个 `GC_CONFIG_DIR` 值运行 `gc auth status`。要让 git 操作（HTTPS clone/push 等）也使用该账号，需在运行 git 的环境中导出同一个 `GC_CONFIG_DIR`：wrapper 只覆盖 gc 命令，`auth setup-git` 写入 git 配置的 helper 条目不携带该变量（git 凭据回填由 `gc auth git-credential` 子命令提供）。
 
 ## 主机传播语义
 
