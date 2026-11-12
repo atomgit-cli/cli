@@ -2,6 +2,10 @@ package root
 
 import (
 	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -222,5 +226,122 @@ func TestExecuteRunsLifecycleOnFailingCommand(t *testing.T) {
 	err := Execute("test", "abc", "today")
 	if err == nil {
 		t.Log("Execute with no args returned nil (help path); the error-path lifecycle call was still exercised")
+	}
+}
+
+func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
+	// A bootstrap first-run notice must not reach the git credential
+	// helper's stderr: git passes helper stderr through into its own output
+	// (issue 647). auth git-credential with an empty config exits silently
+	// with 1 — the error path of Execute must skip the lifecycle too.
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "gc")
+	t.Setenv("GITCODE_CLI_BINARY", binary)
+	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
+		dir, filepath.Join(dir, "helper.js"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Feed the protocol request on stdin so the helper parses and exits
+	// with the silent "no credential" error.
+	reqFile, err := os.CreateTemp(t.TempDir(), "credreq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reqFile.WriteString("protocol=https\nhost=gitcode.com\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reqFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stdin, err := os.Open(reqFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldArgs, oldStdin, oldStderr := os.Args, os.Stdin, os.Stderr
+	os.Args = []string{"gc", "auth", "git-credential", "get"}
+	os.Stdin = stdin
+	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	}()
+
+	err = Execute("test", "abc", "today")
+	if err == nil {
+		t.Log("Execute returned nil (unexpected for silent no-credential exit)")
+	}
+	if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(os.Stderr)
+	os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	if strings.Contains(string(got), "npm bootstrap") || strings.Contains(string(got), "update") {
+		t.Fatalf("protocol command leaked lifecycle output to stderr: %q", string(got))
+	}
+	if len(got) != 0 {
+		t.Fatalf("protocol command stderr = %q, want empty", string(got))
+	}
+}
+
+func TestExecuteRunsFirstRunNoticeForNormalCommand(t *testing.T) {
+	// The skip must be scoped to protocol commands: a normal command on a
+	// fresh bootstrap state still prints the one-time notice (issue 647
+	// acceptance: no regression for interactive users).
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "gc")
+	t.Setenv("GITCODE_CLI_BINARY", binary)
+	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
+		dir, filepath.Join(dir, "helper.js"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldArgs, oldStderr := os.Args, os.Stderr
+	os.Args = []string{"gc", "version"}
+	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.Args, os.Stderr = oldArgs, oldStderr
+	}()
+
+	if err := Execute("test", "abc", "today"); err != nil {
+		t.Logf("Execute version returned: %v", err)
+	}
+	if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(os.Stderr)
+	os.Args, os.Stderr = oldArgs, oldStderr
+	if !strings.Contains(string(got), "npm bootstrap") {
+		t.Fatalf("normal command lost the first-run notice: %q", string(got))
 	}
 }

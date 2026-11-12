@@ -10,6 +10,12 @@ import (
 const FlagEnumAnnotation = "gc.enum"
 const TopicAnnotation = "gc.topic"
 
+// NoUpdateLifecycleAnnotation marks protocol commands whose stderr the
+// calling program passes through to the user (git credential helpers): the
+// root update lifecycle (first-run notice, pending summaries) must skip
+// them so its output never leaks into the protocol stream (issue 647).
+const NoUpdateLifecycleAnnotation = "gc/no-update-lifecycle"
+
 // StandardTopics is the list of standard topic categories.
 var StandardTopics = []string{
 	"auth",

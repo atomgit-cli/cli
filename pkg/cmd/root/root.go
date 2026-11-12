@@ -39,6 +39,21 @@ import (
 
 const commandNameEnv = "GITCODE_CLI_COMMAND_NAME"
 
+// lastStartedCommand records the command that most recently started running
+// (the leaf command, set from PersistentPreRunE). Execute's error path uses
+// it to decide whether the update lifecycle applies: cobra skips
+// PersistentPostRun when RunE fails, and protocol commands annotated with
+// NoUpdateLifecycleAnnotation must keep their stderr clean even on that
+// path — git passes their stderr through into git's own output (issue 647).
+var lastStartedCommand *cobra.Command
+
+// updateLifecycleSkipped reports whether the command opts out of the root
+// update lifecycle (protocol commands whose stderr a calling program relays
+// to the user, e.g. auth git-credential).
+func updateLifecycleSkipped(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[cmdutil.NoUpdateLifecycleAnnotation] != ""
+}
+
 // Execute runs the root command.
 func Execute(ver, commit, date string) error {
 	f := cmdutil.NewFactory()
@@ -51,7 +66,11 @@ func Execute(ver, commit, date string) error {
 	// exits early without an adjacent bootstrap manifest, so this is a
 	// no-op for non-bootstrap channels.
 	if err != nil {
-		runPostCommandLifecycle(rootCmd, f)
+		target := rootCmd
+		if lastStartedCommand != nil {
+			target = lastStartedCommand
+		}
+		runPostCommandLifecycle(target, f)
 	}
 	return err
 }
@@ -59,6 +78,9 @@ func Execute(ver, commit, date string) error {
 // runPostCommandLifecycle mirrors the PersistentPostRun hook for the error
 // path (flag parsing has already happened, so the flag reads are safe).
 func runPostCommandLifecycle(cmd *cobra.Command, f *cmdutil.Factory) {
+	if updateLifecycleSkipped(cmd) {
+		return
+	}
 	noUpdate, _ := cmd.Flags().GetBool("no-update-check")
 	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	cfg, _ := f.Config()
@@ -79,9 +101,13 @@ func NewRootCmd(ver, commit, date string, f *cmdutil.Factory) *cobra.Command {
 			if noInteractive, _ := cmd.Flags().GetBool("no-interactive"); noInteractive {
 				f.IOStreams.SetNoInteractive(true)
 			}
+			lastStartedCommand = cmd
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			if updateLifecycleSkipped(cmd) {
+				return
+			}
 			noUpdate, _ := cmd.Flags().GetBool("no-update-check")
 			noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 			cfg, _ := f.Config()
