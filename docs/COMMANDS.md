@@ -1903,6 +1903,23 @@ gc pr ready 1 -R infra-test/gctest1 --json
 说明：
 - `pr ready` 会修改 PR 草稿/就绪状态，默认需要确认；非交互场景中显式传 `--yes`。
 
+### pr reviews - 查看 PR 评审状态
+
+```bash
+# 查看 PR 的评审状态（评审人/测试人/审核人）
+gc pr reviews 1 -R infra-test/gctest1
+
+# JSON 输出
+gc pr reviews 1 -R infra-test/gctest1 --json
+```
+
+说明：
+- v5 API 无专门的 reviews 列表端点；评审状态内嵌于 PR 详情响应，本命令读取并输出三组状态：`approval_reviewers`（评审人）、`testers`（测试人）、`assignees`（审核人）。
+- 评审人状态为 `accept_status` 枚举：`true`（已通过 approved）、`reject`（已拒绝 rejected）、`optional`（待处理 pending）；测试人状态为 `accept` 布尔（文本渲染 accepted/pending）。文本模式中：评审人的 code owner 会附加标注；审核人仅显示登录名（其 accept 状态保留在 `--json` 输出中）；图标按状态着色（绿勾/红叉/灰点）。
+- 每个条目的字段形态：`id`/`login`/`name`/`html_url`/`assignee`/`code_owner`/`accept`，另 `avatar_url` 为可选字段（testers 条目无此字段）、`accept_status` 仅评审人条目携带。
+- 无任何评审数据时输出空列表（文本提示 No review states；`--json` 为三个空数组），不报错。
+- 该端点不提供逐评审人的时间字段（时间维度仅 PR 级 `created_at`/`merged_at` 等独立字段）。
+
 ### pr review - 评审 PR
 
 ```bash

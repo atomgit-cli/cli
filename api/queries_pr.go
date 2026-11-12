@@ -55,6 +55,49 @@ type PRBranch struct {
 	Repo  *Repository `json:"repo"`
 }
 
+// PRReviewer represents a review-state entry embedded in a PR detail
+// response: an approval reviewer, a tester, or an assignee. Per the
+// official API schema only approval reviewers carry accept_status.
+type PRReviewer struct {
+	ID           string `json:"id"`
+	Login        string `json:"login"`
+	Name         string `json:"name"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
+	HTMLURL      string `json:"html_url"`
+	Assignee     bool   `json:"assignee"`
+	CodeOwner    bool   `json:"code_owner"`
+	Accept       bool   `json:"accept"`
+	AcceptStatus string `json:"accept_status,omitempty"`
+}
+
+// PRReviewStates carries the review-state groups embedded in a PR detail.
+type PRReviewStates struct {
+	ApprovalReviewers []*PRReviewer `json:"approval_reviewers"`
+	Testers           []*PRReviewer `json:"testers"`
+	Assignees         []*PRReviewer `json:"assignees"`
+}
+
+// GetPRReviewStates reads the review states embedded in a PR detail. The
+// v5 API has no dedicated reviews list endpoint; the detail response
+// carries approval reviewers (with accept_status), testers, and assignees.
+func GetPRReviewStates(client *Client, owner, repo string, number int) (*PRReviewStates, error) {
+	states := &PRReviewStates{}
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number)
+	if err := client.Get(path, states); err != nil {
+		return nil, err
+	}
+	if states.ApprovalReviewers == nil {
+		states.ApprovalReviewers = []*PRReviewer{}
+	}
+	if states.Testers == nil {
+		states.Testers = []*PRReviewer{}
+	}
+	if states.Assignees == nil {
+		states.Assignees = []*PRReviewer{}
+	}
+	return states, nil
+}
+
 // PRComment represents a comment on a PR
 type PRComment struct {
 	ID           interface{}      `json:"id"`
