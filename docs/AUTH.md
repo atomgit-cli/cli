@@ -13,8 +13,9 @@
 
 当前版本不支持：
 
-- 多账户切换的完整产品化体验
 - 操作系统 keyring 集成
+
+多账户切换已支持（`gc auth switch`，同一配置目录内同主机的已存储账号之间切换；见下文"单目录内切换账号"）。
 
 ## 认证来源优先级
 
@@ -57,6 +58,19 @@
 
 当前通用配置用于保存 `editor`、`browser`、`pager` 等非敏感偏好。认证 token 仍只写入 `auth.json`。
 通用配置会拒绝 `token`、`password`、`secret` 等未列入允许列表的键。
+
+### 单目录内切换账号（auth switch）
+
+同一配置目录、同一主机下可以存储多个账号 token，`gc auth switch` 在它们之间切换活动账号：
+
+```bash
+gc auth login                 # 第一个账号
+gc auth login                 # 第二个账号（token 属于另一账号时新增条目）
+gc auth switch second-account # 切换；交互模式直接 gc auth switch 会列出账号
+gc auth status                # 显示新账号
+```
+
+切换是本地操作（改写 `auth.json` 的 `active_user`，不调用 API）；git HTTPS 操作经 `auth setup-git` 配置的 helper 会随切换使用新账号。环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）优先级仍高于任何已切换账号；需要并行的两个账号（互不切换）时用下面的目录隔离方案。
 
 ### 一机多账号（GC_CONFIG_DIR 隔离）
 

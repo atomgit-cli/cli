@@ -68,6 +68,10 @@ type AuthConfig interface {
 	Logout(hostname, username string) error
 	// SwitchUser switches the active user for a host
 	SwitchUser(hostname, user string) error
+	// LoginUsers returns the sorted usernames that have stored tokens for a
+	// host (empty when the host has no stored accounts). Interactive
+	// account switching and not-found hints need the list (issue 646).
+	LoginUsers(hostname string) []string
 }
 
 // config implements Config interface

@@ -219,6 +219,26 @@ func (a *authConfig) SwitchUser(hostname, user string) error {
 	return a.config.writeAuthState(state)
 }
 
+// LoginUsers returns the sorted usernames that have stored tokens for a
+// host. The interactive account switch and the not-found hints need the
+// list (issue 646); SwitchUser itself only validates membership.
+func (a *authConfig) LoginUsers(hostname string) []string {
+	state, err := a.config.readAuthState()
+	if err != nil {
+		return nil
+	}
+	host := state.host(hostname)
+	if host == nil {
+		return nil
+	}
+	users := make([]string, 0, len(host.Users))
+	for name := range host.Users {
+		users = append(users, name)
+	}
+	sort.Strings(users)
+	return users
+}
+
 func (c *config) authStatePath() string {
 	return filepath.Join(c.configDir, "auth.json")
 }

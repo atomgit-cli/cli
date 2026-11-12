@@ -321,6 +321,29 @@ gc auth token --json
 - token 输出到 stdout，同时向 stderr 输出安全警告提醒不要共享此输出；禁止把该命令作为脚本 piping、日志采集或 AI 代理取 token 入口。
 - `auth token` 和 `auth status --show-token` 必须在交互式 TTY 中按提示输入 hostname 确认；非交互环境一律拒绝输出完整 token，没有 `--yes` 绕过。
 
+### auth switch - 切换账号
+
+```bash
+# 在默认主机上切换到已存储的账号
+gc auth switch second-account
+
+# 交互式选择（列出该主机的已登录账号，当前账号有标记）
+gc auth switch
+
+# 在指定主机上切换
+gc auth switch deploy-bot --hostname gitcode.com
+
+# 输出 JSON
+gc auth switch second-account --json
+```
+
+说明：
+- 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。
+- 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可；非交互环境（无 TTY）未传用户名时返回退出码 `2`。
+- 目标账号未存储在该主机时返回退出码 `3`，错误消息列出可用账号；主机无任何已存储账号时同样返回 `3` 并提示 `gc auth login`。
+- `--json` 输出 `{"hostname":..., "active_user":...}`（字段序 hostname → active_user）。
+- 环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）仍优先于任何已切换账号（认证来源优先级不变）；跨配置目录的并行账号用 `GC_CONFIG_DIR`（见 docs/AUTH.md 一机多账号小节）。
+
 ### auth logout - 登出
 
 ```bash
