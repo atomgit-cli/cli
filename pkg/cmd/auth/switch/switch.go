@@ -112,6 +112,15 @@ func switchRun(opts *SwitchOptions) error {
 	if len(users) == 0 {
 		return cmdutil.NewNotFoundError(fmt.Sprintf("no stored accounts for %s; run gc auth login to add one", hostname), nil)
 	}
+	// Stored account names are echoed in listings, prompts, and error
+	// hints; a corrupted auth.json must not inject terminal escape
+	// sequences through them (git-credential applies the same idea to its
+	// protocol output).
+	for _, name := range users {
+		if cmdutil.HasTerminalUnsafeChars(name) {
+			return fmt.Errorf("corrupted login state for %s: stored account name contains control characters; inspect auth.json", hostname)
+		}
+	}
 
 	username := opts.Username
 	if username == "" {
@@ -150,15 +159,17 @@ func promptSwitch(io *iostreams.IOStreams, authCfg config.AuthConfig, hostname s
 	current, _ := authCfg.ActiveUser(hostname)
 	cs := io.ColorScheme()
 
-	fmt.Fprintf(io.Out, "? Switch account on %s:\n", hostname)
+	// The prompt block goes to stderr so machine-readable stdout (e.g.
+	// --json) stays pure while the interactive selection stays visible.
+	fmt.Fprintf(io.ErrOut, "? Switch account on %s:\n", hostname)
 	for i, name := range users {
 		marker := ""
 		if name == current {
 			marker = cs.Gray(" (current)")
 		}
-		fmt.Fprintf(io.Out, "  %d. %s%s\n", i+1, name, marker)
+		fmt.Fprintf(io.ErrOut, "  %d. %s%s\n", i+1, name, marker)
 	}
-	fmt.Fprintf(io.Out, "Choose an account [1-%d]: ", len(users))
+	fmt.Fprintf(io.ErrOut, "Choose an account [1-%d]: ", len(users))
 
 	line, err := bufio.NewReader(io.In).ReadString('\n')
 	if err != nil && line == "" {

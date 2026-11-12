@@ -1,6 +1,8 @@
 package switchcmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -107,13 +109,13 @@ func TestSwitchRunNonInteractiveWithoutUsernameExit2(t *testing.T) {
 
 func TestSwitchRunInteractiveSelectionByNumber(t *testing.T) {
 	cfg := loginTwoAccounts(t)
-	io, _, out, _ := iostreams.TestTTY()
+	io, _, _, errOut := iostreams.TestTTY()
 	io.In = strings.NewReader("2\n")
 	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com"})
 	if err != nil {
 		t.Fatalf("switchRun() error = %v", err)
 	}
-	rendered := out.String()
+	rendered := errOut.String()
 	for _, want := range []string{"Switch account on gitcode.com", "1. alice", "2. bob", "(current)"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("prompt output missing %q: %q", want, rendered)
@@ -179,5 +181,46 @@ func TestSwitchRunResolvesDefaultHost(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "gitcode.com") {
 		t.Fatalf("output should mention the resolved host: %q", out.String())
+	}
+}
+
+func TestSwitchRunInteractivePromptsDoNotPolluteJSONStdout(t *testing.T) {
+	// --json + TTY + no username: the prompt block goes to stderr so the
+	// JSON output stays machine-readable (issue 646 review).
+	cfg := loginTwoAccounts(t)
+	io, _, out, _ := iostreams.TestTTY()
+	io.In = strings.NewReader("bob\n")
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", JSON: true})
+	if err != nil {
+		t.Fatalf("switchRun() error = %v", err)
+	}
+	got := out.String()
+	if strings.TrimSpace(got) != `{
+  "hostname": "gitcode.com",
+  "active_user": "bob"
+}` {
+		t.Fatalf("stdout polluted by prompt text: %q", got)
+	}
+}
+
+func TestSwitchRunRejectsControlCharAccountNames(t *testing.T) {
+	// A corrupted auth.json must not push terminal escape sequences
+	// through the account listing or hints.
+	// The fixture uses the JSON escape \u001b so the username parses to a
+	// real ESC byte: the guard must fire before any echo.
+	corrupt := `{"version":1,"default_host":"gitcode.com","hosts":{"gitcode.com":{"active_user":"a\u001bb","users":{"a\u001bb":{"token":"t"},"ok":{"token":"t2"}}}}}`
+	tmp := t.TempDir()
+	t.Setenv("GC_CONFIG_DIR", tmp)
+	if err := os.WriteFile(filepath.Join(tmp, "auth.json"), []byte(corrupt), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.New()
+	io, _, _, _ := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "ok", Hostname: "gitcode.com"})
+	if err == nil {
+		t.Fatal("switchRun() error = nil, want corrupted-state error")
+	}
+	if !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("error = %q, want control-characters mention", err.Error())
 	}
 }
