@@ -76,8 +76,6 @@ func NewCmdReviews(f *cmdutil.Factory, runF func(*ReviewsOptions) error) *cobra.
 }
 
 func reviewsRun(opts *ReviewsOptions) error {
-	cs := opts.IO.ColorScheme()
-
 	// Validate the PR number before repository resolution and any network
 	// activity so usage errors are never masked by auth or API failures.
 	if opts.Number < 1 {
@@ -112,47 +110,75 @@ func reviewsRun(opts *ReviewsOptions) error {
 	if opts.JSON {
 		return cmdutil.WriteJSON(opts.IO.Out, states)
 	}
+	renderReviewStates(opts.IO, states, opts.Number)
+	return nil
+}
 
+// renderReviewStates writes the text output grouped by review role.
+func renderReviewStates(io *iostreams.IOStreams, states *api.PRReviewStates, number int) {
+	cs := io.ColorScheme()
 	if len(states.ApprovalReviewers) == 0 && len(states.Testers) == 0 && len(states.Assignees) == 0 {
-		fmt.Fprintf(opts.IO.Out, "No review states on PR #%d\n", opts.Number)
-		return nil
+		fmt.Fprintf(io.Out, "No review states on PR #%d\n", number)
+		return
 	}
 
-	fmt.Fprintf(opts.IO.Out, "\nReview states on PR #%d:\n\n", opts.Number)
-	fmt.Fprintf(opts.IO.Out, "Approval reviewers (%d):\n", len(states.ApprovalReviewers))
-	if len(states.ApprovalReviewers) == 0 {
-		fmt.Fprintln(opts.IO.Out, "  (none)")
+	fmt.Fprintf(io.Out, "\nReview states on PR #%d:\n\n", number)
+	renderApprovalReviewers(io, cs, states.ApprovalReviewers)
+	fmt.Fprintln(io.Out)
+	renderTesters(io, cs, states.Testers)
+	fmt.Fprintln(io.Out)
+	renderAssignees(io, cs, states.Assignees)
+}
+
+// renderApprovalReviewers writes the approval reviewer group with the
+// accept_status enum mapped to display text and state-colored icons.
+func renderApprovalReviewers(io *iostreams.IOStreams, cs *iostreams.ColorScheme, reviewers []*api.PRReviewer) {
+	fmt.Fprintf(io.Out, "Approval reviewers (%d):\n", len(reviewers))
+	if len(reviewers) == 0 {
+		fmt.Fprintln(io.Out, "  (none)")
+		return
 	}
-	for _, reviewer := range states.ApprovalReviewers {
-		line := fmt.Sprintf("  %s %s (%s", cs.Green("✓"), reviewer.Login, acceptStatusText(reviewer.AcceptStatus))
+	for _, reviewer := range reviewers {
+		line := fmt.Sprintf("  %s %s (%s", reviewIcon(cs, reviewer.AcceptStatus),
+			reviewer.Login, acceptStatusText(reviewer.AcceptStatus))
 		if reviewer.CodeOwner {
 			line += ", code owner"
 		}
 		line += ")\n"
-		fmt.Fprint(opts.IO.Out, line)
+		fmt.Fprint(io.Out, line)
 	}
+}
 
-	fmt.Fprintf(opts.IO.Out, "\nTesters (%d):\n", len(states.Testers))
-	if len(states.Testers) == 0 {
-		fmt.Fprintln(opts.IO.Out, "  (none)")
+// renderTesters writes the tester group; testers carry an accept boolean
+// rather than the accept_status enum.
+func renderTesters(io *iostreams.IOStreams, cs *iostreams.ColorScheme, testers []*api.PRReviewer) {
+	fmt.Fprintf(io.Out, "Testers (%d):\n", len(testers))
+	if len(testers) == 0 {
+		fmt.Fprintln(io.Out, "  (none)")
+		return
 	}
-	for _, tester := range states.Testers {
+	for _, tester := range testers {
 		state := "pending"
+		icon := cs.Gray("·")
 		if tester.Accept {
 			state = "accepted"
+			icon = cs.Green("✓")
 		}
-		fmt.Fprintf(opts.IO.Out, "  %s %s (%s)\n", cs.Green("✓"), tester.Login, state)
+		fmt.Fprintf(io.Out, "  %s %s (%s)\n", icon, tester.Login, state)
 	}
+}
 
-	fmt.Fprintf(opts.IO.Out, "\nAssignees (%d):\n", len(states.Assignees))
-	if len(states.Assignees) == 0 {
-		fmt.Fprintln(opts.IO.Out, "  (none)")
+// renderAssignees writes the assignee group; assignees show the login only
+// in text mode (their accept state stays available in --json).
+func renderAssignees(io *iostreams.IOStreams, cs *iostreams.ColorScheme, assignees []*api.PRReviewer) {
+	fmt.Fprintf(io.Out, "Assignees (%d):\n", len(assignees))
+	if len(assignees) == 0 {
+		fmt.Fprintln(io.Out, "  (none)")
+		return
 	}
-	for _, assignee := range states.Assignees {
-		fmt.Fprintf(opts.IO.Out, "  %s %s\n", cs.Green("✓"), assignee.Login)
+	for _, assignee := range assignees {
+		fmt.Fprintf(io.Out, "  %s %s\n", cs.Green("✓"), assignee.Login)
 	}
-
-	return nil
 }
 
 // acceptStatusText maps the API accept_status enum to display text.
@@ -164,5 +190,17 @@ func acceptStatusText(status string) string {
 		return "rejected"
 	default:
 		return "pending"
+	}
+}
+
+// reviewIcon returns a state-colored icon for an accept_status value.
+func reviewIcon(cs *iostreams.ColorScheme, status string) string {
+	switch status {
+	case "true":
+		return cs.Green("✓")
+	case "reject":
+		return cs.FailureIcon()
+	default:
+		return cs.Gray("·")
 	}
 }

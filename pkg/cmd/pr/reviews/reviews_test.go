@@ -14,12 +14,18 @@ import (
 const reviewStateFixture = `{
   "number": 123,
   "approval_reviewers": [
-    {"id":"1","login":"alice","name":"Alice","avatar_url":"a.png","html_url":"u/alice","assignee":true,"code_owner":true,"accept":true,"accept_status":"true"},
-    {"id":"2","login":"bob","name":"Bob","html_url":"u/bob","assignee":false,"code_owner":false,"accept":false,"accept_status":"reject"},
-    {"id":"3","login":"dave","name":"Dave","html_url":"u/dave","assignee":false,"code_owner":false,"accept":false,"accept_status":"optional"}
+    {"id":"1","login":"alice","name":"Alice","avatar_url":"a.png","html_url":"u/alice",
+     "assignee":true,"code_owner":true,"accept":true,"accept_status":"true"},
+    {"id":"2","login":"bob","name":"Bob","html_url":"u/bob",
+     "assignee":false,"code_owner":false,"accept":false,"accept_status":"reject"},
+    {"id":"3","login":"dave","name":"Dave","html_url":"u/dave",
+     "assignee":false,"code_owner":false,"accept":false,"accept_status":"optional"}
   ],
   "testers": [
-    {"id":"4","login":"carol","name":"Carol","html_url":"u/carol","assignee":false,"code_owner":false,"accept":true}
+    {"id":"4","login":"carol","name":"Carol","html_url":"u/carol",
+     "assignee":false,"code_owner":false,"accept":true},
+    {"id":"6","login":"frank","name":"Frank","html_url":"u/frank",
+     "assignee":false,"code_owner":false,"accept":false}
   ],
   "assignees": [
     {"id":"5","login":"erin","name":"Erin","html_url":"u/erin","assignee":true,"code_owner":false,"accept":false}
@@ -77,6 +83,9 @@ func TestReviewsRunJSON(t *testing.T) {
 	if !ok || len(reviewers) != 3 {
 		t.Fatalf("approval_reviewers = %#v, want three entries", result["approval_reviewers"])
 	}
+	if reviewers[2].(map[string]interface{})["accept_status"] != "optional" {
+		t.Fatalf("dave = %#v, want optional", reviewers[2])
+	}
 	alice := reviewers[0].(map[string]interface{})
 	if alice["login"] != "alice" || alice["accept_status"] != "true" || alice["code_owner"] != true {
 		t.Fatalf("alice = %#v", alice)
@@ -86,8 +95,11 @@ func TestReviewsRunJSON(t *testing.T) {
 		t.Fatalf("bob = %#v", bob)
 	}
 	testers, ok := result["testers"].([]interface{})
-	if !ok || len(testers) != 1 || testers[0].(map[string]interface{})["login"] != "carol" {
+	if !ok || len(testers) != 2 || testers[0].(map[string]interface{})["login"] != "carol" {
 		t.Fatalf("testers = %#v", result["testers"])
+	}
+	if testers[1].(map[string]interface{})["accept"] != false {
+		t.Fatalf("frank = %#v, want accept=false", testers[1])
 	}
 	assignees, ok := result["assignees"].([]interface{})
 	if !ok || len(assignees) != 1 || assignees[0].(map[string]interface{})["login"] != "erin" {
@@ -151,8 +163,9 @@ func TestReviewsRunText(t *testing.T) {
 		"alice", "approved", "code owner",
 		"bob", "rejected",
 		"dave", "pending",
-		"carol", "Testers",
+		"carol", "Testers", "accepted", "frank",
 		"erin", "Assignees",
+		"Approval reviewers",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("text output missing %q: %q", want, got)
