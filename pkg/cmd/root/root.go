@@ -39,14 +39,6 @@ import (
 
 const commandNameEnv = "GITCODE_CLI_COMMAND_NAME"
 
-// lastStartedCommand records the command that most recently started running
-// (the leaf command, set from PersistentPreRunE). Execute's error path uses
-// it to decide whether the update lifecycle applies: cobra skips
-// PersistentPostRun when RunE fails, and protocol commands annotated with
-// NoUpdateLifecycleAnnotation must keep their stderr clean even on that
-// path — git passes their stderr through into git's own output (issue 647).
-var lastStartedCommand *cobra.Command
-
 // updateLifecycleSkipped reports whether the command opts out of the root
 // update lifecycle (protocol commands whose stderr a calling program relays
 // to the user, e.g. auth git-credential).
@@ -58,7 +50,10 @@ func updateLifecycleSkipped(cmd *cobra.Command) bool {
 func Execute(ver, commit, date string) error {
 	f := cmdutil.NewFactory()
 	rootCmd := NewRootCmd(ver, commit, date, f)
-	err := rootCmd.Execute()
+	// ExecuteC returns the command it resolved and ran even when that
+	// command fails, so the error path below can apply the protocol-command
+	// lifecycle skip to the actual leaf command.
+	cmd, err := rootCmd.ExecuteC()
 	// cobra skips PersistentPostRun when RunE returns an error, so a failing
 	// command would skip the update lifecycle entirely (pending summaries,
 	// first-run notice, due background check). The npm wrapper runs its
@@ -66,11 +61,7 @@ func Execute(ver, commit, date string) error {
 	// exits early without an adjacent bootstrap manifest, so this is a
 	// no-op for non-bootstrap channels.
 	if err != nil {
-		target := rootCmd
-		if lastStartedCommand != nil {
-			target = lastStartedCommand
-		}
-		runPostCommandLifecycle(target, f)
+		runPostCommandLifecycle(cmd, f)
 	}
 	return err
 }
@@ -101,7 +92,6 @@ func NewRootCmd(ver, commit, date string, f *cmdutil.Factory) *cobra.Command {
 			if noInteractive, _ := cmd.Flags().GetBool("no-interactive"); noInteractive {
 				f.IOStreams.SetNoInteractive(true)
 			}
-			lastStartedCommand = cmd
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {

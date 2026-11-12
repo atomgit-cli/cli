@@ -225,7 +225,10 @@ func TestExecuteRunsLifecycleOnFailingCommand(t *testing.T) {
 	t.Setenv("GITCODE_CLI_BINARY", t.TempDir()+"/gc")
 	err := Execute("test", "abc", "today")
 	if err == nil {
-		t.Log("Execute with no args returned nil (help path); the error-path lifecycle call was still exercised")
+		// No args takes the help path, which returns nil and does not enter
+		// the error path; this test pins that Execute stays safe on that
+		// path (real error-path coverage lives in the lifecycle tests below).
+		t.Log("Execute with no args returned nil (help path)")
 	}
 }
 
@@ -292,7 +295,7 @@ func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
 
 	err = Execute("test", "abc", "today")
 	if err == nil {
-		t.Log("Execute returned nil (unexpected for silent no-credential exit)")
+		t.Fatal("Execute returned nil; the no-credential helper call must fail so the error-path lifecycle is the path being skipped")
 	}
 	if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
 		t.Fatal(err)
@@ -357,5 +360,118 @@ func TestExecuteRunsFirstRunNoticeForNormalCommand(t *testing.T) {
 	os.Args, os.Stderr = oldArgs, oldStderr
 	if !strings.Contains(string(got), "npm bootstrap") {
 		t.Fatalf("normal command lost the first-run notice: %q", string(got))
+	}
+}
+
+func TestExecuteSkipsLifecycleForProtocolCommandSuccessPath(t *testing.T) {
+	// git calls `store` after a successful fill; the helper's no-op store
+	// succeeds, so the PersistentPostRun guard must skip the lifecycle there
+	// too (issue 647: helper stderr stays clean on every protocol op).
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "gc")
+	t.Setenv("GITCODE_CLI_BINARY", binary)
+	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("BUILD_NUMBER", "")
+	t.Setenv("CI_NAME", "")
+	t.Setenv("TEAMCITY_VERSION", "")
+	t.Setenv("GC_NO_UPDATE_CHECK", "")
+	t.Setenv("GC_UPDATE_MODE", "")
+	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
+		dir, filepath.Join(dir, "helper.js"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldArgs, oldStdin, oldStderr := os.Args, os.Stdin, os.Stderr
+	os.Args = []string{"gc", "auth", "git-credential", "store"}
+	os.Stdin, err = os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Stdin.Close()
+	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	}()
+
+	err = Execute("test", "abc", "today")
+	if err != nil {
+		t.Fatalf("Execute store error = %v, want nil (no-op success)", err)
+	}
+	if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(os.Stderr)
+	os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	if len(got) != 0 {
+		t.Fatalf("protocol command stderr = %q, want empty on the success path too", string(got))
+	}
+}
+
+func TestExecuteRunsLifecycleOnFailingNormalCommand(t *testing.T) {
+	// The skip must be protocol-only: a failing normal command (auth status
+	// without a login) still runs the error-path lifecycle, and the first-run
+	// notice reaches stderr (runPostCommandLifecycle body coverage).
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "gc")
+	t.Setenv("GITCODE_CLI_BINARY", binary)
+	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("BUILD_NUMBER", "")
+	t.Setenv("CI_NAME", "")
+	t.Setenv("TEAMCITY_VERSION", "")
+	t.Setenv("GC_NO_UPDATE_CHECK", "")
+	t.Setenv("GC_UPDATE_MODE", "")
+	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
+		dir, filepath.Join(dir, "helper.js"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldArgs, oldStderr := os.Args, os.Stderr
+	os.Args = []string{"gc", "auth", "status"}
+	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.Args, os.Stderr = oldArgs, oldStderr
+	}()
+
+	err = Execute("test", "abc", "today")
+	if err == nil {
+		t.Fatal("auth status without a login should fail (exit 4)")
+	}
+	if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(os.Stderr)
+	os.Args, os.Stderr = oldArgs, oldStderr
+	if !strings.Contains(string(got), "npm bootstrap") {
+		t.Fatalf("failing normal command lost the error-path first-run notice: %q", string(got))
 	}
 }
