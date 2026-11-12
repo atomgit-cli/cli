@@ -134,8 +134,10 @@ run_expect_status() {
 
 TMP_EMPTY_CONFIG_DIR="$(mktemp -d)"
 TMP_NON_GIT_DIR="$(mktemp -d)"
+TMP_GC_CRED_OUT="$(mktemp)"
+TMP_GC_CRED_ERR="$(mktemp)"
 cleanup() {
-  rm -rf "$TMP_EMPTY_CONFIG_DIR" "$TMP_NON_GIT_DIR"
+  rm -rf "$TMP_EMPTY_CONFIG_DIR" "$TMP_NON_GIT_DIR" "$TMP_GC_CRED_OUT" "$TMP_GC_CRED_ERR"
 }
 trap cleanup EXIT
 
@@ -168,6 +170,40 @@ assert_contains "$env_guidance_out" "gc auth login"
 assert_contains "$env_guidance_out" "gc auth status"
 assert_not_contains "$env_guidance_out" "To re-authenticate, run: gc auth login"
 
+# Git credential helper silent contract (!621, issue 648): with no stored
+# credential, `auth git-credential get` must exit 1 with zero bytes on both
+# stdout and stderr — the main entry point suppresses the error line so git
+# can continue with its next helper without protocol noise. Assertions are
+# byte-level on purpose: no error-message text involved.
+log "Auth Git-Credential Silent Contract"
+set +e
+printf 'protocol=https\nhost=gitcode.com\n' | env GC_CONFIG_DIR="$TMP_EMPTY_CONFIG_DIR" GC_TOKEN= GITCODE_TOKEN= "$GC_BIN" auth git-credential get >"$TMP_GC_CRED_OUT" 2>"$TMP_GC_CRED_ERR"
+GC_CRED_STATUS=$?
+set -e
+if [[ "$GC_CRED_STATUS" -ne 1 ]]; then
+  echo "auth git-credential: expected exit status 1, got $GC_CRED_STATUS" >&2
+  exit 1
+fi
+if [[ -s "$TMP_GC_CRED_OUT" ]]; then
+  echo "auth git-credential: expected empty stdout, got: $(cat "$TMP_GC_CRED_OUT")" >&2
+  exit 1
+fi
+if [[ -s "$TMP_GC_CRED_ERR" ]]; then
+  echo "auth git-credential: expected empty stderr, got: $(cat "$TMP_GC_CRED_ERR")" >&2
+  exit 1
+fi
+
+# gc api --jq smoke (issue 648): the filter must output the current login as
+# a non-empty string, cross-validated against the raw user response.
+log "API User JQ Filter"
+run_capture api_user_login "$GC_BIN" api user --jq .login
+if [[ -z "$api_user_login" ]]; then
+  echo "api user --jq .login: expected non-empty login output" >&2
+  exit 1
+fi
+run_capture api_user_raw "$GC_BIN" api user
+assert_contains "$api_user_raw" "$api_user_login"
+
 log "Repo View"
 run_capture repo_view_out "$GC_BIN" repo view "$READONLY_REPO"
 assert_contains "$repo_view_out" "$READONLY_REPO"
@@ -197,6 +233,16 @@ assert_contains "$issue_list_json" "\"number\""
 log "Issue View JSON"
 run_capture issue_view_json "$GC_BIN" issue view "$ISSUE_NUMBER" -R "$READONLY_REPO" --json
 assert_contains "$issue_view_json" "\"number\""
+
+# gc api --paginate --slurp smoke (issue 648): the merged output must be a
+# single flat JSON array.
+log "API Paginate Slurp Shape"
+run_capture api_paginated_json "$GC_BIN" api "repos/$READONLY_REPO/issues?state=all&per_page=2" --paginate --slurp
+if [[ "$api_paginated_json" != \[* ]]; then
+  echo "api --paginate --slurp: expected output to start with '[', got: ${api_paginated_json:0:60}" >&2
+  exit 1
+fi
+assert_contains "$api_paginated_json" "\"id\""
 else
   echo "SKIP: issue fixture unavailable" >&2
 fi
