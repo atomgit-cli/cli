@@ -29,6 +29,16 @@ type ReplyOptions struct {
 	JSON bool
 }
 
+// replyJSON is the stable --json output shape for pr reply. Field order is
+// part of the output contract (issue 655): discussion_id, note_id, body —
+// matching the docs/COMMANDS.md example. A struct (not a map) keeps the
+// order from drifting when fields are added.
+type replyJSON struct {
+	DiscussionID string `json:"discussion_id"`
+	NoteID       int64  `json:"note_id"`
+	Body         string `json:"body"`
+}
+
 // NewCmdReply creates the reply command
 func NewCmdReply(f *cmdutil.Factory, runF func(*ReplyOptions) error) *cobra.Command {
 	opts := &ReplyOptions{
@@ -133,10 +143,10 @@ func replyRun(opts *ReplyOptions) error {
 	}
 
 	if opts.JSON {
-		return cmdutil.WriteJSON(opts.IO.Out, map[string]interface{}{
-			"discussion_id": opts.DiscussionID,
-			"note_id":       result.NoteID,
-			"body":          result.Body,
+		return cmdutil.WriteJSON(opts.IO.Out, replyJSON{
+			DiscussionID: opts.DiscussionID,
+			NoteID:       result.NoteID,
+			Body:         result.Body,
 		})
 	}
 
