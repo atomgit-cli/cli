@@ -420,57 +420,65 @@ func renderPRComments(out io.Writer, cs *iostreams.ColorScheme, comments []api.P
 
 // reviewSummaryLine builds the one-line review state summary for the PR
 // details header, e.g. "Review: 1 approved, 1 rejected · Testers: 1 accepted".
-// Statuses with a zero count are omitted; the whole line is empty when
-// neither approval reviewers nor testers exist (matching the pr reviews
-// empty-state semantics). Detailed grouping stays in `pr reviews`.
+// The whole line is empty when neither approval reviewers nor testers
+// exist. Detailed grouping stays in `pr reviews`.
 func reviewSummaryLine(states *api.PRReviewStates) string {
 	if states == nil {
 		return ""
 	}
 	var parts []string
 	if len(states.ApprovalReviewers) > 0 {
-		approved, rejected, pending := 0, 0, 0
-		for _, reviewer := range states.ApprovalReviewers {
-			switch render.AcceptStatusText(reviewer.AcceptStatus) {
-			case "approved":
-				approved++
-			case "rejected":
-				rejected++
-			default:
-				pending++
-			}
-		}
-		counts := make([]string, 0, 3)
-		for _, c := range []struct {
-			label string
-			n     int
-		}{{"approved", approved}, {"rejected", rejected}, {"pending", pending}} {
-			if c.n > 0 {
-				counts = append(counts, fmt.Sprintf("%d %s", c.n, c.label))
-			}
-		}
-		parts = append(parts, "Review: "+strings.Join(counts, ", "))
+		parts = append(parts, "Review: "+joinReviewerCounts(states.ApprovalReviewers))
 	}
 	if len(states.Testers) > 0 {
-		accepted, pending := 0, 0
-		for _, tester := range states.Testers {
-			if tester.Accept {
-				accepted++
-			} else {
-				pending++
-			}
-		}
-		counts := make([]string, 0, 2)
-		if accepted > 0 {
-			counts = append(counts, fmt.Sprintf("%d accepted", accepted))
-		}
-		if pending > 0 {
-			counts = append(counts, fmt.Sprintf("%d pending", pending))
-		}
-		parts = append(parts, "Testers: "+strings.Join(counts, ", "))
-	}
-	if len(parts) == 0 {
-		return ""
+		parts = append(parts, "Testers: "+joinTesterCounts(states.Testers))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// joinReviewerCounts summarizes approval reviewers as "1 approved, 2
+// pending"; statuses with a zero count are omitted.
+func joinReviewerCounts(reviewers []*api.PRReviewer) string {
+	approved, rejected, pending := 0, 0, 0
+	for _, reviewer := range reviewers {
+		switch render.AcceptStatusText(reviewer.AcceptStatus) {
+		case "approved":
+			approved++
+		case "rejected":
+			rejected++
+		default:
+			pending++
+		}
+	}
+	counts := make([]string, 0, 3)
+	for _, c := range []struct {
+		label string
+		n     int
+	}{{"approved", approved}, {"rejected", rejected}, {"pending", pending}} {
+		if c.n > 0 {
+			counts = append(counts, fmt.Sprintf("%d %s", c.n, c.label))
+		}
+	}
+	return strings.Join(counts, ", ")
+}
+
+// joinTesterCounts summarizes testers as "1 accepted, 1 pending";
+// statuses with a zero count are omitted.
+func joinTesterCounts(testers []*api.PRReviewer) string {
+	accepted, pending := 0, 0
+	for _, tester := range testers {
+		if tester.Accept {
+			accepted++
+		} else {
+			pending++
+		}
+	}
+	counts := make([]string, 0, 2)
+	if accepted > 0 {
+		counts = append(counts, fmt.Sprintf("%d accepted", accepted))
+	}
+	if pending > 0 {
+		counts = append(counts, fmt.Sprintf("%d pending", pending))
+	}
+	return strings.Join(counts, ", ")
 }

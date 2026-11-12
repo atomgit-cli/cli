@@ -763,3 +763,125 @@ func TestViewRunJSONDoesNotFetchReviewStates(t *testing.T) {
 		t.Fatalf("PR detail GETs in JSON mode = %d, want 1 (no review-states fetch)", detailGets)
 	}
 }
+
+func TestReviewSummaryLineMatrix(t *testing.T) {
+	cases := []struct {
+		name   string
+		states *api.PRReviewStates
+		want   string
+	}{
+		{name: "nil states", states: nil, want: ""},
+		{name: "empty states", states: &api.PRReviewStates{}, want: ""},
+		{name: "reviewers only all statuses", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{
+				{Login: "alice", AcceptStatus: "true"},
+				{Login: "bob", AcceptStatus: "reject"},
+				{Login: "carol"},
+				{Login: "dave", AcceptStatus: "optional"},
+			},
+		}, want: "Review: 1 approved, 1 rejected, 2 pending"},
+		{name: "single status omits the rest", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{
+				{Login: "alice", AcceptStatus: "true"},
+				{Login: "bob", AcceptStatus: "true"},
+			},
+		}, want: "Review: 2 approved"},
+		{name: "testers only", states: &api.PRReviewStates{
+			Testers: []*api.PRReviewer{
+				{Login: "carol", Accept: true},
+				{Login: "dave"},
+			},
+		}, want: "Testers: 1 accepted, 1 pending"},
+		{name: "both groups joined", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{{Login: "alice", AcceptStatus: "true"}},
+			Testers:           []*api.PRReviewer{{Login: "carol", Accept: true}},
+		}, want: "Review: 1 approved · Testers: 1 accepted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reviewSummaryLine(tc.states); got != tc.want {
+				t.Fatalf("reviewSummaryLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestViewRunReviewStatesFailureReturnsErrorInTextMode(t *testing.T) {
+	// The review-states fetch follows the enrichment pattern: the failure
+	// is reported on stderr, the PR details still render, no summary line
+	// appears, and the command exits non-zero ("PR data incomplete").
+	t.Setenv("GC_TOKEN", "test-token")
+	io, _, out, errOut := iostreams.Test()
+	detailGets := 0
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/7") {
+			detailGets++
+			w.Header().Set("Content-Type", "application/json")
+			if detailGets == 1 {
+				fmt.Fprint(w, `{"number":7,"title":"T","state":"open","additions":1,"deletions":1,"changed_files":1,"commits":1}`)
+				return
+			}
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := viewRun(&ViewOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		BaseRepo:   func() (string, error) { return "owner/repo", nil },
+		Repository: "owner/repo",
+		Number:     7,
+	})
+	if err == nil {
+		t.Fatal("viewRun() error = nil, want incomplete-data error")
+	}
+	for _, want := range []string{"PR data incomplete", "failed to get review states"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err.Error(), want)
+		}
+	}
+	if !strings.Contains(out.String(), "T #7") {
+		t.Fatalf("details should still render, stdout = %q", out.String())
+	}
+	if strings.Contains(out.String(), "Review:") {
+		t.Fatalf("summary line must be omitted on fetch failure, stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "Failed to get review states") {
+		t.Fatalf("stderr warning missing: %q", errOut.String())
+	}
+}
+
+func TestViewRunReviewStatesRenderSummaryInTextMode(t *testing.T) {
+	// End-to-end wiring: the second detail GET feeds the summary line in
+	// the rendered text output.
+	t.Setenv("GC_TOKEN", "test-token")
+	io, _, out, _ := iostreams.Test()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/7") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"number":7,"title":"T","state":"open","additions":1,"deletions":1,"changed_files":1,"commits":1,"approval_reviewers":[{"login":"alice","accept_status":"true"},{"login":"bob","accept_status":"reject"}],"testers":[{"login":"carol","accept":true}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := viewRun(&ViewOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		BaseRepo:   func() (string, error) { return "owner/repo", nil },
+		Repository: "owner/repo",
+		Number:     7,
+	})
+	if err != nil {
+		t.Fatalf("viewRun() error = %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Review: 1 approved, 1 rejected",
+		"Testers: 1 accepted",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("viewRun() output missing %q: %s", want, got)
+		}
+	}
+}
