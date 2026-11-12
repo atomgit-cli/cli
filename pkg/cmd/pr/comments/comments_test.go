@@ -338,7 +338,7 @@ func TestCommentsRunJSONIncludesReplies(t *testing.T) {
 	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":169489896,"discussion_id":"ebeb577","body":"parent","comment_type":"pr_comment","resolved":false,
-"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}}]},{"id":2,"body":"no replies","reply":null}]`))
+"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}},{"id":200021584,"body":"second nested reply","created_at":"2026-11-11T19:00:00+08:00","updated_at":"2026-11-11T19:00:00+08:00","user":{"login":"aflyingto"}}]},{"id":2,"body":"no replies","reply":null}]`))
 	}))
 
 	err := commentsRun(&CommentsOptions{
@@ -357,8 +357,8 @@ func TestCommentsRunJSONIncludesReplies(t *testing.T) {
 		t.Fatalf("output is not valid JSON: %v; output=%q", err, out.String())
 	}
 	reply, ok := comments[0]["reply"].([]interface{})
-	if !ok || len(reply) != 1 {
-		t.Fatalf("comment 0 reply = %#v, want one reply entry", comments[0]["reply"])
+	if !ok || len(reply) != 2 {
+		t.Fatalf("comment 0 reply = %#v, want two reply entries", comments[0]["reply"])
 	}
 	first := reply[0].(map[string]interface{})
 	if first["body"] != "the nested reply" {
@@ -366,6 +366,13 @@ func TestCommentsRunJSONIncludesReplies(t *testing.T) {
 	}
 	if first["id"].(float64) != 200021583 {
 		t.Fatalf("reply id = %#v", first["id"])
+	}
+	if reply[1].(map[string]interface{})["body"] != "second nested reply" {
+		t.Fatalf("second reply body = %#v", reply[1])
+	}
+	// A comment with no replies keeps the API's null shape.
+	if comments[1]["reply"] != nil {
+		t.Fatalf("comment 1 reply = %#v, want null", comments[1]["reply"])
 	}
 }
 
@@ -376,7 +383,7 @@ func TestCommentsRunTextShowsReplies(t *testing.T) {
 	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":169489896,"discussion_id":"ebeb577","body":"parent body","comment_type":"pr_comment","resolved":false,
-"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}}]}]`))
+"reply":[{"id":200021583,"body":"the nested reply","created_at":"2026-11-11T18:52:41+08:00","updated_at":"2026-11-11T18:52:41+08:00","user":{"login":"aflyingto"}},{"id":200021584,"body":"second nested reply","created_at":"2026-11-11T19:00:00+08:00","updated_at":"2026-11-11T19:00:00+08:00","user":{"login":"aflyingto"}}]}]`))
 	}))
 
 	err := commentsRun(&CommentsOptions{
@@ -390,11 +397,14 @@ func TestCommentsRunTextShowsReplies(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "Replies (1)") {
+	if !strings.Contains(got, "Replies (2)") {
 		t.Fatalf("text output missing reply count: %q", got)
 	}
 	if !strings.Contains(got, "the nested reply") {
 		t.Fatalf("text output missing reply body: %q", got)
+	}
+	if !strings.Contains(got, "second nested reply") {
+		t.Fatalf("text output missing second reply body: %q", got)
 	}
 	if !strings.Contains(got, "aflyingto") {
 		t.Fatalf("text output missing reply author: %q", got)

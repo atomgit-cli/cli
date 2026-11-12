@@ -106,6 +106,10 @@ func TestReplyFlags(t *testing.T) {
 		t.Errorf("--body shorthand should be 'b', got '%s'", bodyFlag.Shorthand)
 	}
 
+	if cmd.Flags().Lookup("json") == nil {
+		t.Error("--json flag should be registered")
+	}
+
 	repoFlag := cmd.Flags().Lookup("repo")
 	if repoFlag == nil {
 		t.Error("--repo flag should be registered")

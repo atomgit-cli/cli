@@ -274,7 +274,7 @@ func MockAPIHandler() http.Handler {
 	mux.HandleFunc("/api/v5/repos/owner/test-repo/pulls/1/discussions/d1/comments", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"2","noteId":2,"body":"reply"}`))
+		_, _ = w.Write([]byte(`{"id":"2","note_id":2,"body":"reply"}`))
 	})
 
 	// Resolve PR comment
