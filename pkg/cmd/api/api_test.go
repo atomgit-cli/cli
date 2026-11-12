@@ -466,6 +466,63 @@ func TestRunPaginateNonArrayResponse(t *testing.T) {
 	}
 }
 
+func TestRunPaginateNullBodyErrors(t *testing.T) {
+	// A null body decodes as a nil slice without error, which would silently
+	// terminate pagination and mask server-side errors (issue 650).
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`null`))
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+		Slurp:      true,
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want error for null body")
+	}
+	if !strings.Contains(err.Error(), "array") {
+		t.Fatalf("error = %q, want array mention", err.Error())
+	}
+	if !strings.Contains(err.Error(), "empty or null") {
+		t.Fatalf("error = %q, want empty-or-null mention", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty (no silent [] output)", out.String())
+	}
+}
+
+func TestRunPaginateEmptyBodyErrors(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Write nothing: a zero-byte response body.
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want error for empty body")
+	}
+	if !strings.Contains(err.Error(), "array") {
+		t.Fatalf("error = %q, want array mention", err.Error())
+	}
+	if !strings.Contains(err.Error(), "empty or null") {
+		t.Fatalf("error = %q, want consistent empty-or-null message (same as null body)", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}
+
 func TestRunPaginateStopsAtPageLimit(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 	ioStreams, _, _, _ := testutil.NewTestIOStreams()

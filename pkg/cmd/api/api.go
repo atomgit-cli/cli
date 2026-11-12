@@ -324,6 +324,14 @@ func emitPage(opts *Options, resp *api.RawResponse, jqCode *gojq.Code) error {
 
 // decodePageItems parses a page body as a JSON array of items.
 func decodePageItems(resp *api.RawResponse) ([]json.RawMessage, error) {
+	// An empty or null body is not a JSON array. json.Unmarshal would decode
+	// null into a nil slice without error, silently terminating pagination
+	// and masking server-side errors (issue 650); empty input errors with an
+	// opaque message. Handle both up front with one consistent error.
+	trimmed := bytes.TrimSpace(resp.Body)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, fmt.Errorf("--paginate requires a JSON array response, got %q: response body is empty or null", previewBody(resp.Body))
+	}
 	var items []json.RawMessage
 	if err := json.Unmarshal(resp.Body, &items); err != nil {
 		return nil, fmt.Errorf("--paginate requires a JSON array response, got %q: %w", previewBody(resp.Body), err)
