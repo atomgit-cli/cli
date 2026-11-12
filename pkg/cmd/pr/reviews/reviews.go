@@ -169,15 +169,16 @@ func renderTesters(io *iostreams.IOStreams, cs *iostreams.ColorScheme, testers [
 }
 
 // renderAssignees writes the assignee group; assignees show the login only
-// in text mode (their accept state stays available in --json).
-func renderAssignees(io *iostreams.IOStreams, cs *iostreams.ColorScheme, assignees []*api.PRReviewer) {
+// in text mode (their accept state stays available in --json), so no
+// state icon is drawn for this group.
+func renderAssignees(io *iostreams.IOStreams, _ *iostreams.ColorScheme, assignees []*api.PRReviewer) {
 	fmt.Fprintf(io.Out, "Assignees (%d):\n", len(assignees))
 	if len(assignees) == 0 {
 		fmt.Fprintln(io.Out, "  (none)")
 		return
 	}
 	for _, assignee := range assignees {
-		fmt.Fprintf(io.Out, "  %s %s\n", cs.Green("✓"), assignee.Login)
+		fmt.Fprintf(io.Out, "  %s\n", assignee.Login)
 	}
 }
 

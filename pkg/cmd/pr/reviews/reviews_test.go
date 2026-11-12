@@ -163,7 +163,7 @@ func TestReviewsRunText(t *testing.T) {
 		"alice", "approved", "code owner",
 		"bob", "rejected",
 		"dave", "pending",
-		"carol", "Testers", "accepted", "frank",
+		"carol", "Testers", "accepted", "frank (pending)",
 		"erin", "Assignees",
 		"Approval reviewers",
 	} {
