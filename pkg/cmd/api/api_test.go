@@ -494,6 +494,9 @@ func TestRunPaginateNullBodyErrors(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty (no silent [] output)", out.String())
 	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitError)
+	}
 }
 
 func TestRunPaginateEmptyBodyErrors(t *testing.T) {
@@ -520,6 +523,52 @@ func TestRunPaginateEmptyBodyErrors(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitError)
+	}
+}
+
+func TestRunPaginateNullOnLaterPageErrors(t *testing.T) {
+	// A null body on a later page is the most dangerous variant: the old
+	// implementation silently truncated pagination and emitted the partial
+	// data as a complete result. The guard runs per page, so a data page
+	// followed by a null page must now error (issue 650). In slurp mode the
+	// merged data is discarded, matching the page-limit failure semantics.
+	t.Setenv("GC_TOKEN", "test-token")
+	ioStreams, _, out, _ := testutil.NewTestIOStreams()
+	var pages []string
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages = append(pages, r.URL.Query().Get("page"))
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			_, _ = w.Write([]byte(`[{"n":1}]`))
+		default:
+			_, _ = w.Write([]byte(`null`))
+		}
+	}))
+	err := run(&Options{
+		IO:         ioStreams,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		Endpoint:   "repos/owner/repo/issues",
+		Method:     "GET",
+		Paginate:   true,
+		Slurp:      true,
+	})
+	if err == nil {
+		t.Fatal("run() error = nil, want error for null body on a later page")
+	}
+	if !strings.Contains(err.Error(), "empty or null") {
+		t.Fatalf("error = %q, want empty-or-null mention", err.Error())
+	}
+	if len(pages) != 2 {
+		t.Fatalf("requests = %d (%v), want 2 (data page then null page)", len(pages), pages)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty (slurp discards merged data on error)", out.String())
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitError)
 	}
 }
 
