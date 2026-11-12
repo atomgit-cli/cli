@@ -95,13 +95,7 @@ func NewRootCmd(ver, commit, date string, f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
-			if updateLifecycleSkipped(cmd) {
-				return
-			}
-			noUpdate, _ := cmd.Flags().GetBool("no-update-check")
-			noInteractive, _ := cmd.Flags().GetBool("no-interactive")
-			cfg, _ := f.Config()
-			installupdate.AfterCommand(cfg, f.IOStreams.ErrOut, noUpdate, noInteractive)
+			runPostCommandLifecycle(cmd, f)
 		},
 	}
 

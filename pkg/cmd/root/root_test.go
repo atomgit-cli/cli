@@ -215,7 +215,7 @@ func TestRootRegistersSSHKeyCommand(t *testing.T) {
 	}
 }
 
-func TestExecuteRunsLifecycleOnFailingCommand(t *testing.T) {
+func TestExecuteNoArgsIsSafe(t *testing.T) {
 	// A RunE failure skips PersistentPostRun (cobra behavior), so Execute
 	// must run the lifecycle itself on the error path. With no adjacent
 	// bootstrap manifest this is a no-op — the test asserts Execute still
@@ -283,15 +283,15 @@ func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
 	}
 
 	oldArgs, oldStdin, oldStderr := os.Args, os.Stdin, os.Stderr
+	defer func() {
+		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	}()
 	os.Args = []string{"gc", "auth", "git-credential", "get"}
 	os.Stdin = stdin
 	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
-	}()
 
 	err = Execute("test", "abc", "today")
 	if err == nil {
@@ -302,7 +302,7 @@ func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
 	}
 	got, _ := io.ReadAll(os.Stderr)
 	os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
-	if strings.Contains(string(got), "npm bootstrap") || strings.Contains(string(got), "update") {
+	if strings.Contains(string(got), "npm bootstrap") {
 		t.Fatalf("protocol command leaked lifecycle output to stderr: %q", string(got))
 	}
 	if len(got) != 0 {
@@ -341,14 +341,14 @@ func TestExecuteRunsFirstRunNoticeForNormalCommand(t *testing.T) {
 	}
 
 	oldArgs, oldStderr := os.Args, os.Stderr
+	defer func() {
+		os.Args, os.Stderr = oldArgs, oldStderr
+	}()
 	os.Args = []string{"gc", "version"}
 	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		os.Args, os.Stderr = oldArgs, oldStderr
-	}()
 
 	if err := Execute("test", "abc", "today"); err != nil {
 		t.Logf("Execute version returned: %v", err)
@@ -394,6 +394,9 @@ func TestExecuteSkipsLifecycleForProtocolCommandSuccessPath(t *testing.T) {
 	}
 
 	oldArgs, oldStdin, oldStderr := os.Args, os.Stdin, os.Stderr
+	defer func() {
+		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
+	}()
 	os.Args = []string{"gc", "auth", "git-credential", "store"}
 	os.Stdin, err = os.Open(os.DevNull)
 	if err != nil {
@@ -404,9 +407,6 @@ func TestExecuteSkipsLifecycleForProtocolCommandSuccessPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		os.Args, os.Stdin, os.Stderr = oldArgs, oldStdin, oldStderr
-	}()
 
 	err = Execute("test", "abc", "today")
 	if err != nil {
@@ -453,14 +453,14 @@ func TestExecuteRunsLifecycleOnFailingNormalCommand(t *testing.T) {
 	}
 
 	oldArgs, oldStderr := os.Args, os.Stderr
+	defer func() {
+		os.Args, os.Stderr = oldArgs, oldStderr
+	}()
 	os.Args = []string{"gc", "auth", "status"}
 	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		os.Args, os.Stderr = oldArgs, oldStderr
-	}()
 
 	err = Execute("test", "abc", "today")
 	if err == nil {
@@ -473,5 +473,77 @@ func TestExecuteRunsLifecycleOnFailingNormalCommand(t *testing.T) {
 	os.Args, os.Stderr = oldArgs, oldStderr
 	if !strings.Contains(string(got), "npm bootstrap") {
 		t.Fatalf("failing normal command lost the error-path first-run notice: %q", string(got))
+	}
+}
+
+// setupLifecycleFixture prepares a hermetic npm-bootstrap environment: an
+// adjacent manifest, a fresh state dir, an isolated config dir, and cleared
+// CI/update-mode variables (CI runners set them, which legitimately disables
+// the update notice and would make lifecycle assertions vacuous).
+func setupLifecycleFixture(t *testing.T) string {
+	dir := t.TempDir()
+	t.Setenv("GITCODE_CLI_BINARY", filepath.Join(dir, "gc"))
+	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("BUILD_NUMBER", "")
+	t.Setenv("CI_NAME", "")
+	t.Setenv("TEAMCITY_VERSION", "")
+	t.Setenv("GC_NO_UPDATE_CHECK", "")
+	t.Setenv("GC_UPDATE_MODE", "")
+	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
+		dir, filepath.Join(dir, "helper.js"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestExecuteLifecycleMatrix(t *testing.T) {
+	// Pins the ExecuteC failure-mode cells that motivated the refactor: on
+	// flag-parse and arg-validation failures the resolved leaf command still
+	// reaches the annotation check (protocol commands skip the lifecycle);
+	// unknown commands resolve to root and keep the lifecycle.
+	cases := []struct {
+		name       string
+		args       []string
+		wantNotice bool
+	}{
+		{name: "protocol parse error skips lifecycle", args: []string{"auth", "git-credential", "get", "--nope"}, wantNotice: false},
+		{name: "protocol arg validation error skips lifecycle", args: []string{"auth", "git-credential", "a", "b"}, wantNotice: false},
+		{name: "unknown command runs lifecycle", args: []string{"definitely-not-a-command"}, wantNotice: true},
+		{name: "normal command parse error runs lifecycle", args: []string{"version", "--nope"}, wantNotice: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupLifecycleFixture(t)
+			stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := stderrFile.Close(); err != nil {
+				t.Fatal(err)
+			}
+			oldArgs, oldStderr := os.Args, os.Stderr
+			defer func() {
+				os.Args, os.Stderr = oldArgs, oldStderr
+			}()
+			os.Args = append([]string{"gc"}, tc.args...)
+			os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = Execute("test", "abc", "today")
+			if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := io.ReadAll(os.Stderr)
+			os.Args, os.Stderr = oldArgs, oldStderr
+			hasNotice := strings.Contains(string(got), "npm bootstrap")
+			if hasNotice != tc.wantNotice {
+				t.Fatalf("first-run notice = %v, want %v; stderr = %q", hasNotice, tc.wantNotice, string(got))
+			}
+		})
 	}
 }
