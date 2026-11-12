@@ -52,13 +52,16 @@ type ConfigEntry struct {
 type AuthConfig interface {
 	// ActiveToken returns the active token for a host
 	ActiveToken(hostname string) (string, string)
-	// StoredToken returns the stored token for a host without environment overrides
+	// StoredToken returns the stored token for a host without environment
+	// overrides. Callers that also need the username must use
+	// StoredCredential instead (one consistent snapshot) rather than
+	// pairing this with ActiveUser (two separate reads).
 	StoredToken(hostname string) (string, string)
 	// StoredCredential returns the active username and the stored token for
 	// a host from a single read of the auth state, so the pair always comes
 	// from one consistent snapshot; no environment overrides. The pair is
 	// either complete or empty: any incomplete state (missing host, user,
-	// or token, or a failed read) returns ("", ""). Callers that need both
+	// or token, or a failed read; a missing or dangling active user counts as incomplete) returns ("", ""). Callers that need both
 	// values must prefer this over ActiveUser+StoredToken (two separate
 	// reads can straddle a concurrent auth.json rewrite).
 	StoredCredential(hostname string) (username, token string)

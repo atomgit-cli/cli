@@ -593,6 +593,10 @@ func TestGitCredentialRunOutputsOnlyUsernameAndPassword(t *testing.T) {
 // flipAuthConfig simulates auth.json being rewritten between reads: every
 // method call returns the next snapshot, alternating between two accounts.
 // It counts calls so tests can pin the single-read contract (issue 649).
+// It embeds the config.AuthConfig interface with a nil value on purpose:
+// any method outside the counted set being called panics loudly instead of
+// silently succeeding — that is the guard that keeps the call surface
+// pinned to exactly StoredCredential.
 type flipAuthConfig struct {
 	config.AuthConfig
 	reads       int

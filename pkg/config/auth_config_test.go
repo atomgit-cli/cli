@@ -370,6 +370,7 @@ func TestStoredCredentialIncompleteStates(t *testing.T) {
 		{name: "active user empty but users exist", json: `{"version":1,"hosts":{"gitcode.com":{"users":{"alice":{"token":"tokenA"}}}}}`},
 		{name: "dangling active user entry missing", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"bob":{"token":"tokenB"}}}}}`},
 		{name: "active user with empty token", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"alice":{"token":""}}}}}`},
+		{name: "corrupted json read failure", json: `{"version":1,`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
