@@ -78,6 +78,12 @@ func NewCmdReviews(f *cmdutil.Factory, runF func(*ReviewsOptions) error) *cobra.
 func reviewsRun(opts *ReviewsOptions) error {
 	cs := opts.IO.ColorScheme()
 
+	// Validate the PR number before repository resolution and any network
+	// activity so usage errors are never masked by auth or API failures.
+	if opts.Number < 1 {
+		return cmdutil.NewUsageError(fmt.Sprintf("invalid PR number: %d", opts.Number))
+	}
+
 	// Validate repository input before auth so usage errors are not masked
 	// by missing local credentials.
 	repository, err := cmdutil.ResolveRepo(opts.Repository, opts.BaseRepo)

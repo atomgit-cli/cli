@@ -184,13 +184,30 @@ func TestReviewsRunTextEmpty(t *testing.T) {
 }
 
 func TestReviewsRunInvalidNumber(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	// The guard must fire before any request: the handler fails the test
+	// if it is ever reached, so no real network call can happen.
+	var requests int
+	io, _, _, _ := testutil.NewTestIOStreams()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{}`))
+	}))
+
 	err := reviewsRun(&ReviewsOptions{
-		IO:         cmdutil.TestFactory().IOStreams,
-		HttpClient: func() (*http.Client, error) { return http.DefaultClient, nil },
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
 		Repository: "owner/repo",
 		Number:     -1,
 	})
 	if err == nil {
 		t.Fatal("reviewsRun() error = nil, want invalid PR number error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0 (validation must precede any request)", requests)
 	}
 }
