@@ -589,3 +589,77 @@ func TestGitCredentialRunOutputsOnlyUsernameAndPassword(t *testing.T) {
 		}
 	}
 }
+
+// flipAuthConfig simulates auth.json being rewritten between reads: every
+// method call returns the next snapshot, alternating between two accounts.
+// It counts calls so tests can pin the single-read contract (issue 649).
+type flipAuthConfig struct {
+	config.AuthConfig
+	reads       int
+	credentialC int
+	activeUserC int
+	storedTokC  int
+}
+
+func (f *flipAuthConfig) snap() (string, string) {
+	if f.reads%2 == 1 {
+		return "alice", "tokenA"
+	}
+	return "bob", "tokenB"
+}
+
+func (f *flipAuthConfig) StoredCredential(hostname string) (string, string) {
+	f.reads++
+	f.credentialC++
+	return f.snap()
+}
+
+func (f *flipAuthConfig) ActiveUser(hostname string) (string, error) {
+	f.reads++
+	f.activeUserC++
+	user, _ := f.snap()
+	return user, nil
+}
+
+func (f *flipAuthConfig) StoredToken(hostname string) (string, string) {
+	f.reads++
+	f.storedTokC++
+	_, token := f.snap()
+	return token, "config"
+}
+
+type fakeCredentialConfig struct {
+	config.Config
+	auth config.AuthConfig
+}
+
+func (c *fakeCredentialConfig) Authentication() config.AuthConfig { return c.auth }
+
+func TestGetCredentialSingleReadConsistentPair(t *testing.T) {
+	// The helper must serve username and token from ONE auth.json snapshot:
+	// with the old ActiveUser+StoredToken pair, a state rewrite between the
+	// two reads served a mismatched pair (alice + tokenB); the single-read
+	// StoredCredential API makes that impossible (issue 649).
+	fake := &flipAuthConfig{}
+	io, _, out, _ := iostreams.Test()
+	io.In = strings.NewReader("protocol=https\nhost=" + testHost + "\n\n")
+	err := getCredential(&GitCredentialOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return &fakeCredentialConfig{auth: fake}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("getCredential() error = %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "username=alice\n") || !strings.Contains(got, "password=tokenA\n") {
+		t.Fatalf("served pair = %q, want the alice/tokenA snapshot (consistent pair)", got)
+	}
+	if fake.credentialC != 1 {
+		t.Fatalf("StoredCredential calls = %d, want exactly 1", fake.credentialC)
+	}
+	if fake.activeUserC != 0 || fake.storedTokC != 0 {
+		t.Fatalf("legacy reads used: ActiveUser=%d StoredToken=%d, want 0/0 (single-read contract)", fake.activeUserC, fake.storedTokC)
+	}
+}

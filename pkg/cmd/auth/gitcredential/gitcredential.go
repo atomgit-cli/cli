@@ -143,15 +143,13 @@ func getCredential(opts *GitCredentialOptions) error {
 	}
 	authCfg := cfg.Authentication()
 
-	// The helper serves the stored login state only (StoredToken, not
+	// The helper serves the stored login state only (StoredCredential, not
 	// ActiveToken): environment token overrides would break the
-	// GC_CONFIG_DIR isolation contract documented in the command help.
-	username, err := authCfg.ActiveUser(req.host)
-	if err != nil || username == "" {
-		return silentNoCredential(req.host)
-	}
-	token, _ := authCfg.StoredToken(req.host)
-	if token == "" {
+	// GC_CONFIG_DIR isolation contract documented in the command help. The
+	// single-read API serves a consistent (username, token) snapshot even
+	// when another process rewrites auth.json concurrently (issue 649).
+	username, token := authCfg.StoredCredential(req.host)
+	if username == "" || token == "" {
 		return silentNoCredential(req.host)
 	}
 	if req.username != "" && req.username != username {

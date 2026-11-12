@@ -321,3 +321,40 @@ func TestSecureWriteFileRejectsDirectory(t *testing.T) {
 		t.Fatal("secureWriteFile() error = nil, want failure when path is a directory")
 	}
 }
+
+func TestStoredCredentialSingleSnapshot(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := New()
+	auth := cfg.Authentication()
+
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+
+	user, token := auth.StoredCredential("gitcode.com")
+	if user != "bob" || token != "tokenB" {
+		t.Fatalf("StoredCredential() = (%q, %q), want (bob, tokenB) — last login is the active user", user, token)
+	}
+
+	if err := auth.SwitchUser("gitcode.com", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	user, token = auth.StoredCredential("gitcode.com")
+	if user != "alice" || token != "tokenA" {
+		t.Fatalf("StoredCredential() after switch = (%q, %q), want (alice, tokenA)", user, token)
+	}
+
+	user, token = auth.StoredCredential("other.example.com")
+	if user != "" || token != "" {
+		t.Fatalf("StoredCredential(unknown host) = (%q, %q), want empty pair", user, token)
+	}
+
+	// Empty hostname resolves through the default host to the same state.
+	user, token = auth.StoredCredential("")
+	if user != "alice" || token != "tokenA" {
+		t.Fatalf("StoredCredential(\"\") = (%q, %q), want (alice, tokenA) via default-host resolution", user, token)
+	}
+}

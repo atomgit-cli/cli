@@ -56,6 +56,28 @@ func (a *authConfig) StoredToken(hostname string) (string, string) {
 	return user.Token, "config"
 }
 
+// StoredCredential returns the active username and stored token for a host
+// from a single read of the auth state. ActiveUser and StoredToken are two
+// separate reads of the same file that can straddle a concurrent rewrite
+// (login or user switch in another process) and yield a mismatched pair;
+// the helper protocol requires one consistent snapshot (issue 649). The
+// pair is either complete or empty: any incomplete state returns ("", "").
+func (a *authConfig) StoredCredential(hostname string) (string, string) {
+	state, err := a.config.readAuthState()
+	if err != nil {
+		return "", ""
+	}
+	host := state.host(hostname)
+	if host == nil || host.ActiveUser == "" {
+		return "", ""
+	}
+	user := host.Users[host.ActiveUser]
+	if user == nil || user.Token == "" {
+		return "", ""
+	}
+	return host.ActiveUser, user.Token
+}
+
 // HasActiveToken checks if a token exists for a host
 func (a *authConfig) HasActiveToken(hostname string) bool {
 	token, _ := a.ActiveToken(hostname)
