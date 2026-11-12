@@ -56,9 +56,11 @@ type AuthConfig interface {
 	StoredToken(hostname string) (string, string)
 	// StoredCredential returns the active username and the stored token for
 	// a host from a single read of the auth state, so the pair always comes
-	// from one consistent snapshot; no environment overrides. Callers that
-	// need both values must prefer this over ActiveUser+StoredToken (two
-	// separate reads can straddle a concurrent auth.json rewrite).
+	// from one consistent snapshot; no environment overrides. The pair is
+	// either complete or empty: any incomplete state (missing host, user,
+	// or token, or a failed read) returns ("", ""). Callers that need both
+	// values must prefer this over ActiveUser+StoredToken (two separate
+	// reads can straddle a concurrent auth.json rewrite).
 	StoredCredential(hostname string) (username, token string)
 	// HasActiveToken checks if a token exists for a host
 	HasActiveToken(hostname string) bool

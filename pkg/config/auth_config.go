@@ -60,8 +60,9 @@ func (a *authConfig) StoredToken(hostname string) (string, string) {
 // from a single read of the auth state. ActiveUser and StoredToken are two
 // separate reads of the same file that can straddle a concurrent rewrite
 // (login or user switch in another process) and yield a mismatched pair;
-// the helper protocol requires one consistent snapshot (issue 649). The
-// pair is either complete or empty: any incomplete state returns ("", "").
+// consumers that need both values require one consistent snapshot (issue
+// 649). The pair is either complete or empty: any incomplete state returns
+// ("", "").
 func (a *authConfig) StoredCredential(hostname string) (string, string) {
 	state, err := a.config.readAuthState()
 	if err != nil {

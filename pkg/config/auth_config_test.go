@@ -358,3 +358,30 @@ func TestStoredCredentialSingleSnapshot(t *testing.T) {
 		t.Fatalf("StoredCredential(\"\") = (%q, %q), want (alice, tokenA) via default-host resolution", user, token)
 	}
 }
+
+func TestStoredCredentialIncompleteStates(t *testing.T) {
+	// The complete-or-empty contract is only reachable by hand-written
+	// auth.json states (Login always writes complete entries), so pin each
+	// incomplete branch with raw fixtures (issue 649).
+	cases := []struct {
+		name string
+		json string
+	}{
+		{name: "active user empty but users exist", json: `{"version":1,"hosts":{"gitcode.com":{"users":{"alice":{"token":"tokenA"}}}}}`},
+		{name: "dangling active user entry missing", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"bob":{"token":"tokenB"}}}}}`},
+		{name: "active user with empty token", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"alice":{"token":""}}}}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("GC_CONFIG_DIR", dir)
+			if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			user, token := New().Authentication().StoredCredential("gitcode.com")
+			if user != "" || token != "" {
+				t.Fatalf("StoredCredential() = (%q, %q), want empty pair for incomplete state", user, token)
+			}
+		})
+	}
+}

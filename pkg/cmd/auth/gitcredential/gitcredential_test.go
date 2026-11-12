@@ -640,6 +640,7 @@ func TestGetCredentialSingleReadConsistentPair(t *testing.T) {
 	// with the old ActiveUser+StoredToken pair, a state rewrite between the
 	// two reads served a mismatched pair (alice + tokenB); the single-read
 	// StoredCredential API makes that impossible (issue 649).
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	fake := &flipAuthConfig{}
 	io, _, out, _ := iostreams.Test()
 	io.In = strings.NewReader("protocol=https\nhost=" + testHost + "\n\n")
