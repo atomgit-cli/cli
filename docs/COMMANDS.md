@@ -1680,9 +1680,11 @@ gc pr view 1 -R infra-test/gctest1 --time-format relative
 说明：
 - `pr view` 的文本详情输出会使用更稳定的元信息排布，便于人工和代理阅读。
 - 文本输出包含里程碑信息（如果 PR 关联了里程碑）。
+- 文本详情头部包含 review 状态摘要行（如 `Review: 1 approved, 1 rejected · Testers: 1 accepted`）：仅在有评审人/测试人数据时显示，无数据时整行省略（与 `pr reviews` 空态语义一致）；摘要失败计入"数据不完整"信号（stderr warning + 非零退出码），与统计补齐失败同规则。详细分组输出仍由 `gc pr reviews` 承担。
+- `--comments` 的评论区嵌套回复渲染与 `gc pr comments` 同口径（`Replies (N)` + `↳ ID: ...` 行 + 缩进正文，回复 id 可用于单条读取）；两命令共用同一渲染实现。
 - `--time-format absolute|relative` 只影响文本详情和评论区中的时间展示，不改变 `--json` 结构。
 - 如果 PR 详情 API 返回的 `additions`、`deletions`、`changed_files` 或 `commits` 为 0，CLI 会尝试通过 PR files/commits API 补齐统计；补齐失败时会给出 warning，但不阻断查看。补齐失败时返回非零退出码（按底层 API 错误映射：401→4、404→3、409→5、其他→1），PR 详情仍输出到 stdout。多个补齐源同时失败时，退出码按首个失败 API 的状态码映射。
-- `--json` 路径保持结构化输出，milestone、body、description、merged、merged_at 等字段会自动包含在 JSON 中；其中 `body` 与 `description` 会基于远端返回互相补齐。GitCode API 对已合并 PR 返回 `merged: null` 时，CLI 会根据 `state=merged` 或非空 `merged_at` 将 `merged` 归一化为 `true`。`--comments --json` 在评论获取失败时仍写入 `{"pull_request": ..., "comments": null}` 并返回非零退出码，与文本模式"渲染已有数据 + 信号不完整"的行为一致。
+- `--json` 路径保持结构化输出，milestone、body、description、merged、merged_at 等字段会自动包含在 JSON 中；其中 `body` 与 `description` 会基于远端返回互相补齐。GitCode API 对已合并 PR 返回 `merged: null` 时，CLI 会根据 `state=merged` 或非空 `merged_at` 将 `merged` 归一化为 `true`。`--comments --json` 在评论获取失败时仍写入 `{"pull_request": ..., "comments": null}` 并返回非零退出码，与文本模式"渲染已有数据 + 信号不完整"的行为一致。`--json` 不包含 review 状态字段也不为此发起额外请求——结构化评审状态由专用命令 `gc pr reviews --json` 承载（`--comments --json` 的评论对象自带嵌套 `reply` 数组）。
 
 ### pr issues - 查看 PR 关联的 Issues
 

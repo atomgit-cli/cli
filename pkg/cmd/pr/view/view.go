@@ -15,6 +15,7 @@ import (
 
 	"gitcode.com/gitcode-cli/cli/api"
 	"gitcode.com/gitcode-cli/cli/pkg/browser"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/pr/render"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 	"gitcode.com/gitcode-cli/cli/pkg/output"
@@ -151,6 +152,20 @@ func viewRun(opts *ViewOptions) error {
 		fmt.Fprintf(opts.IO.ErrOut, "%s Failed to enrich PR stats: %v\n", cs.Yellow("!"), enrichErr)
 	}
 
+	// Review states feed the text-mode summary line; --json deliberately
+	// does not fetch them (the dedicated `pr reviews --json` carries the
+	// structured states — contract decision recorded in issue 652).
+	var reviewStates *api.PRReviewStates
+	if !opts.JSON {
+		states, serr := api.GetPRReviewStates(client, owner, repo, opts.Number)
+		if serr != nil {
+			fmt.Fprintf(opts.IO.ErrOut, "%s Failed to get review states: %v\n", cs.Yellow("!"), serr)
+			enrichErr = errors.Join(enrichErr, fmt.Errorf("failed to get review states: %w", serr))
+		} else {
+			reviewStates = states
+		}
+	}
+
 	if opts.JSON {
 		if opts.Comments {
 			comments, err := api.ListPRComments(client, owner, repo, opts.Number)
@@ -174,7 +189,7 @@ func viewRun(opts *ViewOptions) error {
 		return nil
 	}
 
-	if err := renderPRDetails(opts.IO.Out, cs, pr, timeFormat, now); err != nil {
+	if err := renderPRDetails(opts.IO.Out, cs, pr, reviewStates, timeFormat, now); err != nil {
 		return err
 	}
 
@@ -184,7 +199,7 @@ func viewRun(opts *ViewOptions) error {
 			fmt.Fprintf(opts.IO.ErrOut, "%s Failed to get comments: %v\n", cs.Yellow("!"), err)
 			commentErr := fmt.Errorf("failed to get comments: %w", err)
 			enrichErr = errors.Join(enrichErr, commentErr)
-		} else if err := renderPRComments(opts.IO.Out, comments, timeFormat, now); err != nil {
+		} else if err := renderPRComments(opts.IO.Out, cs, comments, timeFormat, now); err != nil {
 			return err
 		}
 	}
@@ -318,14 +333,14 @@ func enrichPRStats(client *api.Client, owner, repo string, pr *api.PullRequest) 
 	return errors.Join(errs...)
 }
 
-func renderPRView(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullRequest, comments []api.PRComment, timeFormat output.TimeFormat, now time.Time) error {
-	if err := renderPRDetails(out, cs, pr, timeFormat, now); err != nil {
+func renderPRView(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullRequest, comments []api.PRComment, states *api.PRReviewStates, timeFormat output.TimeFormat, now time.Time) error {
+	if err := renderPRDetails(out, cs, pr, states, timeFormat, now); err != nil {
 		return err
 	}
-	return renderPRComments(out, comments, timeFormat, now)
+	return renderPRComments(out, cs, comments, timeFormat, now)
 }
 
-func renderPRDetails(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullRequest, timeFormat output.TimeFormat, now time.Time) error {
+func renderPRDetails(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullRequest, states *api.PRReviewStates, timeFormat output.TimeFormat, now time.Time) error {
 	fmt.Fprintf(out, "\n")
 	fmt.Fprintf(out, "%s #%d\n", cs.Bold(pr.Title), pr.Number)
 	if pr.Draft {
@@ -351,6 +366,9 @@ func renderPRDetails(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullReque
 	if len(pr.Reviewers) > 0 {
 		fmt.Fprintf(out, "  Reviewers: %s\n", joinUsers(pr.Reviewers))
 	}
+	if summary := reviewSummaryLine(states); summary != "" {
+		fmt.Fprintf(out, "  %s\n", summary)
+	}
 	if len(pr.Labels) > 0 {
 		fmt.Fprintf(out, "  Labels: %s\n", joinLabels(pr.Labels))
 	}
@@ -367,10 +385,14 @@ func renderPRDetails(out io.Writer, cs *iostreams.ColorScheme, pr *api.PullReque
 	return nil
 }
 
-func renderPRComments(out io.Writer, comments []api.PRComment, timeFormat output.TimeFormat, now time.Time) error {
+func renderPRComments(out io.Writer, cs *iostreams.ColorScheme, comments []api.PRComment, timeFormat output.TimeFormat, now time.Time) error {
 	if len(comments) == 0 {
 		fmt.Fprintf(out, "\n--- No comments ---\n\n")
 		return nil
+	}
+
+	replyTime := func(t api.FlexibleTime) string {
+		return formatViewTime(t.Time, timeFormat, now)
 	}
 
 	fmt.Fprintf(out, "\n--- Comments (%d) ---\n", len(comments))
@@ -387,8 +409,68 @@ func renderPRComments(out io.Writer, comments []api.PRComment, timeFormat output
 			fmt.Fprintf(out, " (%s)", c.DiffFile)
 		}
 		fmt.Fprintf(out, ":\n%s\n", c.Body)
+		// Nested replies use the same rendering as the comments command
+		// (issue 652: one dataset, one rendering contract).
+		render.ReplyBlock(out, cs, c.Reply, "  ", replyTime)
 	}
 
 	fmt.Fprintf(out, "\n")
 	return nil
+}
+
+// reviewSummaryLine builds the one-line review state summary for the PR
+// details header, e.g. "Review: 1 approved, 1 rejected · Testers: 1 accepted".
+// Statuses with a zero count are omitted; the whole line is empty when
+// neither approval reviewers nor testers exist (matching the pr reviews
+// empty-state semantics). Detailed grouping stays in `pr reviews`.
+func reviewSummaryLine(states *api.PRReviewStates) string {
+	if states == nil {
+		return ""
+	}
+	var parts []string
+	if len(states.ApprovalReviewers) > 0 {
+		approved, rejected, pending := 0, 0, 0
+		for _, reviewer := range states.ApprovalReviewers {
+			switch render.AcceptStatusText(reviewer.AcceptStatus) {
+			case "approved":
+				approved++
+			case "rejected":
+				rejected++
+			default:
+				pending++
+			}
+		}
+		counts := make([]string, 0, 3)
+		for _, c := range []struct {
+			label string
+			n     int
+		}{{"approved", approved}, {"rejected", rejected}, {"pending", pending}} {
+			if c.n > 0 {
+				counts = append(counts, fmt.Sprintf("%d %s", c.n, c.label))
+			}
+		}
+		parts = append(parts, "Review: "+strings.Join(counts, ", "))
+	}
+	if len(states.Testers) > 0 {
+		accepted, pending := 0, 0
+		for _, tester := range states.Testers {
+			if tester.Accept {
+				accepted++
+			} else {
+				pending++
+			}
+		}
+		counts := make([]string, 0, 2)
+		if accepted > 0 {
+			counts = append(counts, fmt.Sprintf("%d accepted", accepted))
+		}
+		if pending > 0 {
+			counts = append(counts, fmt.Sprintf("%d pending", pending))
+		}
+		parts = append(parts, "Testers: "+strings.Join(counts, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ")
 }
