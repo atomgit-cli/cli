@@ -264,3 +264,19 @@ func TestSwitchRunToCurrentUserIsIdempotent(t *testing.T) {
 		t.Fatalf("output = %q", out.String())
 	}
 }
+
+func TestSwitchRunNoAccountsTakesPrecedenceOverTTYRequirement(t *testing.T) {
+	// The empty-host check runs before the TTY check: no stored accounts
+	// exits 3 even without a username in a non-interactive context (more
+	// diagnostic than the generic usage error; documented in COMMANDS.md).
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	io, _, _, _ := iostreams.Test() // not a TTY
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com"})
+	if err == nil {
+		t.Fatal("switchRun() error = nil, want not found")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitNotFound {
+		t.Fatalf("ExitCode() = %d, want %d (no-accounts takes precedence over the TTY usage error)", cmdutil.ExitCode(err), cmdutil.ExitNotFound)
+	}
+}
