@@ -66,8 +66,10 @@ func Execute(ver, commit, date string) error {
 	return err
 }
 
-// runPostCommandLifecycle mirrors the PersistentPostRun hook for the error
-// path (flag parsing has already happened, so the flag reads are safe).
+// runPostCommandLifecycle runs the update lifecycle for a finished command.
+// Both call sites share it: PersistentPostRun on the success path, and
+// Execute's error path (cobra skips PersistentPostRun when RunE fails).
+// Flag parsing has already happened by either point, so the reads are safe.
 func runPostCommandLifecycle(cmd *cobra.Command, f *cmdutil.Factory) {
 	if updateLifecycleSkipped(cmd) {
 		return
