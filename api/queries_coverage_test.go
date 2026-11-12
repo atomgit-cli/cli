@@ -277,10 +277,10 @@ func TestReplyPRCommentEscapesDiscussionID(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"d1","body":"reply","note_id":42}`))
 	})))
 	opts := &ReplyPRCommentOptions{Body: "reply"}
-	if _, err := ReplyPRComment(client, "owner", "test-repo", 1, "a/b c?d", opts); err != nil {
+	if _, err := ReplyPRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
 		t.Fatalf("ReplyPRComment() error = %v", err)
 	}
-	want := "/api/v5/repos/owner/test-repo/pulls/1/discussions/a%2Fb%20c%3Fd/comments"
+	want := "/api/v5/repos/owner/test-repo/pulls/1/discussions/a%2Fb%20c%3Fd%23e/comments"
 	if gotEscapedPath != want {
 		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
 	}
@@ -293,10 +293,10 @@ func TestResolvePRCommentEscapesDiscussionID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})))
 	opts := &ResolvePRCommentOptions{Resolved: true}
-	if err := ResolvePRComment(client, "owner", "test-repo", 1, "a/b c?d", opts); err != nil {
+	if err := ResolvePRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
 		t.Fatalf("ResolvePRComment() error = %v", err)
 	}
-	want := "/api/v5/repos/owner/test-repo/pulls/1/comments/a%2Fb%20c%3Fd"
+	want := "/api/v5/repos/owner/test-repo/pulls/1/comments/a%2Fb%20c%3Fd%23e"
 	if gotEscapedPath != want {
 		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
 	}

@@ -535,7 +535,9 @@ type ReplyPRCommentReply struct {
 // ReplyPRComment replies to a PR comment discussion
 func ReplyPRComment(client *Client, owner, repo string, number int, discussionID string, opts *ReplyPRCommentOptions) (*ReplyPRCommentReply, error) {
 	var result ReplyPRCommentReply
-	err := client.Post(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/discussions/"+url.PathEscape(discussionID)+"/comments", opts, &result)
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/discussions/" + url.PathEscape(discussionID) + "/comments"
+	err := client.Post(path, opts, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +551,9 @@ type ResolvePRCommentOptions struct {
 
 // ResolvePRComment updates the resolution status of a PR comment
 func ResolvePRComment(client *Client, owner, repo string, number int, discussionID string, opts *ResolvePRCommentOptions) error {
-	return client.Put(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/comments/"+url.PathEscape(discussionID), opts, nil)
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/comments/" + url.PathEscape(discussionID)
+	return client.Put(path, opts, nil)
 }
 
 // ListPRCommits lists commits in a PR
