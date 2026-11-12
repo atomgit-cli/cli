@@ -239,6 +239,13 @@ func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
 	t.Setenv("GITCODE_CLI_BINARY", binary)
 	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
 	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("BUILD_NUMBER", "")
+	t.Setenv("CI_NAME", "")
+	t.Setenv("TEAMCITY_VERSION", "")
+	t.Setenv("GC_NO_UPDATE_CHECK", "")
+	t.Setenv("GC_UPDATE_MODE", "")
 	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
 		dir, filepath.Join(dir, "helper.js"))
 	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
@@ -309,6 +316,13 @@ func TestExecuteRunsFirstRunNoticeForNormalCommand(t *testing.T) {
 	t.Setenv("GITCODE_CLI_BINARY", binary)
 	t.Setenv("GC_STATE_DIR", filepath.Join(dir, "state"))
 	t.Setenv("GC_CONFIG_DIR", filepath.Join(dir, "config"))
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("BUILD_NUMBER", "")
+	t.Setenv("CI_NAME", "")
+	t.Setenv("TEAMCITY_VERSION", "")
+	t.Setenv("GC_NO_UPDATE_CHECK", "")
+	t.Setenv("GC_UPDATE_MODE", "")
 	manifest := fmt.Sprintf(`{"distribution":"npm-bootstrap","version":"1.2.3","targetDir":%q,"helper":%q}`,
 		dir, filepath.Join(dir, "helper.js"))
 	if err := os.WriteFile(filepath.Join(dir, ".gitcode-install.json"), []byte(manifest), 0o600); err != nil {
