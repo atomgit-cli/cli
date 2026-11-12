@@ -155,13 +155,16 @@ func switchRun(opts *SwitchOptions) error {
 	cs := opts.IO.ColorScheme()
 	fmt.Fprintf(opts.IO.Out, "%s Switched to %s on %s\n", cs.Green("✓"), cs.Bold(username), hostname)
 	// The switched account only takes effect for commands that read the
-	// stored state; an environment token keeps overriding them (the git
-	// credential helper is unaffected by design). Same warning family as
-	// login/logout (issue 646 review).
+	// stored state; on the default host an environment token keeps
+	// overriding them (custom hosts always read local state — the host
+	// propagation semantics; the git credential helper is unaffected by
+	// design). Same warning family as login/logout (issue 646 review).
 	envVars := make([]string, 0, 2)
-	for _, name := range []string{"GC_TOKEN", "GITCODE_TOKEN"} {
-		if os.Getenv(name) != "" {
-			envVars = append(envVars, name)
+	if hostname == "gitcode.com" {
+		for _, name := range []string{"GC_TOKEN", "GITCODE_TOKEN"} {
+			if os.Getenv(name) != "" {
+				envVars = append(envVars, name)
+			}
 		}
 	}
 	if len(envVars) > 0 {

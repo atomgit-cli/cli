@@ -320,3 +320,27 @@ func TestSwitchRunWarnsWhenEnvTokenOverrides(t *testing.T) {
 		t.Fatalf("stderr warning missing: %q", errOut.String())
 	}
 }
+
+func TestSwitchRunNoEnvWarningOnCustomHost(t *testing.T) {
+	// GC_TOKEN only overrides commands resolving to the default host;
+	// switching on a custom host reads local state, so no warning there.
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	auth := cfg.Authentication()
+	if _, err := auth.Login("enterprise.example.com", "svc-bot", "tokenS", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_TOKEN", "env-token-do-not-use")
+	io, _, _, errOut := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "svc-bot", Hostname: "enterprise.example.com"})
+	if err != nil {
+		t.Fatalf("switchRun() error = %v", err)
+	}
+	if strings.Contains(errOut.String(), "environment token") {
+		t.Fatalf("warning must not fire for a custom-host switch: %q", errOut.String())
+	}
+}
