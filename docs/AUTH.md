@@ -15,7 +15,7 @@
 
 - 操作系统 keyring 集成
 
-多账户切换已支持（`gc auth switch`，同一配置目录内同主机的已存储账号之间切换；见下文"单目录内切换账号"）。
+多账户切换已支持：`gc auth switch` 在同一配置目录内同主机的已存储账号之间切换（见下文"单目录内切换账号"）。
 
 ## 认证来源优先级
 
@@ -70,7 +70,7 @@ gc auth switch second-account # 切换；交互模式直接 gc auth switch 会�
 gc auth status                # 显示新账号
 ```
 
-切换是本地操作（改写 `auth.json` 的 `active_user`，不调用 API）；git HTTPS 操作经 `auth setup-git` 配置的 helper 会随切换使用新账号。环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）优先级仍高于任何已切换账号；需要并行的两个账号（互不切换）时用下面的目录隔离方案。
+切换是本地操作（改写 `auth.json` 的 `active_user`，不调用 API）；git HTTPS 操作经 `auth setup-git` 配置的 helper 会随切换使用新账号。环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）优先级仍高于已切换账号（该优先级指默认主机 gitcode.com；自定义主机读取本地登录态、不受通用环境变量影响，见下文主机传播语义）；需要并行的两个账号（互不切换）时用下面的目录隔离方案。
 
 ### 一机多账号（GC_CONFIG_DIR 隔离）
 

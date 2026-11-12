@@ -3,7 +3,9 @@ package switchcmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -155,24 +157,27 @@ func switchRun(opts *SwitchOptions) error {
 
 // promptSwitch lists the stored accounts with the current one marked and
 // reads one selection, accepting either the number or the exact username.
-func promptSwitch(io *iostreams.IOStreams, authCfg config.AuthConfig, hostname string, users []string) (string, error) {
+func promptSwitch(streams *iostreams.IOStreams, authCfg config.AuthConfig, hostname string, users []string) (string, error) {
 	current, _ := authCfg.ActiveUser(hostname)
-	cs := io.ColorScheme()
+	cs := streams.ColorScheme()
 
 	// The prompt block goes to stderr so machine-readable stdout (e.g.
 	// --json) stays pure while the interactive selection stays visible.
-	fmt.Fprintf(io.ErrOut, "? Switch account on %s:\n", hostname)
+	fmt.Fprintf(streams.ErrOut, "? Switch account on %s:\n", hostname)
 	for i, name := range users {
 		marker := ""
 		if name == current {
 			marker = cs.Gray(" (current)")
 		}
-		fmt.Fprintf(io.ErrOut, "  %d. %s%s\n", i+1, name, marker)
+		fmt.Fprintf(streams.ErrOut, "  %d. %s%s\n", i+1, name, marker)
 	}
-	fmt.Fprintf(io.ErrOut, "Choose an account [1-%d]: ", len(users))
+	fmt.Fprintf(streams.ErrOut, "Choose an account [1-%d]: ", len(users))
 
-	line, err := bufio.NewReader(io.In).ReadString('\n')
-	if err != nil && line == "" {
+	line, err := bufio.NewReader(streams.In).ReadString('\n')
+	// Surface read errors even when partial input was received (#361
+	// lesson); a clean EOF with a trailing partial line is still a valid
+	// selection (no trailing newline).
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", cmdutil.NewUsageError(fmt.Sprintf("failed to read selection: %v", err))
 	}
 	choice := strings.TrimSpace(line)

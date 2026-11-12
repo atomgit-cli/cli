@@ -222,6 +222,10 @@ func (a *authConfig) SwitchUser(hostname, user string) error {
 // LoginUsers returns the sorted usernames that have stored tokens for a
 // host. The interactive account switch and the not-found hints need the
 // list (issue 646); SwitchUser itself only validates membership.
+// Read errors are swallowed (nil) like the sibling StoredToken/Hosts
+// readers: an unreadable auth.json surfaces to the caller as "no stored
+// accounts", which keeps the command usable at the exit-code level; the
+// tradeoff is recorded here deliberately.
 func (a *authConfig) LoginUsers(hostname string) []string {
 	state, err := a.config.readAuthState()
 	if err != nil {

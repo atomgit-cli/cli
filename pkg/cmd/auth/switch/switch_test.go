@@ -16,6 +16,7 @@ import (
 func loginTwoAccounts(t *testing.T) config.Config {
 	t.Helper()
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("GC_HOST", "")
 	cfg := config.New()
 	auth := cfg.Authentication()
 	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
@@ -110,20 +111,20 @@ func TestSwitchRunNonInteractiveWithoutUsernameExit2(t *testing.T) {
 func TestSwitchRunInteractiveSelectionByNumber(t *testing.T) {
 	cfg := loginTwoAccounts(t)
 	io, _, _, errOut := iostreams.TestTTY()
-	io.In = strings.NewReader("2\n")
+	io.In = strings.NewReader("1\n") // alice is NOT the active user (bob is) — a real switch
 	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com"})
 	if err != nil {
 		t.Fatalf("switchRun() error = %v", err)
 	}
 	rendered := errOut.String()
-	for _, want := range []string{"Switch account on gitcode.com", "1. alice", "2. bob", "(current)"} {
+	for _, want := range []string{"Switch account on gitcode.com", "1. alice", "2. bob (current)"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("prompt output missing %q: %q", want, rendered)
 		}
 	}
 	active, _ := cfg.Authentication().ActiveUser("gitcode.com")
-	if active != "bob" {
-		t.Fatalf("ActiveUser() = %q, want bob (selected by number)", active)
+	if active != "alice" {
+		t.Fatalf("ActiveUser() = %q, want alice (selected by number)", active)
 	}
 }
 
@@ -173,6 +174,7 @@ func TestSwitchRunJSONOutput(t *testing.T) {
 }
 
 func TestSwitchRunResolvesDefaultHost(t *testing.T) {
+	t.Setenv("GC_HOST", "")
 	cfg := loginTwoAccounts(t) // DefaultHost becomes gitcode.com
 	io, _, out, _ := iostreams.Test()
 	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "bob"})
@@ -222,5 +224,43 @@ func TestSwitchRunRejectsControlCharAccountNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "control characters") {
 		t.Fatalf("error = %q, want control-characters mention", err.Error())
+	}
+}
+
+func TestNewCmdSwitchBindsUsernameArg(t *testing.T) {
+	// RunE must wire args[0] into opts.Username (Execute-level pin).
+	f := cmdutil.TestFactory()
+	var gotUser string
+	cmd := NewCmdSwitch(f, func(opts *SwitchOptions) error {
+		gotUser = opts.Username
+		return nil
+	})
+	cmd.SetArgs([]string{"bob"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if gotUser != "bob" {
+		t.Fatalf("Username = %q, want bob", gotUser)
+	}
+}
+
+func TestSwitchRunInvalidHostnameFails(t *testing.T) {
+	cfg := loginTwoAccounts(t)
+	io, _, _, _ := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "bob", Hostname: "bad/host"})
+	if err == nil || !strings.Contains(err.Error(), "invalid host") {
+		t.Fatalf("error = %v, want invalid host", err)
+	}
+}
+
+func TestSwitchRunToCurrentUserIsIdempotent(t *testing.T) {
+	cfg := loginTwoAccounts(t) // active = bob
+	io, _, out, _ := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Username: "bob", Hostname: "gitcode.com"})
+	if err != nil {
+		t.Fatalf("switchRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Switched to bob") {
+		t.Fatalf("output = %q", out.String())
 	}
 }

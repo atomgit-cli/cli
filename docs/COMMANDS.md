@@ -339,10 +339,10 @@ gc auth switch second-account --json
 
 说明：
 - 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。
-- 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可；非交互环境（无 TTY）未传用户名时返回退出码 `2`。
+- 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可；非交互环境（无 TTY 或 `--no-interactive`）未传用户名时返回退出码 `2`。
 - 目标账号未存储在该主机时返回退出码 `3`，错误消息列出可用账号；主机无任何已存储账号时同样返回 `3` 并提示 `gc auth login`。
 - `--json` 输出 `{"hostname":..., "active_user":...}`（字段序 hostname → active_user）。
-- 环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）仍优先于任何已切换账号（认证来源优先级不变）；跨配置目录的并行账号用 `GC_CONFIG_DIR`（见 docs/AUTH.md 一机多账号小节）。
+- 环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）仍优先于已切换账号（该优先级指默认主机 gitcode.com；自定义主机读取本地登录态、不受通用环境变量影响，见 docs/AUTH.md 主机传播语义）；跨配置目录的并行账号用 `GC_CONFIG_DIR`（见 docs/AUTH.md 一机多账号小节）。
 
 ### auth logout - 登出
 
