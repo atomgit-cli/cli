@@ -426,6 +426,13 @@ gc api repos/infra-test/gctest1/issues/1/comments -f body='评论内容'
 - `--slurp`：仅 `--paginate` 下可用，把全部页的条目合并为单一 JSON 数组输出（空结果输出 `[]`）；不能与 `--jq` 组合（gc 返回 exit 2 用法错误；gh 同样拒绝该组合，但其退出码为 1，gc 按自身退出码契约返回 2）。注意与 gh 同名 flag 的形状差异：gh 把每一页整体包进外层数组，gc 为扁平合并全部条目。
 - `-f, --field`：可重复的 `key=value` 字符串字段，组成 JSON 对象作为请求体（同名键后者覆盖前者）；与 `--input` 互斥；不支持类型化字段（`-F`），复杂结构请用 `--input`。
 
+从 gh 迁移时，还有四处行为差异需要注意（`--slurp` 形状与退出码、HTTP 304 语义的差异已在上面条目注明）：
+
+- `--jq` 不加载环境变量：`$ENV` 是空对象，`$ENV.HOME` 等取值为 `null`。这是有意为之的安全设计——jq 表达式读不到 `GC_TOKEN` 等环境变量，令牌在结构上不可能经 `--jq` 输出泄露。gh 的 `--jq` 会加载进程环境变量，从 gh 迁移的表达式若依赖 `$ENV`，需要改用别的方式传值。
+- `-f` 字段不会因 GET 请求转为查询参数：字段始终构造 JSON 请求体（服务端对 GET 请求体通常忽略）。gh 在 GET 请求下会把 `-f` 字段转为 query string；在 `gc api` 中传查询参数请直接写进 endpoint URL，例如 `gc api 'repos/infra-test/gctest1/commits?path=README.md'`。
+- 响应中的超大整数有精度上限：`--jq` 处理前，响应体先按 JSON 通用类型解析（数值走 float64），超过 2^53（约 9×10^15）的整数会失真；gh 的实现同样如此。GitCode v5 各类 id 远小于该值，正常使用不受影响，作为已知限制说明于此。
+- `halt` / `halt_error` 以错误结束：`--jq 'halt'` 会报 `--jq filter error: halt error: null` 并以 exit 1 结束；gh 对 `halt` 是静默正常退出（exit 0）。`halt_error` 在两边都以错误结束，数值参数不会作为进程退出码透传。依赖 halt 控制流程的脚本迁移时需要调整。
+
 ---
 
 ## 仓库命令 (repo)
@@ -3841,6 +3848,7 @@ gc schema "issue view"
 | `GC_TOKEN` | 认证 Token |
 | `GITCODE_TOKEN` | 备用 Token |
 | `GC_HOST` | 默认 GitCode 主机（默认：gitcode.com）；必须是受信 hostname-only 值；已接入共享 host-aware 认证入口的业务命令会映射到对应 API 主机，且非默认 host 只使用该 host 的本地登录 token |
+| `GC_CONFIG_DIR` | 覆盖配置目录（默认 `~/.config/gc`），登录态与偏好随目录切换。指向空目录等于未登录，不会回落默认目录；设为空字符串则视为未设置、仍读写默认目录——例外是 `auth git-credential`：空字符串视为无凭据、不回落，以保证多账号隔离语义确定。一机多账号用法与示例见 `docs/AUTH.md` |
 | `GC_TIMEOUT` | API 请求超时时间（默认：30s）；支持 Duration 格式如 `60s`、`2m`，或纯秒数如 `120` |
 | `GC_DEBUG` | 启用 API 调试日志，输出重试、Rate Limit 等信息到 stderr |
 | `GC_API_DEBUG` | 同 `GC_DEBUG`，启用 API 调试日志 |
