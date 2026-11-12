@@ -35,6 +35,13 @@ func NewCmdConfig(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config <command>",
 		Short: "Read and write GitCode CLI configuration",
+		Long: heredoc.Doc(`
+			Read and write GitCode CLI configuration.
+
+			Configuration lives in the config directory (default
+			~/.config/gc). Set GC_CONFIG_DIR to read and write a different
+			directory, e.g. to keep a per-account configuration.
+		`),
 	}
 	cmd.AddCommand(newCmdGet(f))
 	cmd.AddCommand(newCmdSet(f))

@@ -58,6 +58,25 @@
 当前通用配置用于保存 `editor`、`browser`、`pager` 等非敏感偏好。认证 token 仍只写入 `auth.json`。
 通用配置会拒绝 `token`、`password`、`secret` 等未列入允许列表的键。
 
+### 一机多账号（GC_CONFIG_DIR 隔离）
+
+`GC_CONFIG_DIR` 指向哪个目录，gc 就读写哪个目录的登录态与偏好：指向空目录等于"未登录"，不会回落到默认目录 `~/.config/gc`；设为空字符串则视为未设置，仍读写默认目录。环境变量 token 的优先级（见上文认证来源优先级）不受目录选择影响。
+
+典型用法是给第二个账号包一个 wrapper：
+
+```sh
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/gc-agent <<'WRAP'
+#!/bin/sh
+GC_CONFIG_DIR="$HOME/.config/gc-agent" exec gc "$@"
+WRAP
+chmod +x ~/.local/bin/gc-agent
+gc-agent auth login   # 在隔离目录登录第二个账号，不影响主配置
+gc-agent auth status  # 查看该账号状态；主 gc 命令仍用主账号
+```
+
+排查隔离目录的登录状态时，用同一个 `GC_CONFIG_DIR` 值运行 `gc auth status`。要让 git 操作（HTTPS clone/push 等）也使用该账号，需在运行 git 的环境中导出同一个 `GC_CONFIG_DIR`：wrapper 只覆盖 gc 命令，`auth setup-git` 写入 git 配置的 helper 条目不携带该变量（git 凭据回填由 `gc auth git-credential` 子命令提供）。
+
 ## 主机传播语义
 
 - `GC_HOST` 或登录配置中的默认 host 会决定已接入共享 host-aware 认证入口的业务命令所使用的 GitCode 主机。
