@@ -109,9 +109,9 @@ field/type checks whenever a command supports `--json`.
 16. `release delete <tag> --dry-run`
 17. 非 Git 目录下的 `repo view` 错误路径，期望退出码 `2`
 18. 不存在 commit 的 `commit view` 错误路径，期望退出码 `3`
-19. `gc api user --jq .login`（断言输出为非空登录名，并与 `api user` 原始响应交叉验证）
-20. `gc api 'repos/<repo>/issues?state=all&per_page=2' --paginate --slurp`（断言输出为单一 JSON 数组，含 `"id"` 字段）
-21. 空 `GC_CONFIG_DIR` 且无环境 token 下 `gc auth git-credential`（stdin 喂协议请求）——静默契约：stdout 0 字节、stderr 0 字节、退出码 `1`（守护 git credential 协议的静默性，断言为字节级、不依赖错误消息文本）
+19. `gc api user --jq .login`（断言输出为非空裸字符串登录名——不含引号，并与 `api user` 原始响应静默交叉验证）
+20. `gc api 'repos/<repo>/issues?state=all&per_page=2' --paginate --slurp`（断言输出为单行、以 `[` 开头以 `]` 结尾的单一 JSON 数组形态，含 `"id"` 字段——行数断言可拦逐页未合并的回归）
+21. 临时空 `GC_CONFIG_DIR`（指向空目录）且无环境 token 下 `gc auth git-credential get`（stdin 喂协议请求）——静默契约：stdout 0 字节、stderr 0 字节、退出码 `1`（守护 git credential 协议的静默性，断言为字节级、不依赖错误消息文本）
 
 说明：
 - 脚本不会读取真实 token，不会执行 `auth login --with-token`，也不会执行 `auth logout`。
