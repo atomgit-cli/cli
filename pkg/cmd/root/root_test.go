@@ -288,10 +288,14 @@ func TestExecuteSkipsLifecycleForProtocolCommand(t *testing.T) {
 	}()
 	os.Args = []string{"gc", "auth", "git-credential", "get"}
 	os.Stdin = stdin
-	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	stderrHandle, err := os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the handle before t.TempDir cleanup removes the file: an open
+	// handle blocks RemoveAll on Windows (issue filed from the mirror CI).
+	defer stderrHandle.Close()
+	os.Stderr = stderrHandle
 
 	err = Execute("test", "abc", "today")
 	if err == nil {
@@ -345,10 +349,14 @@ func TestExecuteRunsFirstRunNoticeForNormalCommand(t *testing.T) {
 		os.Args, os.Stderr = oldArgs, oldStderr
 	}()
 	os.Args = []string{"gc", "version"}
-	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	stderrHandle, err := os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the handle before t.TempDir cleanup removes the file: an open
+	// handle blocks RemoveAll on Windows (issue filed from the mirror CI).
+	defer stderrHandle.Close()
+	os.Stderr = stderrHandle
 
 	if err := Execute("test", "abc", "today"); err != nil {
 		t.Logf("Execute version returned: %v", err)
@@ -403,10 +411,14 @@ func TestExecuteSkipsLifecycleForProtocolCommandSuccessPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Stdin.Close()
-	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	stderrHandle, err := os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the handle before t.TempDir cleanup removes the file: an open
+	// handle blocks RemoveAll on Windows (issue filed from the mirror CI).
+	defer stderrHandle.Close()
+	os.Stderr = stderrHandle
 
 	err = Execute("test", "abc", "today")
 	if err != nil {
@@ -457,10 +469,14 @@ func TestExecuteRunsLifecycleOnFailingNormalCommand(t *testing.T) {
 		os.Args, os.Stderr = oldArgs, oldStderr
 	}()
 	os.Args = []string{"gc", "auth", "status"}
-	os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+	stderrHandle, err := os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close the handle before t.TempDir cleanup removes the file: an open
+	// handle blocks RemoveAll on Windows (issue filed from the mirror CI).
+	defer stderrHandle.Close()
+	os.Stderr = stderrHandle
 
 	err = Execute("test", "abc", "today")
 	if err == nil {
@@ -530,10 +546,14 @@ func TestExecuteLifecycleMatrix(t *testing.T) {
 				os.Args, os.Stderr = oldArgs, oldStderr
 			}()
 			os.Args = append([]string{"gc"}, tc.args...)
-			os.Stderr, err = os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
+			stderrHandle, err := os.OpenFile(stderrFile.Name(), os.O_RDWR, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Close the handle before t.TempDir cleanup removes the file
+			// (an open handle blocks RemoveAll on Windows).
+			defer stderrHandle.Close()
+			os.Stderr = stderrHandle
 			_ = Execute("test", "abc", "today")
 			if _, err := os.Stderr.Seek(0, io.SeekStart); err != nil {
 				t.Fatal(err)
