@@ -100,22 +100,24 @@ func GetPRReviewStates(client *Client, owner, repo string, number int) (*PRRevie
 
 // PRComment represents a comment on a PR
 type PRComment struct {
-	ID           interface{}      `json:"id"`
-	DiscussionID string           `json:"discussion_id"`
-	Body         string           `json:"body"`
-	User         *User            `json:"user"`
-	CreatedAt    FlexibleTime     `json:"created_at"`
-	UpdatedAt    FlexibleTime     `json:"updated_at"`
-	CommentType  string           `json:"comment_type"`
-	Resolved     bool             `json:"resolved"`
-	DiffFile     string           `json:"diff_file"`
-	DiffPosition interface{}      `json:"diff_position"`
-	Reply        []PRCommentReply `json:"reply"`
+	ID           interface{}         `json:"id"`
+	DiscussionID string              `json:"discussion_id"`
+	Body         string              `json:"body"`
+	User         *User               `json:"user"`
+	CreatedAt    FlexibleTime        `json:"created_at"`
+	UpdatedAt    FlexibleTime        `json:"updated_at"`
+	CommentType  string              `json:"comment_type"`
+	Resolved     bool                `json:"resolved"`
+	DiffFile     string              `json:"diff_file"`
+	DiffPosition interface{}         `json:"diff_position"`
+	Reply        []PRDiscussionReply `json:"reply"`
 }
 
-// PRCommentReply represents a reply nested under a PR comment. Replies
+// PRDiscussionReply represents a reply nested under a PR comment (the
+// reply array element of the comment listing). Distinct from
+// ReplyPRCommentReply, which is the response of creating a reply. Replies
 // carry no discussion_id of their own: the parent comment owns it.
-type PRCommentReply struct {
+type PRDiscussionReply struct {
 	ID        interface{}  `json:"id"`
 	Body      string       `json:"body"`
 	User      *User        `json:"user"`
@@ -533,7 +535,9 @@ type ReplyPRCommentReply struct {
 // ReplyPRComment replies to a PR comment discussion
 func ReplyPRComment(client *Client, owner, repo string, number int, discussionID string, opts *ReplyPRCommentOptions) (*ReplyPRCommentReply, error) {
 	var result ReplyPRCommentReply
-	err := client.Post(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/discussions/"+discussionID+"/comments", opts, &result)
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/discussions/" + url.PathEscape(discussionID) + "/comments"
+	err := client.Post(path, opts, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +551,9 @@ type ResolvePRCommentOptions struct {
 
 // ResolvePRComment updates the resolution status of a PR comment
 func ResolvePRComment(client *Client, owner, repo string, number int, discussionID string, opts *ResolvePRCommentOptions) error {
-	return client.Put(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/comments/"+discussionID, opts, nil)
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/comments/" + url.PathEscape(discussionID)
+	return client.Put(path, opts, nil)
 }
 
 // ListPRCommits lists commits in a PR
