@@ -332,3 +332,43 @@ func TestLogoutRunPositionalUsernameLogsOutThatUser(t *testing.T) {
 		t.Fatalf("active after logout of bob = %q, want alice (Logout falls back to first user)", active)
 	}
 }
+
+func TestLogoutCmdConflictingUsernamesExit2(t *testing.T) {
+	// A positional username and --username with different values must be
+	// a usage error (never a silent flag-wins), naming both values.
+	f := cmdutil.TestFactory()
+	cmd := NewCmdLogout(f, func(opts *LogoutOptions) error {
+		t.Fatal("runF must not run when usernames conflict")
+		return nil
+	})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"bob", "-u", "alice"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+	for _, want := range []string{`"alice"`, `"bob"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want both values mentioned", err.Error())
+		}
+	}
+}
+
+func TestLogoutCmdTooManyArgsExit2(t *testing.T) {
+	f := cmdutil.TestFactory()
+	cmd := NewCmdLogout(f, nil)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"bob", "alice"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want cobra arg validation error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d (MaximumNArgs)", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
