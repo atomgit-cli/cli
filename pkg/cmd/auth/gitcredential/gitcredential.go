@@ -79,6 +79,12 @@ func NewCmdGitCredential(f *cmdutil.Factory, runF func(*GitCredentialOptions) er
 		Long:    gitCredentialLong,
 		Example: gitCredentialExample,
 		Args:    cobra.MaximumNArgs(1),
+		Annotations: map[string]string{
+			// git passes helper stderr through to the user; the update
+			// lifecycle (first-run notice, pending summaries) must stay
+			// out of the protocol stream (issue 647).
+			cmdutil.NoUpdateLifecycleAnnotation: "true",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				opts.Operation = args[0]

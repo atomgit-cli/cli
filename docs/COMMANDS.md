@@ -431,7 +431,7 @@ gc api repos/infra-test/gctest1 --include
 # 用 jq 表达式过滤输出
 gc api user --jq .login
 
-# 自动翻页：跟随 page 参数直到空页；--slurp 把所有页合并为单一 JSON 数组
+# 自动翻页：跟随 page 参数直到空页（空数组）；--slurp 把所有页合并为单一 JSON 数组
 gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate
 gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate --slurp
 
@@ -447,9 +447,16 @@ gc api repos/infra-test/gctest1/issues/1/comments -f body='评论内容'
 - `--include`：先输出 `HTTP/1.1 <状态码> <状态文本>` 与响应头（按头名排序，注意 Go 客户端会按规范形式显示如 `Etag`），空行后再输出响应体；响应头可用于读取 `Etag`、限流头等元数据。`--include` 与 `--jq` 可组合（先头块后过滤结果）。
 - HTTP 304（条件请求命中）：`gc api` 一律以非零退出码结束（错误消息含 304），配 `--include` 时先输出响应头再报错；消费方可据此把"非零退出 + 304"判定为"资源未变化"。当前 GitCode v5 多数端点不返回 ETag，该路径在无 ETag 的端点不可达。
 - `--jq`：完整 jq 表达式（gojq 实现）；字符串结果按原文输出，其余结果为紧凑 JSON 逐行输出；表达式非法返回 exit 2 用法错误。
-- `--paginate`：仅限 GET，且不能与 `--input` / `-f` 组合；自动注入 `page=1..N`（未指定时补 `per_page=100`，已有则保留），翻到空页终止；最多发起 100 次请求且第 100 页必须为空页（即最多 99 个数据页；超限报错 exit 1 并提示收窄查询，`--slurp` 超限时丢弃已合并数据不输出——失败优于静默截断）；要求响应为 JSON 数组。非 `--slurp` 模式逐页原样输出（每页一个 JSON 数组），`--jq` 逐页应用。
+- `--paginate`：仅限 GET，且不能与 `--input` / `-f` 组合；自动注入 `page=1..N`（未指定时补 `per_page=100`，已有则保留），翻到空页（空数组 `[]`）终止；最多发起 100 次请求且第 100 页必须为空页（即最多 99 个数据页；超限报错 exit 1 并提示收窄查询，`--slurp` 超限时丢弃已合并数据不输出——失败优于静默截断）；要求响应为 JSON 数组——空 body 或 null 响应体同样报错（exit 1、同一报错格式，仅 body 预览不同）而非按空页处理，避免掩盖服务端异常（翻页中途的任一页出现这两种形态也同样报错）。非 `--slurp` 模式逐页原样输出（每页一个 JSON 数组），`--jq` 逐页应用。
 - `--slurp`：仅 `--paginate` 下可用，把全部页的条目合并为单一 JSON 数组输出（空结果输出 `[]`）；不能与 `--jq` 组合（gc 返回 exit 2 用法错误；gh 同样拒绝该组合，但其退出码为 1，gc 按自身退出码契约返回 2）。注意与 gh 同名 flag 的形状差异：gh 把每一页整体包进外层数组，gc 为扁平合并全部条目。
 - `-f, --field`：可重复的 `key=value` 字符串字段，组成 JSON 对象作为请求体（同名键后者覆盖前者）；与 `--input` 互斥；不支持类型化字段（`-F`），复杂结构请用 `--input`。
+
+从 gh 迁移时，还有四处行为差异需要注意（`--slurp` 的形状与退出码差异已在上面条目注明）：
+
+- `--jq` 不加载环境变量：`$ENV` 是空对象，`$ENV.HOME` 等取值为 `null`。这是有意为之的安全设计——jq 表达式读不到 `GC_TOKEN` 等环境变量，CLI 侧的认证凭据在结构上不可能经 `--jq` 输出泄露（`--jq` 会如实输出响应体本身的数据，与 CLI 凭据无关）。gh 的 `--jq` 会加载进程环境变量，从 gh 迁移的表达式若依赖 `$ENV`，需要改用别的方式传值——注意 shell 变量插值进命令行会进入进程列表与 shell history，敏感值不适用。
+- `-f` 字段不会因 GET 请求转为查询参数：字段始终构造 JSON 请求体（服务端对 GET 请求体通常忽略）。gh 在显式指定 GET 时会把 `-f` 字段转为 query string；在 `gc api` 中传查询参数请直接写进 endpoint URL，例如 `gc api 'repos/infra-test/gctest1/commits?path=README.md'`（敏感值不宜放进查询串，会进入服务端与代理的访问日志）。
+- 响应中的超大整数有精度上限：`--jq` 处理前，响应体先按 JSON 通用类型解析（数值走 float64），超过 2^53（约 9×10^15）的整数不再保证精确表示；gh 的实现同样如此。GitCode v5 各类 id 远小于该值，正常使用不受影响，作为已知限制说明于此。
+- `halt` / `halt_error` 以错误结束：`--jq 'halt'` 会报 `--jq filter error: halt error: null` 并以 exit 1 结束；gh 对 `halt` 及空值输入的 `halt_error` 是静默正常退出（exit 0），其余情形 `halt_error` 在两边都以错误结束、数值参数不会作为进程退出码透传。依赖 halt 控制流程的脚本迁移时需要调整。
 
 ---
 
@@ -3866,6 +3873,7 @@ gc schema "issue view"
 | `GC_TOKEN` | 认证 Token |
 | `GITCODE_TOKEN` | 备用 Token |
 | `GC_HOST` | 默认 GitCode 主机（默认：gitcode.com）；必须是受信 hostname-only 值；已接入共享 host-aware 认证入口的业务命令会映射到对应 API 主机，且非默认 host 只使用该 host 的本地登录 token |
+| `GC_CONFIG_DIR` | 覆盖配置目录（默认 `~/.config/gc`），登录态与偏好随目录切换。指向空目录等于未登录，不会回落默认目录；设为空字符串则视为未设置、仍读写默认目录——例外是 `auth git-credential`：空字符串视为无凭据、不回落，以保证多账号隔离语义确定。环境变量 token 的优先级不受目录切换影响（见上方 `GC_TOKEN` 行）。一机多账号用法与示例见 `docs/AUTH.md` |
 | `GC_TIMEOUT` | API 请求超时时间（默认：30s）；支持 Duration 格式如 `60s`、`2m`，或纯秒数如 `120` |
 | `GC_DEBUG` | 启用 API 调试日志，输出重试、Rate Limit 等信息到 stderr |
 | `GC_API_DEBUG` | 同 `GC_DEBUG`，启用 API 调试日志 |

@@ -589,3 +589,13 @@ func TestGitCredentialRunOutputsOnlyUsernameAndPassword(t *testing.T) {
 		}
 	}
 }
+
+func TestNewCmdGitCredentialOptsOutOfUpdateLifecycle(t *testing.T) {
+	// The helper's stderr is passed through by git into git's own output,
+	// so the command opts out of the root update lifecycle (issue 647).
+	f := cmdutil.TestFactory()
+	cmd := NewCmdGitCredential(f, nil)
+	if cmd.Annotations[cmdutil.NoUpdateLifecycleAnnotation] == "" {
+		t.Fatalf("git-credential lacks the %q annotation", cmdutil.NoUpdateLifecycleAnnotation)
+	}
+}
