@@ -276,6 +276,19 @@ func TestReplyRunJSONOutput(t *testing.T) {
 	if result["body"] != "hello reply" {
 		t.Fatalf("body = %#v", result["body"])
 	}
+
+	// Field order is part of the --json output contract (issue 655):
+	// discussion_id, note_id, body — matching the docs/COMMANDS.md example.
+	raw := out.String()
+	idxDiscussion := strings.Index(raw, `"discussion_id"`)
+	idxNote := strings.Index(raw, `"note_id"`)
+	idxBody := strings.Index(raw, `"body"`)
+	if idxDiscussion < 0 || idxNote < 0 || idxBody < 0 {
+		t.Fatalf("expected keys missing from output: %q", raw)
+	}
+	if !(idxDiscussion < idxNote && idxNote < idxBody) {
+		t.Fatalf("JSON field order wrong: discussion_id@%d, note_id@%d, body@%d; want discussion_id < note_id < body\noutput=%q", idxDiscussion, idxNote, idxBody, raw)
+	}
 }
 
 func TestReplyRunTextShowsCommentID(t *testing.T) {
