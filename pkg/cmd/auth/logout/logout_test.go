@@ -116,8 +116,10 @@ func TestLogoutNormalizesAndValidatesHostname(t *testing.T) {
 		if err == nil {
 			t.Fatal("logoutRun() error = nil, want usage error")
 		}
-		if code := cmdutil.ExitCode(err); code != cmdutil.ExitUsage {
-			t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitUsage)
+		// Invalid hostname exits 1 like the auth family (login/status/
+		// token/switch), unified by issue 658.
+		if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+			t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitError)
 		}
 		if out.String() != "" {
 			t.Fatalf("output = %q, want empty", out.String())
@@ -135,8 +137,10 @@ func TestLogoutNormalizesAndValidatesHostname(t *testing.T) {
 		if err == nil {
 			t.Fatal("logoutRun() error = nil, want usage error")
 		}
-		if code := cmdutil.ExitCode(err); code != cmdutil.ExitUsage {
-			t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitUsage)
+		// Invalid hostname exits 1 like the auth family (login/status/
+		// token/switch), unified by issue 658.
+		if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+			t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitError)
 		}
 		if out.String() != "" {
 			t.Fatalf("output = %q, want empty", out.String())
@@ -282,5 +286,49 @@ func TestLogoutEnvHintGoesToStderrAndListsOnlySetVars(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLogoutCmdBindsUsernameArg(t *testing.T) {
+	// RunE must wire args[0] into opts.Username: a positional username must
+	// log out that account, never silently fall back to the active user
+	// (issue 658).
+	f := cmdutil.TestFactory()
+	var gotUser string
+	cmd := NewCmdLogout(f, func(opts *LogoutOptions) error {
+		gotUser = opts.Username
+		return nil
+	})
+	cmd.SetArgs([]string{"bob"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if gotUser != "bob" {
+		t.Fatalf("Username = %q, want bob (positional arg must bind)", gotUser)
+	}
+}
+
+func TestLogoutRunPositionalUsernameLogsOutThatUser(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	auth := cfg.Authentication()
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	io, _, _, _ := iostreams.Test()
+	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Username: "bob", Yes: true})
+	if err != nil {
+		t.Fatalf("logoutRun() error = %v", err)
+	}
+	users := auth.LoginUsers("gitcode.com")
+	if len(users) != 1 || users[0] != "alice" {
+		t.Fatalf("after logout of bob, users = %v, want [alice]", users)
+	}
+	active, _ := auth.ActiveUser("gitcode.com")
+	if active != "alice" {
+		t.Fatalf("active after logout of bob = %q, want alice (Logout falls back to first user)", active)
 	}
 }

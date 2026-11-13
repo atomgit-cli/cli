@@ -36,7 +36,7 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 	}
 
 	cmd := &cobra.Command{
-		Use:   "logout",
+		Use:   "logout [<username>]",
 		Short: "Log out of a GitCode account",
 		Long: heredoc.Doc(`
 			Log out of a GitCode account.
@@ -62,7 +62,17 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			# Skip confirmation prompt
 			$ gc auth logout --yes
 		`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A positional username is equivalent to --username: log out
+			// that account, never a silent fallback to the active user
+			// (issue 658).
+			if len(args) > 0 && args[0] != "" {
+				if opts.Username != "" && opts.Username != args[0] {
+					return cmdutil.NewUsageError(fmt.Sprintf("conflicting usernames: %q (flag) and %q (argument); pass one", opts.Username, args[0]))
+				}
+				opts.Username = args[0]
+			}
 			if runF != nil {
 				return runF(opts)
 			}
@@ -89,7 +99,10 @@ func logoutRun(opts *LogoutOptions) error {
 	}
 	opts.Hostname, err = config.NormalizeTrustedHost(opts.Hostname)
 	if err != nil {
-		return cmdutil.NewUsageError(err.Error())
+		// Exit 1 like the auth family (login/status/token/switch); the
+		// invalid host is a runtime input error, not a usage error
+		// (issue 658).
+		return fmt.Errorf("%w", err)
 	}
 
 	cs := opts.IO.ColorScheme()

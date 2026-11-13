@@ -351,13 +351,16 @@ gc auth switch second-account --json
 ```bash
 gc auth logout
 
+# 登出指定账号（位置参数，等价于 --username）
+gc auth logout second-account --yes
+
 # 非交互执行
 gc auth logout --yes
 ```
 
 说明：
-- `auth logout` 会清理本地持久化认证信息。
-- 目标 hostname 会先校验并归一化；无效 hostname 返回参数错误，不会显示登出成功。
+- `auth logout` 会清理本地持久化认证信息；可带 `[<username>]` 位置参数（或 `-u/--username`）登出指定账号——两者同时传且不同值时返回退出码 `2`。
+- 目标 hostname 会先校验并归一化；无效 hostname 返回通用错误（退出码 `1`，与 `auth login/status/token/switch` 家族一致——此前 logout 独为参数错误 `2`，已统一）。
 - 默认主机下，若任一 `GC_TOKEN` / `GITCODE_TOKEN` 已设置且非空，命令会把提示写入 stderr，并仅列出这些实际生效的变量，按当前平台给出仅作用于当前终端的清理命令（Unix `unset`，Windows `Remove-Item Env:`）；stdout 只保留成功信息。该提示只清理当前终端，若变量还定义在 shell 配置文件中，需另行移除或更新。自定义主机登出不受通用环境变量影响，不输出该提示。
 - 非交互场景中显式传 `--yes`。
 
