@@ -25,7 +25,7 @@ func TestStateRootAbsoluteWhenXDGSet(t *testing.T) {
 		t.Fatalf("stateRootChecked() error = %v with XDG set", err)
 	}
 	if !filepath.IsAbs(root) {
-		t.Fatalf("stateRoot() = %q, want an absolute path (no silent cwd writes)", root)
+		t.Fatalf("stateRootChecked() = %q, want an absolute path (no silent cwd writes)", root)
 	}
 }
 
