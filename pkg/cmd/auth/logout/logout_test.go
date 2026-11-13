@@ -114,7 +114,7 @@ func TestLogoutNormalizesAndValidatesHostname(t *testing.T) {
 		io, _, out, _ := iostreams.Test()
 		err := logoutRun(newOpts(io, "https://gitcode.com"))
 		if err == nil {
-			t.Fatal("logoutRun() error = nil, want usage error")
+			t.Fatal("logoutRun() error = nil, want invalid-host error (exit 1)")
 		}
 		// Invalid hostname exits 1 like the auth family (login/status/
 		// token/switch), unified by issue 658.
@@ -135,7 +135,7 @@ func TestLogoutNormalizesAndValidatesHostname(t *testing.T) {
 		io, _, out, _ := iostreams.Test()
 		err := logoutRun(newOpts(io, ""))
 		if err == nil {
-			t.Fatal("logoutRun() error = nil, want usage error")
+			t.Fatal("logoutRun() error = nil, want invalid-host error (exit 1)")
 		}
 		// Invalid hostname exits 1 like the auth family (login/status/
 		// token/switch), unified by issue 658.
@@ -319,17 +319,20 @@ func TestLogoutRunPositionalUsernameLogsOutThatUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	io, _, _, _ := iostreams.Test()
-	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Username: "bob", Yes: true})
+	// Log out alice — the NON-active user (bob is active after the two
+	// logins): the outcome distinguishes this fix from the old bug, which
+	// silently logged out the active account instead.
+	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Username: "alice", Yes: true})
 	if err != nil {
 		t.Fatalf("logoutRun() error = %v", err)
 	}
 	users := auth.LoginUsers("gitcode.com")
-	if len(users) != 1 || users[0] != "alice" {
-		t.Fatalf("after logout of bob, users = %v, want [alice]", users)
+	if len(users) != 1 || users[0] != "bob" {
+		t.Fatalf("after logout of alice, users = %v, want [bob]", users)
 	}
 	active, _ := auth.ActiveUser("gitcode.com")
-	if active != "alice" {
-		t.Fatalf("active after logout of bob = %q, want alice (Logout falls back to first user)", active)
+	if active != "bob" {
+		t.Fatalf("active after logout of alice = %q, want bob (unchanged)", active)
 	}
 }
 
@@ -370,5 +373,26 @@ func TestLogoutCmdTooManyArgsExit2(t *testing.T) {
 	}
 	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
 		t.Fatalf("ExitCode() = %d, want %d (MaximumNArgs)", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
+
+func TestLogoutCmdEmptyUsernameArgExit2(t *testing.T) {
+	// An explicitly empty positional argument (script's unset variable)
+	// must be a usage error, never a silent active-account logout —
+	// the same bug class issue 658 kills.
+	f := cmdutil.TestFactory()
+	cmd := NewCmdLogout(f, func(opts *LogoutOptions) error {
+		t.Fatal("runF must not run for an empty username argument")
+		return nil
+	})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{""})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
 	}
 }

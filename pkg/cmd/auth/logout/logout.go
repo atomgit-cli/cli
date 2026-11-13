@@ -47,6 +47,10 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			On the default host, token environment variables are not removed.
 			The command prints current-session cleanup guidance on stderr.
 
+			A positional <username> is equivalent to --username: it logs
+			out that stored account, not the active one. Passing both
+			with different values is a usage error.
+
 				Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
@@ -55,6 +59,9 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			! This will log out of gitcode.com
 			Type the hostname to confirm: gitcode.com
 			✓ Cleared stored authentication for gitcode.com
+
+			# Logout a specific stored account (positional, equals --username)
+			$ gc auth logout second-account --yes
 
 			# Logout from a specific hostname
 			$ gc auth logout --hostname gitcode.com
@@ -67,9 +74,12 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			// A positional username is equivalent to --username: log out
 			// that account, never a silent fallback to the active user
 			// (issue 658).
-			if len(args) > 0 && args[0] != "" {
+			if len(args) > 0 {
 				if opts.Username != "" && opts.Username != args[0] {
 					return cmdutil.NewUsageError(fmt.Sprintf("conflicting usernames: %q (flag) and %q (argument); pass one", opts.Username, args[0]))
+				}
+				if args[0] == "" {
+					return cmdutil.NewUsageError("empty username argument; pass a username or omit the argument")
 				}
 				opts.Username = args[0]
 			}
@@ -102,7 +112,7 @@ func logoutRun(opts *LogoutOptions) error {
 		// Exit 1 like the auth family (login/status/token/switch); the
 		// invalid host is a runtime input error, not a usage error
 		// (issue 658).
-		return fmt.Errorf("%w", err)
+		return err
 	}
 
 	cs := opts.IO.ColorScheme()
