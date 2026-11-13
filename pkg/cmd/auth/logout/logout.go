@@ -71,17 +71,24 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// A positional username is equivalent to --username: log out
-			// that account, never a silent fallback to the active user
-			// (issue 658).
+			// An empty username — positional or via --username — is a
+			// usage error, never a silent fallback to the active account
+			// (issue 658: a script's unset variable must not log out the
+			// active session). The docs promise the two forms are
+			// equivalent; the guard is too.
+			argument := ""
 			if len(args) > 0 {
-				if opts.Username != "" && opts.Username != args[0] {
-					return cmdutil.NewUsageError(fmt.Sprintf("conflicting usernames: %q (flag) and %q (argument); pass one", opts.Username, args[0]))
-				}
-				if args[0] == "" {
-					return cmdutil.NewUsageError("empty username argument; pass a username or omit the argument")
-				}
-				opts.Username = args[0]
+				argument = args[0]
+			}
+			flagSet := cmd.Flags().Changed("username")
+			if flagSet && argument != "" && opts.Username != argument {
+				return cmdutil.NewUsageError(fmt.Sprintf("conflicting usernames: %q (flag) and %q (argument); pass one", opts.Username, argument))
+			}
+			if len(args) > 0 {
+				opts.Username = argument
+			}
+			if (flagSet || len(args) > 0) && opts.Username == "" {
+				return cmdutil.NewUsageError("empty username; pass a username or omit the argument")
 			}
 			if runF != nil {
 				return runF(opts)

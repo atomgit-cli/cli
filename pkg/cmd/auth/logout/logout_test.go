@@ -402,3 +402,25 @@ func TestLogoutCmdEmptyUsernameArgExit2(t *testing.T) {
 		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
 	}
 }
+
+func TestLogoutCmdEmptyFlagUsernameExit2(t *testing.T) {
+	// An explicitly empty --username is a usage error too, not a silent
+	// active-account logout — the docs promise the two forms are
+	// equivalent, and the boundary review reproduced the active-account
+	// wipe with exactly this spelling (incident evidence for issue 658).
+	f := cmdutil.TestFactory()
+	cmd := NewCmdLogout(f, func(opts *LogoutOptions) error {
+		t.Fatal("runF must not run for an empty --username")
+		return nil
+	})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"-u", ""})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want usage error")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitUsage {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
+	}
+}
