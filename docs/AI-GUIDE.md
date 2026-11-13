@@ -232,6 +232,8 @@ gitcode release upload v1.0.0 app.zip -R owner/repo --json
 - 写路径 `--json` 只在操作成功后输出结构化结果；执行失败时不要从 stdout 解析半成品结果。
 - `pr create --json` 会尽量回读新建 PR 以补齐创建响应缺失的正文；如果远端仍未返回 body，会在 stderr 给 warning，并保持 JSON 中的远端事实为空，脚本可再运行 `gitcode pr view <number> -R owner/repo --json` 核验。
 - 当前基础退出码语义：`0` 成功，`1` 通用错误，`2` 参数/用法错误，`3` 资源不存在，`4` 认证/权限错误，`5` 资源冲突。
+- 自动化配仓（API 添加仓库协作者）有一步平台侧断点：`PUT repos/{owner}/{repo}/collaborators/{username}` 可用（`gitcode api -X PUT ...`，可带 `{"permission":"pull"|"push"|"admin"}` 指定权限），但产生的**待接受邀请**的列出与接受两端点（`user/repository_invitations`）当前在 v5 API 中不存在（官方文档已核对，见 issue #656）——被邀请账号对私有仓的读取会 403，直到有人在 gitcode.com 网页上接受邀请。自动化配仓流程应在邀请创建后停一步等人工接受（或在平台端点落地后闭环）。
+
 
 ## 6. 使用 RTK 优化 Token 消耗（可选）
 
