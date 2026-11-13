@@ -321,3 +321,68 @@ func TestSecureWriteFileRejectsDirectory(t *testing.T) {
 		t.Fatal("secureWriteFile() error = nil, want failure when path is a directory")
 	}
 }
+
+func TestStoredCredentialSingleSnapshot(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := New()
+	auth := cfg.Authentication()
+
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+
+	user, token := auth.StoredCredential("gitcode.com")
+	if user != "bob" || token != "tokenB" {
+		t.Fatalf("StoredCredential() = (%q, %q), want (bob, tokenB) — last login is the active user", user, token)
+	}
+
+	if err := auth.SwitchUser("gitcode.com", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	user, token = auth.StoredCredential("gitcode.com")
+	if user != "alice" || token != "tokenA" {
+		t.Fatalf("StoredCredential() after switch = (%q, %q), want (alice, tokenA)", user, token)
+	}
+
+	user, token = auth.StoredCredential("other.example.com")
+	if user != "" || token != "" {
+		t.Fatalf("StoredCredential(unknown host) = (%q, %q), want empty pair", user, token)
+	}
+
+	// Empty hostname resolves through the default host to the same state.
+	user, token = auth.StoredCredential("")
+	if user != "alice" || token != "tokenA" {
+		t.Fatalf("StoredCredential(\"\") = (%q, %q), want (alice, tokenA) via default-host resolution", user, token)
+	}
+}
+
+func TestStoredCredentialIncompleteStates(t *testing.T) {
+	// The complete-or-empty contract is only reachable by hand-written
+	// auth.json states (Login always writes complete entries), so pin each
+	// incomplete branch with raw fixtures (issue 649).
+	cases := []struct {
+		name string
+		json string
+	}{
+		{name: "active user empty but users exist", json: `{"version":1,"hosts":{"gitcode.com":{"users":{"alice":{"token":"tokenA"}}}}}`},
+		{name: "dangling active user entry missing", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"bob":{"token":"tokenB"}}}}}`},
+		{name: "active user with empty token", json: `{"version":1,"hosts":{"gitcode.com":{"active_user":"alice","users":{"alice":{"token":""}}}}}`},
+		{name: "corrupted json read failure", json: `{"version":1,`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("GC_CONFIG_DIR", dir)
+			if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(tc.json), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			user, token := New().Authentication().StoredCredential("gitcode.com")
+			if user != "" || token != "" {
+				t.Fatalf("StoredCredential() = (%q, %q), want empty pair for incomplete state", user, token)
+			}
+		})
+	}
+}
