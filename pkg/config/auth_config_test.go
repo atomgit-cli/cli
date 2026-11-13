@@ -322,6 +322,29 @@ func TestSecureWriteFileRejectsDirectory(t *testing.T) {
 	}
 }
 
+func TestLoginUsers(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	auth := New().Authentication()
+
+	if got := auth.LoginUsers("gitcode.com"); len(got) != 0 {
+		t.Fatalf("LoginUsers() on empty config = %v, want empty", got)
+	}
+	if got := auth.LoginUsers("other.example.com"); len(got) != 0 {
+		t.Fatalf("LoginUsers(unknown host) = %v, want empty", got)
+	}
+
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	got := auth.LoginUsers("gitcode.com")
+	if len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
+		t.Fatalf("LoginUsers() = %v, want sorted [alice bob]", got)
+	}
+}
+
 func TestStoredCredentialSingleSnapshot(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	cfg := New()

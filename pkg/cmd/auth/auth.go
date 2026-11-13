@@ -10,6 +10,7 @@ import (
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/logout"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/setupgit"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/status"
+	switchcmd "gitcode.com/gitcode-cli/cli/pkg/cmd/auth/switch"
 	"gitcode.com/gitcode-cli/cli/pkg/cmd/auth/token"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 )
@@ -40,6 +41,7 @@ func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(setupgit.NewCmdSetupGit(f, nil))
 	cmd.AddCommand(gitcredential.NewCmdGitCredential(f, nil))
 	cmd.AddCommand(status.NewCmdStatus(f, nil))
+	cmd.AddCommand(switchcmd.NewCmdSwitch(f, nil))
 	cmd.AddCommand(token.NewCmdToken(f, nil))
 
 	return cmd

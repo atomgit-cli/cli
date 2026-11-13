@@ -32,3 +32,14 @@ func TestNewCmdAuthHelpDocumentsConfigDir(t *testing.T) {
 		t.Errorf("auth Long does not mention GC_CONFIG_DIR: %q", cmd.Long)
 	}
 }
+
+func TestNewCmdAuthIncludesSwitchSubcommand(t *testing.T) {
+	f := cmdutil.TestFactory()
+	cmd := NewCmdAuth(f)
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "switch" {
+			return
+		}
+	}
+	t.Fatal("auth command does not register the switch subcommand")
+}

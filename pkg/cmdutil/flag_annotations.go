@@ -3,6 +3,7 @@ package cmdutil
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -58,4 +59,16 @@ func SetTopicAnnotation(cmd *cobra.Command, topic string) {
 		cmd.Annotations = make(map[string]string)
 	}
 	cmd.Annotations[TopicAnnotation] = topic
+}
+
+// HasTerminalUnsafeChars reports whether s contains characters that would
+// break line-oriented output or inject terminal escape sequences when the
+// value is echoed to a user (newline, carriage return, NUL, ESC). Text that
+// the CLI displays from stored state — account names in listings, prompts,
+// error hints — must be rejected or escaped when this reports true; the
+// git-credential helper applies the same idea to its protocol output
+// (issue 646 review). The line-protocol-specific check in the credential
+// helper (newline, CR, NUL only) stays private there.
+func HasTerminalUnsafeChars(s string) bool {
+	return strings.ContainsAny(s, "\n\r\x00\x1b")
 }
