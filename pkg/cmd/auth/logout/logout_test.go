@@ -362,8 +362,14 @@ func TestLogoutCmdConflictingUsernamesExit2(t *testing.T) {
 }
 
 func TestLogoutCmdTooManyArgsExit2(t *testing.T) {
+	// The guard must be the argument validation, not a downstream
+	// confirmation gate: runF fatals if RunE executes at all (the old
+	// nil-runF form passed on main via the confirmation error instead).
 	f := cmdutil.TestFactory()
-	cmd := NewCmdLogout(f, nil)
+	cmd := NewCmdLogout(f, func(opts *LogoutOptions) error {
+		t.Fatal("runF must not run when arguments exceed the limit")
+		return nil
+	})
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetArgs([]string{"bob", "alice"})
