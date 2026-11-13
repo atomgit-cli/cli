@@ -3,6 +3,7 @@ package view
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -161,7 +162,7 @@ func TestRenderPRView(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := renderPRView(&buf, io.ColorScheme(), pr, comments, output.TimeFormatRelative, now); err != nil {
+	if err := renderPRView(&buf, io.ColorScheme(), pr, comments, nil, output.TimeFormatRelative, now); err != nil {
 		t.Fatalf("renderPRView() error = %v", err)
 	}
 
@@ -190,10 +191,11 @@ func TestRenderPRView(t *testing.T) {
 }
 
 func TestRenderPRCommentsEmpty(t *testing.T) {
+	io, _, _, _ := iostreams.Test()
 	var buf bytes.Buffer
 	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 
-	if err := renderPRComments(&buf, nil, output.TimeFormatAbsolute, now); err != nil {
+	if err := renderPRComments(&buf, io.ColorScheme(), nil, output.TimeFormatAbsolute, now); err != nil {
 		t.Fatalf("renderPRComments() error = %v", err)
 	}
 
@@ -652,5 +654,234 @@ func TestViewRunEnrichFilesAndCommitsBothFail(t *testing.T) {
 	}
 	if pr["number"] != float64(123) {
 		t.Fatalf("PR number = %v, want 123", pr["number"])
+	}
+}
+
+func TestRenderPRCommentsNestedReplies(t *testing.T) {
+	// pr view must render the nested reply array the same way the comments
+	// command does (issue 652: one dataset, one rendering contract).
+	io, _, _, _ := iostreams.Test()
+	var buf bytes.Buffer
+	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	comments := []api.PRComment{
+		{
+			Body:      "Parent comment",
+			User:      &api.User{Login: "alice"},
+			CreatedAt: api.FlexibleTime{Time: now.Add(-2 * time.Hour)},
+			Reply: []api.PRDiscussionReply{
+				{ID: "199", Body: "reply body line 1\nreply body line 2", User: &api.User{Login: "bob"}, CreatedAt: api.FlexibleTime{Time: now.Add(-1 * time.Hour)}},
+			},
+		},
+	}
+	if err := renderPRComments(&buf, io.ColorScheme(), comments, output.TimeFormatAbsolute, now); err != nil {
+		t.Fatalf("renderPRComments() error = %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Parent comment",
+		"Replies (1):",
+		"↳ ID: 199, bob at",
+		"reply body line 1",
+		"reply body line 2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderPRComments() output missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestRenderPRViewReviewSummary(t *testing.T) {
+	io, _, _, _ := iostreams.Test()
+	var buf bytes.Buffer
+	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	pr := &api.PullRequest{Title: "T", Number: 7, State: "open"}
+	states := &api.PRReviewStates{
+		ApprovalReviewers: []*api.PRReviewer{
+			{Login: "alice", AcceptStatus: "true"},
+			{Login: "bob", AcceptStatus: "reject"},
+		},
+		Testers: []*api.PRReviewer{
+			{Login: "carol", Accept: true},
+			{Login: "dave"},
+		},
+	}
+	if err := renderPRView(&buf, io.ColorScheme(), pr, nil, states, output.TimeFormatAbsolute, now); err != nil {
+		t.Fatalf("renderPRView() error = %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Review: 1 approved, 1 rejected",
+		"Testers: 1 accepted, 1 pending",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderPRView() output missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestRenderPRViewReviewSummaryOmittedWhenEmpty(t *testing.T) {
+	io, _, _, _ := iostreams.Test()
+	var buf bytes.Buffer
+	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	pr := &api.PullRequest{Title: "T", Number: 7, State: "open"}
+	if err := renderPRView(&buf, io.ColorScheme(), pr, nil, &api.PRReviewStates{}, output.TimeFormatAbsolute, now); err != nil {
+		t.Fatalf("renderPRView() error = %v", err)
+	}
+	if strings.Contains(buf.String(), "Review:") {
+		t.Fatalf("renderPRView() output should omit the review summary when no states exist: %s", buf.String())
+	}
+}
+
+func TestViewRunJSONDoesNotFetchReviewStates(t *testing.T) {
+	// The --json contract decision (issue 652): review states stay out of
+	// pr view --json; the dedicated `pr reviews --json` carries them. JSON
+	// mode must not even fetch them (no second PR-detail GET).
+	t.Setenv("GC_TOKEN", "test-token")
+	io, _, _, _ := iostreams.Test()
+	var detailGets int
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/7") {
+			detailGets++
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"number":7,"title":"T","state":"open","additions":1,"deletions":1,"changed_files":1,"commits":1}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := viewRun(&ViewOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		BaseRepo:   func() (string, error) { return "owner/repo", nil },
+		Repository: "owner/repo",
+		Number:     7,
+		JSON:       true,
+	})
+	if err != nil {
+		t.Fatalf("viewRun() error = %v", err)
+	}
+	if detailGets != 1 {
+		t.Fatalf("PR detail GETs in JSON mode = %d, want 1 (no review-states fetch)", detailGets)
+	}
+}
+
+func TestReviewSummaryLineMatrix(t *testing.T) {
+	cases := []struct {
+		name   string
+		states *api.PRReviewStates
+		want   string
+	}{
+		{name: "nil states", states: nil, want: ""},
+		{name: "empty states", states: &api.PRReviewStates{}, want: ""},
+		{name: "reviewers only all statuses", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{
+				{Login: "alice", AcceptStatus: "true"},
+				{Login: "bob", AcceptStatus: "reject"},
+				{Login: "carol"},
+				{Login: "dave", AcceptStatus: "optional"},
+			},
+		}, want: "Review: 1 approved, 1 rejected, 2 pending"},
+		{name: "single status omits the rest", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{
+				{Login: "alice", AcceptStatus: "true"},
+				{Login: "bob", AcceptStatus: "true"},
+			},
+		}, want: "Review: 2 approved"},
+		{name: "testers only", states: &api.PRReviewStates{
+			Testers: []*api.PRReviewer{
+				{Login: "carol", Accept: true},
+				{Login: "dave"},
+			},
+		}, want: "Testers: 1 accepted, 1 pending"},
+		{name: "both groups joined", states: &api.PRReviewStates{
+			ApprovalReviewers: []*api.PRReviewer{{Login: "alice", AcceptStatus: "true"}},
+			Testers:           []*api.PRReviewer{{Login: "carol", Accept: true}},
+		}, want: "Review: 1 approved · Testers: 1 accepted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reviewSummaryLine(tc.states); got != tc.want {
+				t.Fatalf("reviewSummaryLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestViewRunReviewStatesFailureReturnsErrorInTextMode(t *testing.T) {
+	// The review-states fetch follows the enrichment pattern: the failure
+	// is reported on stderr, the PR details still render, no summary line
+	// appears, and the command exits non-zero ("PR data incomplete").
+	t.Setenv("GC_TOKEN", "test-token")
+	io, _, out, errOut := iostreams.Test()
+	detailGets := 0
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/7") {
+			detailGets++
+			w.Header().Set("Content-Type", "application/json")
+			if detailGets == 1 {
+				fmt.Fprint(w, `{"number":7,"title":"T","state":"open","additions":1,"deletions":1,"changed_files":1,"commits":1}`)
+				return
+			}
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := viewRun(&ViewOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		BaseRepo:   func() (string, error) { return "owner/repo", nil },
+		Repository: "owner/repo",
+		Number:     7,
+	})
+	if err == nil {
+		t.Fatal("viewRun() error = nil, want incomplete-data error")
+	}
+	for _, want := range []string{"PR data incomplete", "failed to get review states"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err.Error(), want)
+		}
+	}
+	if !strings.Contains(out.String(), "T #7") {
+		t.Fatalf("details should still render, stdout = %q", out.String())
+	}
+	if strings.Contains(out.String(), "Review:") {
+		t.Fatalf("summary line must be omitted on fetch failure, stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "Failed to get review states") {
+		t.Fatalf("stderr warning missing: %q", errOut.String())
+	}
+}
+
+func TestViewRunReviewStatesRenderSummaryInTextMode(t *testing.T) {
+	// End-to-end wiring: the second detail GET feeds the summary line in
+	// the rendered text output.
+	t.Setenv("GC_TOKEN", "test-token")
+	io, _, out, _ := iostreams.Test()
+	client := testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/7") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"number":7,"title":"T","state":"open","additions":1,"deletions":1,"changed_files":1,"commits":1,"approval_reviewers":[{"login":"alice","accept_status":"true"},{"login":"bob","accept_status":"reject"}],"testers":[{"login":"carol","accept":true}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	err := viewRun(&ViewOptions{
+		IO:         io,
+		HttpClient: func() (*http.Client, error) { return client, nil },
+		BaseRepo:   func() (string, error) { return "owner/repo", nil },
+		Repository: "owner/repo",
+		Number:     7,
+	})
+	if err != nil {
+		t.Fatalf("viewRun() error = %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Review: 1 approved, 1 rejected",
+		"Testers: 1 accepted",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("viewRun() output missing %q: %s", want, got)
+		}
 	}
 }

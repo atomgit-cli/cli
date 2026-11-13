@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/api"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/pr/render"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 )
@@ -181,21 +182,9 @@ func commentsRun(opts *CommentsOptions) error {
 
 		// Print nested replies (the API embeds each discussion's replies in
 		// the parent comment's reply array; replies carry no discussion_id
-		// of their own — the parent owns it).
-		if len(comment.Reply) > 0 {
-			fmt.Fprintf(opts.IO.Out, "   Replies (%d):\n", len(comment.Reply))
-			for _, reply := range comment.Reply {
-				replyAuthor := "unknown"
-				if reply.User != nil {
-					replyAuthor = reply.User.Login
-				}
-				replyID := cmdutil.FormatAPIID(reply.ID)
-				fmt.Fprintf(opts.IO.Out, "     ↳ ID: %s, %s at %s\n", cs.Cyan(replyID), cs.Bold(replyAuthor), formatTime(reply.CreatedAt))
-				for _, line := range strings.Split(reply.Body, "\n") {
-					fmt.Fprintf(opts.IO.Out, "       %s\n", line)
-				}
-			}
-		}
+		// of their own — the parent owns it). Shared rendering with
+		// `pr view --comments` (issue 652).
+		render.ReplyBlock(opts.IO.Out, cs, comment.Reply, "   ", formatTime)
 
 		fmt.Fprintf(opts.IO.Out, "\n")
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/api"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/pr/render"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 )
@@ -140,7 +141,7 @@ func renderApprovalReviewers(io *iostreams.IOStreams, cs *iostreams.ColorScheme,
 	}
 	for _, reviewer := range reviewers {
 		line := fmt.Sprintf("  %s %s (%s", reviewIcon(cs, reviewer.AcceptStatus),
-			reviewer.Login, acceptStatusText(reviewer.AcceptStatus))
+			reviewer.Login, render.AcceptStatusText(reviewer.AcceptStatus))
 		if reviewer.CodeOwner {
 			line += ", code owner"
 		}
@@ -179,18 +180,6 @@ func renderAssignees(io *iostreams.IOStreams, _ *iostreams.ColorScheme, assignee
 	}
 	for _, assignee := range assignees {
 		fmt.Fprintf(io.Out, "  %s\n", assignee.Login)
-	}
-}
-
-// acceptStatusText maps the API accept_status enum to display text.
-func acceptStatusText(status string) string {
-	switch status {
-	case "true":
-		return "approved"
-	case "reject":
-		return "rejected"
-	default:
-		return "pending"
 	}
 }
 
