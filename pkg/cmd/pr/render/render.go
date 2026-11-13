@@ -18,7 +18,7 @@ import (
 // header, then one "↳ ID: ..., author at time" line and indented body lines
 // per reply, all offset by indent. timeFn formats a reply's creation time.
 // Replies carry no discussion_id of their own; the parent comment owns it.
-func ReplyBlock(out io.Writer, cs *iostreams.ColorScheme, replies []api.PRCommentReply, indent string, timeFn func(api.FlexibleTime) string) {
+func ReplyBlock(out io.Writer, cs *iostreams.ColorScheme, replies []api.PRDiscussionReply, indent string, timeFn func(api.FlexibleTime) string) {
 	if len(replies) == 0 {
 		return
 	}

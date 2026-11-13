@@ -668,7 +668,7 @@ func TestRenderPRCommentsNestedReplies(t *testing.T) {
 			Body:      "Parent comment",
 			User:      &api.User{Login: "alice"},
 			CreatedAt: api.FlexibleTime{Time: now.Add(-2 * time.Hour)},
-			Reply: []api.PRCommentReply{
+			Reply: []api.PRDiscussionReply{
 				{ID: "199", Body: "reply body line 1\nreply body line 2", User: &api.User{Login: "bob"}, CreatedAt: api.FlexibleTime{Time: now.Add(-1 * time.Hour)}},
 			},
 		},

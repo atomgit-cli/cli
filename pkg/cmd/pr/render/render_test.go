@@ -11,7 +11,7 @@ import (
 func TestReplyBlock(t *testing.T) {
 	io, _, _, _ := iostreams.Test()
 	var buf bytes.Buffer
-	replies := []api.PRCommentReply{
+	replies := []api.PRDiscussionReply{
 		{ID: "11", Body: "line 1\nline 2", User: &api.User{Login: "bob"}, CreatedAt: api.FlexibleTime{}},
 		{ID: "12", Body: "solo", User: nil},
 	}
