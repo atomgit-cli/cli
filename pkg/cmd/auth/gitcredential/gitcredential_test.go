@@ -668,3 +668,13 @@ func TestGetCredentialSingleReadConsistentPair(t *testing.T) {
 		t.Fatalf("legacy reads used: ActiveUser=%d StoredToken=%d, want 0/0 (single-read contract)", fake.activeUserC, fake.storedTokC)
 	}
 }
+
+func TestNewCmdGitCredentialOptsOutOfUpdateLifecycle(t *testing.T) {
+	// The helper's stderr is passed through by git into git's own output,
+	// so the command opts out of the root update lifecycle (issue 647).
+	f := cmdutil.TestFactory()
+	cmd := NewCmdGitCredential(f, nil)
+	if cmd.Annotations[cmdutil.NoUpdateLifecycleAnnotation] == "" {
+		t.Fatalf("git-credential lacks the %q annotation", cmdutil.NoUpdateLifecycleAnnotation)
+	}
+}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"testing"
 
 	"gitcode.com/gitcode-cli/cli/pkg/testutil"
@@ -262,5 +263,69 @@ func TestResolvePRComment(t *testing.T) {
 	opts := &ResolvePRCommentOptions{Resolved: true}
 	if err := ResolvePRComment(client, "owner", "test-repo", 1, "d1", opts); err != nil {
 		t.Fatalf("ResolvePRComment() error = %v", err)
+	}
+}
+
+func TestReplyPRCommentEscapesDiscussionID(t *testing.T) {
+	// A discussionID with path/query metacharacters must be percent-encoded
+	// into a single path segment so it cannot alter the request path (the
+	// #316 owner/repo escaping applied to the remaining path segment).
+	var gotEscapedPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"d1","body":"reply","note_id":42}`))
+	})))
+	opts := &ReplyPRCommentOptions{Body: "reply"}
+	if _, err := ReplyPRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
+		t.Fatalf("ReplyPRComment() error = %v", err)
+	}
+	want := "/api/v5/repos/owner/test-repo/pulls/1/discussions/a%2Fb%20c%3Fd%23e/comments"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
+func TestResolvePRCommentEscapesDiscussionID(t *testing.T) {
+	var gotEscapedPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	})))
+	opts := &ResolvePRCommentOptions{Resolved: true}
+	if err := ResolvePRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
+		t.Fatalf("ResolvePRComment() error = %v", err)
+	}
+	want := "/api/v5/repos/owner/test-repo/pulls/1/comments/a%2Fb%20c%3Fd%23e"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
+func TestGetPRReviewStates(t *testing.T) {
+	var gotPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		// approval_reviewers present, testers and assignees absent (null) to
+		// exercise the nil-to-empty normalization.
+		_, _ = w.Write([]byte(`{"approval_reviewers":[{"id":"7","login":"alice","accept_status":"true"}]}`))
+	})))
+	states, err := GetPRReviewStates(client, "owner", "test-repo", 3)
+	if err != nil {
+		t.Fatalf("GetPRReviewStates() error = %v", err)
+	}
+	wantPath := "/api/v5/repos/owner/test-repo/pulls/3"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if len(states.ApprovalReviewers) != 1 || states.ApprovalReviewers[0].Login != "alice" {
+		t.Fatalf("ApprovalReviewers = %+v, want one alice", states.ApprovalReviewers)
+	}
+	if states.Testers == nil || len(states.Testers) != 0 {
+		t.Fatalf("Testers = %#v, want non-nil empty slice", states.Testers)
+	}
+	if states.Assignees == nil || len(states.Assignees) != 0 {
+		t.Fatalf("Assignees = %#v, want non-nil empty slice", states.Assignees)
 	}
 }

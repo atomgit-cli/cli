@@ -146,6 +146,7 @@ TTY 场景下默认文本输出可保留既有体验。新增 JSON 输出视为�
 - `doctor install --json` 完全离线、无需认证，stdout 只包含稳定诊断对象；不得读取认证配置或 Token
 - `update --check --json` / `update --json` 字段固定为 `status`、`distribution`、`current`、`latest`、`message`
 - 后台更新摘要只写 stderr，不得污染业务命令 JSON stdout
+- stderr 被外部程序透传给用户的协议命令（如 `auth git-credential`，git 会把 helper stderr 混入 git 自身输出）必须完全跳过更新生命周期：以 `gc/no-update-lifecycle` 命令注解声明（presence 语义，任意非空值生效），root 的 PersistentPostRun 与错误路径两处统一检查后跳过（issue #647 模式）
 - `CI=true`、`--no-interactive`、`--no-update-check`、`GC_NO_UPDATE_CHECK=1` 禁用隐式自动应用；显式 `update` 仍按用户请求执行
 - registry 超时、离线、权限失败、锁冲突和回滚不得改变已经完成的业务命令退出码，也不得产生交互式提权提示
 
