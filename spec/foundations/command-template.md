@@ -138,7 +138,7 @@ func getEnvToken() string {
 
 ## 帮助文本形态（内联与包级 var）
 
-帮助文本有两种规范形态，按一条机械判据选择：**帮助文本长到会把构造器推向 50 行函数上限时，提取为包级 var；否则内联**（见上方基本模板的默认形态）。
+帮助文本有两种规范形态，按一条机械判据选择：**帮助文本长到会使构造器超过 50 行函数上限时，提取为包级 var；否则内联**（见上方基本模板的默认形态）。
 
 包级 var 形态（长帮助文本的标准逃生通道，先例：`pkg/cmd/auth/gitcredential/gitcredential.go`）：
 
@@ -170,7 +170,7 @@ func NewCmdGitCredential(f *cmdutil.Factory, runF func(*GitCredentialOptions) er
 
 规则：
 
-- 变量命名 `<command>Long` / `<command>Example`，放在文件顶部（Options 结构体前后），以符号名开头的注释说明提取动机
+- 变量命名 `<command>Long` / `<command>Example`，放在文件顶部（Options 结构体前后），以符号名开头的注释说明提取动机（先例 gitcredential 的两个 var 早于本注释要求，补注释属可选清理）
 - `coding-standards.md` 的"单个函数不超过 50 行"**保持严格**：本形态是标准逃生通道，构造器没有任何豁免——不要为长文本放宽上限
 - 存量内联超限的构造器（如 `NewCmdLogin`）按本判据属可选清理项，不强制回填；**新命令必须遵循本判据**，不得新增内联超限构造器
 
