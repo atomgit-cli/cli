@@ -424,3 +424,52 @@ func TestLogoutCmdEmptyFlagUsernameExit2(t *testing.T) {
 		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitUsage)
 	}
 }
+
+func TestLogoutRunUnknownUsernameExit3WithAvailableList(t *testing.T) {
+	// A typo must read as "not logged out", not as success: align with the
+	// switch family pattern (exit 3 + available accounts).
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	auth := cfg.Authentication()
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	io, _, _, _ := iostreams.Test()
+	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Username: "charlie", Yes: true})
+	if err == nil {
+		t.Fatal("logoutRun() error = nil, want not found")
+	}
+	if cmdutil.ExitCode(err) != cmdutil.ExitNotFound {
+		t.Fatalf("ExitCode() = %d, want %d", cmdutil.ExitCode(err), cmdutil.ExitNotFound)
+	}
+	for _, want := range []string{"charlie", "available", "alice", "bob"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q mentioned", err.Error(), want)
+		}
+	}
+	// Nothing was removed.
+	if users := auth.LoginUsers("gitcode.com"); len(users) != 2 {
+		t.Fatalf("users = %v, want both intact", users)
+	}
+}
+
+func TestLogoutRunTargetedEchoesUsername(t *testing.T) {
+	// The confirmation prompt and success message echo the target
+	// username when one is named (intent alignment, issue 658 review).
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	if _, err := cfg.Authentication().Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	io, _, out, _ := iostreams.Test()
+	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Username: "bob", Yes: true})
+	if err != nil {
+		t.Fatalf("logoutRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "for bob on gitcode.com") {
+		t.Fatalf("success message missing username: %q", out.String())
+	}
+}
