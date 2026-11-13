@@ -95,3 +95,22 @@ func TestMutateStateLockedEmptyPathSilentNoCwdWrite(t *testing.T) {
 		t.Fatalf("cwd polluted with %d entries: %v", len(entries), entries)
 	}
 }
+
+func TestStateRootCheckedNormalHomeBranch(t *testing.T) {
+	// The default HOME branch (no XDG, no GC_STATE_DIR) is the normal
+	// production form; it must resolve under the fake home.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GC_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses LOCALAPPDATA")
+	}
+
+	root, err := stateRootChecked()
+	if err != nil {
+		t.Fatalf("stateRootChecked() error = %v with HOME set", err)
+	}
+	if !filepath.IsAbs(root) {
+		t.Fatalf("stateRootChecked() = %q, want absolute", root)
+	}
+}

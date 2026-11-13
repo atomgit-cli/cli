@@ -239,6 +239,10 @@ func acquireStateLock(path string) (*os.File, error) {
 // GC_STATE_DIR keeps the legacy flat file; a legacy manifest without a
 // package name falls back to the flat path too, staying consistent with
 // the old helper copy that writes the same flat file.
+//
+// Returns an empty string when no state location can be resolved (Unix
+// without HOME/XDG_STATE_HOME/GC_STATE_DIR, issue 671); callers must
+// treat that as "no state" and must never create directories for it.
 func StatePath(manifest *Manifest) string {
 	if dir := os.Getenv("GC_STATE_DIR"); dir != "" {
 		return filepath.Join(dir, "update-state.json")
