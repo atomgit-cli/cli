@@ -215,6 +215,7 @@ func SetFlagEnum(cmd *cobra.Command, name string, values ...string) {
 ### 函数长度
 - 单个函数不超过 50 行
 - 超过时应拆分为多个函数
+- 帮助文本长到会突破上限时，用包级 var 形态提取（见命令开发模板"帮助文本形态"一节），构造器不设豁免
 
 ### 注释
 - 导出的函数、类型必须有注释
