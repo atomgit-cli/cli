@@ -1,6 +1,7 @@
 package installupdate
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,10 +17,13 @@ func TestStateRootAbsoluteWhenXDGSet(t *testing.T) {
 	t.Setenv("GC_STATE_DIR", "")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if runtime.GOOS == "windows" {
-		t.Skip("windows uses LOCALAPPDATA; the relative fallback is Unix-only")
+		t.Skip("windows uses LOCALAPPDATA; the Unix fail-closed path is not exercised here")
 	}
 
-	root := stateRoot()
+	root, err := stateRootChecked()
+	if err != nil {
+		t.Fatalf("stateRootChecked() error = %v with XDG set", err)
+	}
 	if !filepath.IsAbs(root) {
 		t.Fatalf("stateRoot() = %q, want an absolute path (no silent cwd writes)", root)
 	}
@@ -30,7 +34,7 @@ func TestStateRootFailsClosedWithoutHome(t *testing.T) {
 	t.Setenv("GC_STATE_DIR", "")
 	t.Setenv("XDG_STATE_HOME", "")
 	if runtime.GOOS == "windows" {
-		t.Skip("windows uses LOCALAPPDATA; the relative fallback is Unix-only")
+		t.Skip("windows uses LOCALAPPDATA; the Unix fail-closed path is not exercised here")
 	}
 
 	_, err := stateRootChecked()
@@ -41,5 +45,53 @@ func TestStateRootFailsClosedWithoutHome(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want guidance mentioning %s", err.Error(), want)
 		}
+	}
+}
+
+func TestStatePathEmptyWhenUnresolvable(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("GC_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses LOCALAPPDATA; the Unix fail-closed path is not exercised here")
+	}
+	if got := StatePath(nil); got != "" {
+		t.Fatalf("StatePath(nil) = %q, want \"\" (no cwd-relative path)", got)
+	}
+}
+
+func TestMutateStateLockedEmptyPathSilentNoCwdWrite(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("GC_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses LOCALAPPDATA; the Unix fail-closed path is not exercised here")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	called := false
+	ok := mutateStateLocked("", func(*updateState) { called = true })
+	if ok {
+		t.Fatal("mutateStateLocked(\"\") = true, want false (fully silent degradation)")
+	}
+	if called {
+		t.Fatal("mutate callback ran for an empty path; want it skipped entirely")
+	}
+	// Nothing may appear in the current directory.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("cwd polluted with %d entries: %v", len(entries), entries)
 	}
 }

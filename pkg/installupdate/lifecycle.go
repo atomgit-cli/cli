@@ -148,10 +148,12 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 
 func mutateStateLocked(path string, mutate func(*updateState)) bool {
 	if path == "" {
-		// No resolvable state location (issue 671); skip rather than
-		// creating lock files in the current working directory.
-		mutate(&updateState{})
-		return true
+		// No resolvable state location (issue 671); degrade fully
+		// silently — no lock files in the cwd, no state mutation. The
+		// alternative (mutating an in-memory state) would repeat the
+		// first-run notice and the detached-check attempt on every
+		// command, since nothing is ever persisted.
+		return false
 	}
 	lockPath := path + ".lock"
 	lock, err := acquireStateLock(lockPath)
@@ -254,12 +256,15 @@ func StatePath(manifest *Manifest) string {
 	return filepath.Join(root, "update-state.json")
 }
 
-// stateRootChecked returns the state directory, failing closed when the
-// home directory is unavailable and no override is set. The old fallback
-// silently produced a RELATIVE path (.local/state/gitcode-cli), so
-// acquireStateLock's MkdirAll created the tree in whatever directory the
-// command ran in — cron/systemd/container environments without HOME
-// polluted their cwd with state fragments (issue 671).
+// stateRootChecked returns the state directory, failing closed on Unix
+// when the home directory is unavailable and no override is set. The old
+// fallback silently produced a RELATIVE path (.local/state/gitcode-cli),
+// so acquireStateLock's MkdirAll created the tree in whatever directory
+// the command ran in — cron/systemd/container environments without HOME
+// polluted their cwd with state fragments (issue 671). Windows keeps the
+// LOCALAPPDATA/home precedence (matching the JS helper); a Windows
+// machine missing both env vars still yields a relative path — tracked
+// as a follow-up since it matches the helper's own behavior.
 func stateRootChecked() (string, error) {
 	if runtime.GOOS == "windows" {
 		home, _ := os.UserHomeDir()
@@ -273,14 +278,6 @@ func stateRootChecked() (string, error) {
 		return "", fmt.Errorf("cannot resolve the state directory: HOME is not set; set HOME, XDG_STATE_HOME, or GC_STATE_DIR")
 	}
 	return filepath.Join(home, ".local", "state", "gitcode-cli"), nil
-}
-
-// stateRoot is the legacy entry point kept for callers that cannot
-// propagate an error; it degrades to the empty string, which callers
-// already treat as "no state" (no directories are created).
-func stateRoot() string {
-	root, _ := stateRootChecked()
-	return root
 }
 
 // windowsStateRoot mirrors the JS stateDir precedence: LOCALAPPDATA wins,
