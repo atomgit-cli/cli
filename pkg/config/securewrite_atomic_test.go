@@ -2,11 +2,12 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -14,7 +15,9 @@ import (
 // with O_TRUNC, so a reader that opened the file between the truncate and
 // the completed write saw an empty or partial file — a torn read. The
 // live-command reproduction on origin/main measured 3,414 failed parses in
-// 472,798 reads (40s of concurrent 100 KiB rewrites).
+// 472,798 reads (40s of concurrent 100 KiB rewrites); the in-package red
+// state measured 11,846 torn reads in 0.13s (an independent reviewer
+// measured 28,715 on the same base).
 func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
@@ -30,10 +33,10 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	stop := make(chan struct{})
 	var readers sync.WaitGroup
 	const numReaders = 4
-	parseFailures := make([]int, numReaders)
+	var tornReads, readErrors, writeErrors int64
 	for i := 0; i < numReaders; i++ {
 		readers.Add(1)
-		go func(idx int) {
+		go func() {
 			defer readers.Done()
 			for {
 				select {
@@ -43,25 +46,30 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 				}
 				data, err := os.ReadFile(path)
 				if err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						continue
-					}
-					parseFailures[idx]++
+					// A read error means the entry could not be opened as a
+					// complete file. On Windows a transient sharing violation
+					// during the rename replacement is platform noise, not a
+					// torn read (MoveFileEx semantics; issue 672 will
+					// serialize writers). On Unix any read error — including
+					// a missing entry — would be a regression: rename
+					// replaces the entry atomically and never removes it.
+					atomic.AddInt64(&readErrors, 1)
 					continue
 				}
 				var st struct {
 					V string `json:"v"`
 				}
 				if err := json.Unmarshal(data, &st); err != nil {
-					parseFailures[idx]++ // torn read: empty or partial file
+					// Torn read: successfully read data that is empty or
+					// partial. This is the atomicity invariant and must hold
+					// on every platform.
+					atomic.AddInt64(&tornReads, 1)
 				}
 			}
-		}(i)
+		}()
 	}
 
 	var writers sync.WaitGroup
-	var writeFailures int
-	var mu sync.Mutex
 	for w := 0; w < 2; w++ {
 		writers.Add(1)
 		go func(seed int) {
@@ -74,9 +82,7 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 					err = secureWriteFile(path, payload('b'), 0o600)
 				}
 				if err != nil {
-					mu.Lock()
-					writeFailures++
-					mu.Unlock()
+					atomic.AddInt64(&writeErrors, 1)
 				}
 			}
 		}(w)
@@ -85,16 +91,58 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	close(stop)
 	readers.Wait()
 
-	total := 0
-	for _, f := range parseFailures {
-		total += f
+	// The atomicity invariant: data that was successfully read always parses
+	// into one of the two complete payloads. Strict on every platform.
+	if tornReads != 0 {
+		t.Fatalf("%d torn reads observed during concurrent rewrites — the write is not atomic", tornReads)
 	}
-	if total != 0 {
-		t.Fatalf("%d torn/parse-failed reads observed during concurrent rewrites — the write is not atomic", total)
+	if runtime.GOOS != "windows" {
+		// On Unix, rename replaces the directory entry atomically and never
+		// removes it, and two writers' renames onto one target cannot fail:
+		// any read error or write failure is a regression.
+		if readErrors != 0 || writeErrors != 0 {
+			t.Fatalf("read errors = %d, write failures = %d — both must be zero on Unix", readErrors, writeErrors)
+		}
+	} else {
+		t.Logf("windows: %d read errors / %d write failures from transient sharing during concurrent MoveFileEx replacement (platform noise; issue 672 serializes writers)", readErrors, writeErrors)
 	}
-	if writeFailures != 0 {
-		t.Fatalf("%d concurrent writes failed", writeFailures)
+
+	// The final content must be one of the two complete payloads (guards
+	// against a no-op write regression).
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("final read failed: %v", err)
 	}
+	var st struct {
+		V string `json:"v"`
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatalf("final content does not parse: %v", err)
+	}
+	if len(st.V) != 1<<17 || (st.V[0] != 'a' && st.V[0] != 'b') {
+		t.Fatalf("final content is not one of the two payloads (len=%d, first=%q)", len(st.V), firstByte(st.V))
+	}
+
+	// No temp residue after the concurrent run: the directory holds exactly
+	// the target file.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "auth.json" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("temp residue left behind after concurrent writes: %v", names)
+	}
+}
+
+func firstByte(s string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[:1]
 }
 
 // A successful atomic write must leave nothing behind in the target

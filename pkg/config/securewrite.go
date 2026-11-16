@@ -28,14 +28,14 @@ import (
 // for credential redirection — the worst case in the Lstat→rename gap is
 // the link being atomically replaced, never written through. Threat model
 // assumptions documented in .loop/deliveries/issue-400-design.md and
-// re-reviewed for the rename path in issue 663: parent-directory symlink
-// components redirect the file exactly as they did for the in-place write
-// (unchanged, mitigated by the 0700 config dir); hard links are replaced
-// rather than followed.
+// re-reviewed for the rename path in a comment on issue 400:
+// parent-directory symlink components redirect the file exactly as they
+// did for the in-place write (unchanged, mitigated by the 0700 config
+// dir); hard links are replaced rather than followed.
 //
-// Failure cleanup: a write that cannot land removes its temp file — a
-// leftover would hold the full payload (credentials) at 0600 in the config
-// directory.
+// Failure cleanup: a write that cannot land attempts to remove its temp
+// file — a leftover would hold the full payload (credentials) at 0600 in
+// the config directory.
 func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 	if li, err := os.Lstat(path); err == nil && li.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write to symlink: %s", path)
