@@ -146,7 +146,7 @@ lark-cli auth login --scope "im:message.send_as_user"
 
 - 飞书令牌始终由 `lark-cli` keychain 管理，`gc` 不读取 `auth.json`/`access_token`/`refresh_token`，不打印飞书凭证。
 - `lark-cli` 子进程不继承 `gc` 的 stdin，且环境中的 `GC_TOKEN`/`GITCODE_TOKEN` 会被剥离（纵深防御）。
-- 默认群配置 `~/.config/gc/lark.json` 复用 `config.SecureWriteFile` 写入：拒绝符号链接、`0600` 文件/`0700` 目录、temp+rename 原子替换（并发读者只见完整旧文件或完整新文件）。
+- 默认群配置 `~/.config/gc/lark.json` 复用 `config.SecureWriteFile` 写入：拒绝符号链接、`0600` 文件/`0700` 目录、temp+rename 原子替换（成功读到的数据必为完整旧文件或完整新文件）。
 - 不得把飞书令牌、密钥写入 issue/PR/comment 内容。`gc lark send` 的 `--text`/`--markdown`/`--body-file` 正文在发送前会扫描当前 `GC_TOKEN`/`GITCODE_TOKEN` 值。
 
 ## 参考

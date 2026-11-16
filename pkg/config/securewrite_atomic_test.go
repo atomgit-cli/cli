@@ -104,6 +104,14 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 			t.Fatalf("read errors = %d, write failures = %d — both must be zero on Unix", readErrors, writeErrors)
 		}
 	} else {
+		// Bounded exemption: total breakage is caught by the seed write, but
+		// a regression that fails only under concurrent read load must not
+		// stay green either — at least one of the 600 renames has to
+		// succeed. P(all 600 hit a sharing violation) is effectively zero
+		// under this load, so the bound cannot flake.
+		if writeErrors >= 600 {
+			t.Fatalf("all %d concurrent writes failed on Windows — the rename path is broken under load, not just noisy", writeErrors)
+		}
 		t.Logf("windows: %d read errors / %d write failures from transient sharing during concurrent MoveFileEx replacement (platform noise; issue 672 serializes writers)", readErrors, writeErrors)
 	}
 

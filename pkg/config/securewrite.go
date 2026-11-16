@@ -12,11 +12,14 @@ import (
 // Atomicity: the payload goes to a freshly created temp file in the target's
 // directory (os.CreateTemp: O_EXCL, random name, 0600 — immune to symlink
 // planting), is synced, and is renamed over the target. rename never follows
-// a final-component symlink — it replaces the directory entry — so a
-// concurrent reader observes either the complete old file or the complete
+// a final-component symlink — it replaces the directory entry — so data a
+// reader successfully reads is always the complete old file or the complete
 // new file, never the empty/partial file the previous O_TRUNC in-place
 // write exposed mid-rewrite (issue 663; live repro: 3,414 failed parses in
-// 472,798 reads on origin/main).
+// 472,798 reads on origin/main). On Windows a reader or external process
+// holding the target open can transiently fail the replacing rename with a
+// sharing violation — a loud, retryable error, never torn data (see the
+// spec's credential-write constraints for the full contract).
 //
 // Permissions: the temp file is chmod'ed to perm before the rename, so the
 // final file lands with the requested mode regardless of umask, and the
@@ -35,7 +38,9 @@ import (
 //
 // Failure cleanup: a write that cannot land attempts to remove its temp
 // file — a leftover would hold the full payload (credentials) at 0600 in
-// the config directory.
+// the config directory, and removal itself can fail (e.g. an external
+// process holding the temp open on Windows); both crash and failed-cleanup
+// leftovers are covered by the spec's recorded residual.
 func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 	if li, err := os.Lstat(path); err == nil && li.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write to symlink: %s", path)
@@ -69,7 +74,11 @@ func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("failed to close %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("failed to rename %s to %s: %w", tmp, path, err)
+		// The message names only the target: the temp file is already gone
+		// by the time this surfaces (cleaned up below), so naming it would
+		// send anyone following the error on a hunt for a file that no
+		// longer exists.
+		return fmt.Errorf("failed to replace %s: %w", path, err)
 	}
 
 	landed = true
