@@ -31,8 +31,11 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	}
 
 	stop := make(chan struct{})
-	var readers sync.WaitGroup
 	const numReaders = 4
+	const numWriters = 2
+	const writesPerWriter = 300
+	totalWrites := int64(numWriters * writesPerWriter)
+	var readers sync.WaitGroup
 	var tornReads, readErrors, writeErrors int64
 	for i := 0; i < numReaders; i++ {
 		readers.Add(1)
@@ -70,11 +73,11 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	}
 
 	var writers sync.WaitGroup
-	for w := 0; w < 2; w++ {
+	for w := 0; w < numWriters; w++ {
 		writers.Add(1)
 		go func(seed int) {
 			defer writers.Done()
-			for i := 0; i < 300; i++ {
+			for i := 0; i < writesPerWriter; i++ {
 				var err error
 				if (i+seed)%2 == 0 {
 					err = secureWriteFile(path, payload('a'), 0o600)
@@ -106,10 +109,11 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 	} else {
 		// Bounded exemption: total breakage is caught by the seed write, but
 		// a regression that fails only under concurrent read load must not
-		// stay green either — at least one of the 600 renames has to
-		// succeed. P(all 600 hit a sharing violation) is effectively zero
-		// under this load, so the bound cannot flake.
-		if writeErrors >= 600 {
+		// stay green either — at least one rename has to succeed. The bound
+		// derives from the loop constants above, so tuning them cannot let
+		// it silently go inert. P(every rename hits a sharing violation) is
+		// effectively zero under this load, so it cannot flake.
+		if writeErrors >= totalWrites {
 			t.Fatalf("all %d concurrent writes failed on Windows — the rename path is broken under load, not just noisy", writeErrors)
 		}
 		t.Logf("windows: %d read errors / %d write failures from transient sharing during concurrent MoveFileEx replacement (platform noise; issue 672 serializes writers)", readErrors, writeErrors)
