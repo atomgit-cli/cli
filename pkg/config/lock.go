@@ -47,7 +47,7 @@ func lockConfigDir(dir string) (release func(), err error) {
 	}
 	if err := lockFile(f); err != nil {
 		_ = f.Close()
-		return nil, fmt.Errorf("could not acquire the config lock at %s within %s (another gc process may be stuck holding it): %w", path, lockTimeout, err)
+		return nil, fmt.Errorf("could not acquire the config lock at %s within %s (another gc process may be stuck holding it — the lock releases when that process exits, so find and finish or kill it): %w", path, lockTimeout, err)
 	}
 	sweepStaleTemps(dir)
 	return func() { _ = f.Close() }, nil
