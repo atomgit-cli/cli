@@ -53,12 +53,23 @@ func lockConfigDir(dir string) (release func(), err error) {
 	return func() { _ = f.Close() }, nil
 }
 
-// LockConfigDir is the exported form of lockConfigDir for sibling packages
-// whose read-modify-write paths must join the same cross-process lock as
-// pkg/config's. Issue 672: one lock guards all three files (auth.json,
-// config.json, lark.json) — they share the directory, the resolution
-// sentinel, and the write funnel, so larkcli must not race outside the
-// lock.
+// LockConfigDir acquires the directory-level cross-process write lock for
+// dir and returns the release function. It blocks up to ~10 seconds
+// (lockTimeout), then fails loudly with an error naming the lock path.
+// Side effects: it creates dir (0700, MkdirAll + Chmod) if missing, creates
+// the .gc-lock file (0600) inside it, and removes .gc-tmp-* entries older
+// than ~60 seconds in that directory (stale crash/cleanup residue). Release
+// closes the lock file, which drops the lock — calling release more than
+// once is safe; process death also releases. An empty dir fails with the
+// raw MkdirAll error, so callers must resolve the config directory first
+// (ResolveConfigDir / the per-method unresolvable checks).
+//
+// Issue 672: one lock guards all three files (auth.json, config.json,
+// lark.json) — they share the directory, the resolution sentinel, and the
+// write funnel, so sibling read-modify-write paths (pkg/larkcli) must not
+// race outside the lock. Acquire the lock only AFTER the unresolvable-dir
+// outcome is decided: the lock file lives in the config dir, and acquiring
+// it first would mask ErrNoConfigDir with a lock-creation error.
 func LockConfigDir(dir string) (release func(), err error) {
 	return lockConfigDir(dir)
 }
