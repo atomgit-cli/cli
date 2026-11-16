@@ -138,14 +138,12 @@ func switchRun(opts *SwitchOptions) error {
 	}
 
 	if !slices.Contains(users, username) {
-		msg := fmt.Sprintf("account %q is not stored for %s; available: %s", username, hostname, strings.Join(users, ", "))
-		if len(users) == 0 {
-			// An empty list would render a dangling "available: "
-			// trailer — every fresh-install named switch hits this
-			// (found in review of the issue 676 fix).
-			msg = fmt.Sprintf("account %q is not stored for %s; no accounts are stored on this host", username, hostname)
-		}
-		return cmdutil.NewNotFoundError(msg, nil)
+		// The empty-list case cannot occur here: the caller returns early
+		// above with "no stored accounts" when the list is empty (an
+		// earlier review round added a dead empty branch here — removed;
+		// logout.go keeps the real fix, its precheck lacks the early
+		// return).
+		return cmdutil.NewNotFoundError(fmt.Sprintf("account %q is not stored for %s; available: %s", username, hostname, strings.Join(users, ", ")), nil)
 	}
 
 	if err := authCfg.SwitchUser(hostname, username); err != nil {
