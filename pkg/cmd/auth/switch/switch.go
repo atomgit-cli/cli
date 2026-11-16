@@ -138,6 +138,12 @@ func switchRun(opts *SwitchOptions) error {
 	}
 
 	if !slices.Contains(users, username) {
+		// The empty-list case cannot occur here: the same function
+		// returns early above with "no stored accounts" when the list is
+		// empty (an
+		// earlier review round added a dead empty branch here — removed;
+		// logout.go keeps the real fix, its precheck lacks the early
+		// return).
 		return cmdutil.NewNotFoundError(fmt.Sprintf("account %q is not stored for %s; available: %s", username, hostname, strings.Join(users, ", ")), nil)
 	}
 

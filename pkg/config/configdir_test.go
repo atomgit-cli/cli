@@ -104,20 +104,30 @@ func TestConfigReadsEmptyAndIgnoresLegacyCwdWhenDirUnresolvable(t *testing.T) {
 	}
 }
 
-// The unresolvable contracts of the auth writers that do NOT fail with
-// ErrNoConfigDir (issue 675 semantics): Logout is a no-op success and
-// SwitchUser reports the empty-state "host not found" — pinned because
-// the lock refactor moved these checks ahead of the empty reads that
-// used to produce the same outcomes (found in review of the issue 672
-// fix; previously covered only by code equivalence).
+// The unresolvable contracts of the auth writers beyond the plain
+// ErrNoConfigDir shape (issue 675 semantics; Logout flipped from a
+// pinned no-op to fail-closed by issue 676 — the pre-flip semantics
+// was itself pinned here by !644): Logout fails closed with
+// ErrNoConfigDir — a logout never reports success without grounds
+// (issue 676) — and SwitchUser reports the empty-state "host not
+// found". Pinned because the lock refactor moved these checks ahead of
+// the empty reads that used to produce the same outcomes (found in
+// review of the issue 672 fix; previously covered only by code
+// equivalence).
 func TestAuthWriterUnresolvableContracts(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("GC_CONFIG_DIR", "")
 
 	auth := New().Authentication()
-	if err := auth.Logout("gitcode.com", "anyone"); err != nil {
-		t.Fatalf("Logout() on unresolvable dir error = %v, want nil no-op", err)
+	// Issue 676: a logout must never report success without grounds —
+	// with no resolvable config location there is nothing to clear and no
+	// way to know whether anything is stored, so it fails closed like
+	// every other write (mirrors Login's never-silently-skip contract).
+	if err := auth.Logout("gitcode.com", "anyone"); err == nil {
+		t.Fatal("Logout() on unresolvable dir error = nil, want ErrNoConfigDir")
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Logout() on unresolvable dir error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 	if err := auth.SwitchUser("gitcode.com", "anyone"); err == nil || err.Error() != "host not found" {
 		t.Fatalf("SwitchUser() on unresolvable dir error = %v, want host not found", err)
@@ -126,6 +136,20 @@ func TestAuthWriterUnresolvableContracts(t *testing.T) {
 
 // Writes in an unresolvable environment must fail with guidance and must
 // not create anything in the current directory.
+// Contrast case for issue 676's fail-closed contract: an unresolvable
+// dir errors, but a RESOLVABLE dir with a genuinely empty state is still
+// the grounded no-op success (the file was resolved and confirmed absent
+// — nothing was hidden by a broken environment). Pins the host==nil →
+// nil branch that the unresolvable guard now sits in front of.
+func TestLogoutEmptyStateInResolvableDirIsStillNoOpSuccess(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	if err := New().Authentication().Logout("gitcode.com", ""); err != nil {
+		t.Fatalf("Logout() on empty but resolvable state error = %v, want nil no-op", err)
+	}
+}
+
 func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
@@ -169,6 +193,12 @@ func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 		t.Fatalf("Write() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
 	} else if !errors.Is(err, ErrNoConfigDir) {
 		t.Fatalf("Write() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
+	}
+
+	if err := auth.Logout("gitcode.com", ""); err == nil {
+		t.Fatal("Logout() error = nil with an unresolvable config dir")
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Logout() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 
 	entries, err := os.ReadDir(dir)

@@ -11,8 +11,9 @@ import (
 const authStateVersion = 1
 
 // errHostNotFound is the reads-as-empty result of auth state operations
-// that require a stored host (issue 675 semantics: an unresolvable config
-// dir behaves exactly like a fresh installation).
+// that require a stored host (issue 675 semantics: reads on an
+// unresolvable config dir behave exactly like a fresh installation —
+// writes fail closed instead, issue 676).
 var errHostNotFound = errors.New("host not found")
 
 // authConfig implements AuthConfig interface
@@ -205,9 +206,11 @@ func (a *authConfig) Logout(hostname, username string) error {
 		hostname = "gitcode.com"
 	}
 	if a.config.configDir == "" {
-		// Reads-as-empty: nothing is stored, so this is a no-op success
-		// (issue 675 semantics; issue 676 tracks the honesty follow-up).
-		return nil
+		// Fail closed: with no resolvable config location there is nothing
+		// to clear and no way to know whether anything is stored — a
+		// logout must never report success without grounds (issue 676,
+		// mirroring Login's never-silently-skip contract).
+		return ErrNoConfigDir
 	}
 	release, err := lockConfigDir(a.config.configDir)
 	if err != nil {

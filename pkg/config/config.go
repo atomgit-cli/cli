@@ -80,9 +80,10 @@ type AuthConfig interface {
 	// ErrNoConfigDir when the config directory cannot be resolved; the
 	// stored state is never silently skipped.
 	Login(hostname, username, token, gitProtocol string, secureStorage bool) (bool, error)
-	// Logout removes authentication for a host. Reads an unresolvable
-	// directory as an empty state, so a logout of a host that is not
-	// stored is a successful no-op.
+	// Logout removes authentication for a host. A logout of a host that
+	// is not stored (in a resolvable directory) is a successful no-op;
+	// an unresolvable config directory fails closed with ErrNoConfigDir —
+	// a logout never reports success without grounds (issue 676).
 	Logout(hostname, username string) error
 	// SwitchUser switches the active user for a host. Reads an
 	// unresolvable directory as an empty state, so switching on a host
@@ -108,7 +109,8 @@ type config struct {
 // ErrNoConfigDir is returned by every write path when the config directory
 // cannot be resolved (no GC_CONFIG_DIR and no home directory). Resolution
 // never falls back to a cwd-relative path; callers surface this error so a
-// login can never report success without persisting anything. Sibling
+// login can never report success without persisting anything, and a
+// logout can never report success without grounds (issue 676). Sibling
 // packages that persist under the same directory (pkg/larkcli) reuse this
 // sentinel instead of duplicating the guidance text. The message names the
 // home variable per platform: os.UserHomeDir reads HOME on Unix and

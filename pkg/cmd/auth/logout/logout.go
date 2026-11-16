@@ -151,8 +151,14 @@ func logoutRun(opts *LogoutOptions) error {
 	if opts.Username != "" {
 		users := authCfg.LoginUsers(opts.Hostname)
 		if !slices.Contains(users, opts.Username) {
-			return cmdutil.NewNotFoundError(
-				fmt.Sprintf("account %q is not stored for %s; available: %s", opts.Username, opts.Hostname, strings.Join(users, ", ")), nil)
+			msg := fmt.Sprintf("account %q is not stored for %s; available: %s", opts.Username, opts.Hostname, strings.Join(users, ", "))
+			if len(users) == 0 {
+				// An empty list would render a dangling "available: "
+				// trailer — every fresh-install named logout hits this
+				// (found in review of the issue 676 fix).
+				msg = fmt.Sprintf("account %q is not stored for %s; no accounts are stored on this host", opts.Username, opts.Hostname)
+			}
+			return cmdutil.NewNotFoundError(msg, nil)
 		}
 	}
 
