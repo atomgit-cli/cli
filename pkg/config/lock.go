@@ -27,11 +27,12 @@ const lockFileName = ".gc-lock"
 // lockConfigDir acquires the directory-level cross-process write lock for
 // the gc config directory and returns the release function. The lock file
 // is created if missing (0600); MkdirAll + Chmod(0700) happen here, so
-// every read-modify-write path shares one dir-ensuring entry point (issue
-// 672 hoisted the per-write duplication here). After acquiring, stale
-// .gc-tmp-* leftovers older than tempSweepAge are removed. Closing the lock
-// file releases the platform lock; process death also releases it — a
-// crashed holder cannot deadlock later runs.
+// every read-modify-write path passes through one dir-ensuring entry point
+// (issue 672; the state writers keep their own idempotent MkdirAll copies
+// as defense in depth). After acquiring, stale .gc-tmp-* leftovers older
+// than tempSweepAge are removed. Closing the lock file releases the
+// platform lock; process death also releases it — a crashed holder cannot
+// deadlock later runs.
 func lockConfigDir(dir string) (release func(), err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err

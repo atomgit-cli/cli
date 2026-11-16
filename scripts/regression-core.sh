@@ -324,5 +324,31 @@ else
   echo "skipped: set GC_REGRESSION_WRITE=1 plus GC_REGRESSION_PR_REPO and GC_REGRESSION_PR_HEAD to run write-path regression"
 fi
 
+log "Concurrent Write Lock (issue 672)"
+# Cross-process matrix the in-process unit tests cannot provide (flock vs a
+# process-local mutex is indistinguishable in-process): two real binaries
+# racing logout of different users must lose neither deletion.
+LOCKDIR=$(mktemp -d)
+for i in $(seq 1 10); do
+  python3 - <<PYSEED
+import json
+users = {"alice": {"token": "fake-alice"}, "bob": {"token": "fake-bob"}}
+state = {"version": 1, "default_host": "gitcode.com",
+         "hosts": {"gitcode.com": {"active_user": "alice", "users": users}}}
+json.dump(state, open("$LOCKDIR/auth.json", "w"))
+PYSEED
+  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" "$GC_BIN" auth logout alice --yes >/dev/null 2>&1) &
+  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" "$GC_BIN" auth logout bob --yes >/dev/null 2>&1) &
+  wait
+  LEFT=$(python3 -c "import json; d=json.load(open('$LOCKDIR/auth.json')); print(len(d.get('hosts',{}).get('gitcode.com',{}).get('users',{})))" 2>/dev/null || echo CORRUPT)
+  if [[ "$LEFT" != "0" ]]; then
+    echo "REGRESSION: concurrent logout round $i left $LEFT user(s) — a deletion was lost (issue 672)" >&2
+    rm -rf "$LOCKDIR"
+    exit 1
+  fi
+done
+echo "  concurrent logout matrix: 10/10 rounds clean"
+rm -rf "$LOCKDIR"
+
 log "Done"
 echo "Core regression checks completed."

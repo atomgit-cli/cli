@@ -29,6 +29,9 @@ func TestConcurrentLogoutsLoseNoUpdates(t *testing.T) {
 
 	for round := 0; round < 20; round++ {
 		seed()
+		if got := New().Authentication().LoginUsers("gitcode.com"); len(got) != 2 {
+			t.Fatalf("round %d: seed left %v, want [alice bob] (guards a vacuous pass)", round, got)
+		}
 		var wg sync.WaitGroup
 		for _, u := range []string{"alice", "bob"} {
 			wg.Add(1)
@@ -56,8 +59,11 @@ func TestConcurrentLogoutSwitchMatrix(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", dir)
 
 	for round := 0; round < 20; round++ {
+		// Login bob first, then alice: active_user ends as alice, so the
+		// racing logout of alice exercises the active-user reassignment
+		// path (the previous seeding left active=bob and never touched it).
 		auth := New().Authentication()
-		for _, u := range []string{"alice", "bob"} {
+		for _, u := range []string{"bob", "alice"} {
 			if _, err := auth.Login("gitcode.com", u, "token-"+u, "https", false); err != nil {
 				t.Fatalf("seed Login(%s) error = %v", u, err)
 			}
@@ -67,11 +73,15 @@ func TestConcurrentLogoutSwitchMatrix(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_ = New().Authentication().Logout("gitcode.com", "alice")
+			if err := New().Authentication().Logout("gitcode.com", "alice"); err != nil {
+				t.Errorf("round %d: Logout(alice) error = %v", round, err)
+			}
 		}()
 		go func() {
 			defer wg.Done()
-			_ = New().Authentication().SwitchUser("gitcode.com", "bob")
+			if err := New().Authentication().SwitchUser("gitcode.com", "bob"); err != nil {
+				t.Errorf("round %d: SwitchUser(bob) error = %v", round, err)
+			}
 		}()
 		wg.Wait()
 
@@ -147,6 +157,22 @@ func TestLockSweepsStaleTempFiles(t *testing.T) {
 	if err := os.WriteFile(fresh, []byte("in-flight"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Near-boundary pair pins the age gate itself (a drift of the
+	// tempSweepAge var to either side flips one of these).
+	justOld := filepath.Join(dir, ".gc-tmp-justold")
+	if err := os.WriteFile(justOld, []byte("just past the gate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(justOld, time.Now().Add(-tempSweepAge-time.Second), time.Now().Add(-tempSweepAge-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	justNew := filepath.Join(dir, ".gc-tmp-justnew")
+	if err := os.WriteFile(justNew, []byte("just inside the gate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(justNew, time.Now().Add(-tempSweepAge+time.Second), time.Now().Add(-tempSweepAge+time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := New().Authentication().Login("gitcode.com", "alice", "token", "https", false); err != nil {
 		t.Fatal(err)
@@ -157,6 +183,12 @@ func TestLockSweepsStaleTempFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Fatalf("fresh temp must be kept by the age gate: %v", err)
+	}
+	if _, err := os.Stat(justOld); !os.IsNotExist(err) {
+		t.Fatalf("temp just past the gate (%s) must be swept: %v", tempSweepAge, err)
+	}
+	if _, err := os.Stat(justNew); err != nil {
+		t.Fatalf("temp just inside the gate must be kept: %v", err)
 	}
 }
 

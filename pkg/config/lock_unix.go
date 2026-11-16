@@ -3,7 +3,6 @@
 package config
 
 import (
-	"errors"
 	"os"
 	"syscall"
 	"time"
@@ -11,9 +10,11 @@ import (
 
 // lockFile takes an exclusive advisory lock with a bounded wait: LOCK_NB
 // polling with backoff up to lockTimeout, then the last error is returned
-// so lockConfigDir can fail loudly. flock releases on close and on process
-// death; two handles in one process (separate open file descriptions) still
-// exclude each other, so in-process concurrency is serialized too.
+// so lockConfigDir can fail loudly. The deadline bounds every path,
+// including persistent EINTR (each retry sleeps, so the loop cannot spin
+// hot). flock releases on close and on process death; two handles in one
+// process (separate open file descriptions) still exclude each other, so
+// in-process concurrency is serialized too.
 func lockFile(f *os.File) error {
 	deadline := time.Now().Add(lockTimeout)
 	delay := 200 * time.Microsecond
@@ -22,7 +23,7 @@ func lockFile(f *os.File) error {
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, syscall.EINTR) && time.Now().After(deadline) {
+		if time.Now().After(deadline) {
 			return err
 		}
 		time.Sleep(delay)

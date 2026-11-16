@@ -234,7 +234,11 @@ func (a *authConfig) Logout(hostname, username string) error {
 	if _, ok := host.Users[username]; !ok {
 		// Nothing to remove: skip the rewrite entirely — the unconditional
 		// no-op rewrite both widened the concurrent-race window and churned
-		// the file for nothing (issue 672).
+		// the file for nothing (issue 672). Trade-off: the old rewrite
+		// incidentally re-normalized externally corrupted state (a dangling
+		// active_user or an empty host); our own locked writers maintain
+		// those invariants, and every reader already treats a dangling
+		// active user as empty, so the skip is safe.
 		return nil
 	}
 

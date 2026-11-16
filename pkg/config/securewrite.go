@@ -79,8 +79,9 @@ func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 	// sharing violation that usually clears within milliseconds; two quick
 	// retries absorb it (issue 672). On Unix rename failures are
 	// deterministic, and retrying only re-fails.
+	const renameAttempts = 3
 	var renameErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < renameAttempts; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
 		}
@@ -94,5 +95,5 @@ func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 	// by the time this surfaces (cleaned up below), so naming it would
 	// send anyone following the error on a hunt for a file that no
 	// longer exists.
-	return fmt.Errorf("failed to replace %s after %d attempts: %w", path, 3, renameErr)
+	return fmt.Errorf("failed to replace %s after %d attempts: %w", path, renameAttempts, renameErr)
 }
