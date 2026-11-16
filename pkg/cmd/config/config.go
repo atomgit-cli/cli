@@ -210,7 +210,15 @@ func printConfigList(out interface{ Write([]byte) (int, error) }, items []config
 }
 
 func clearCache(io *iostreams.IOStreams) error {
-	cacheDir := filepath.Join(configDir(), "cache")
+	dir, err := config.ResolveConfigDir()
+	if err != nil {
+		// No resolvable config location means no cache location: behave as
+		// empty. Never fall back to a cwd-relative "~" tree — the pre-fix
+		// local fallback deleted planted files from the working directory.
+		fmt.Fprintln(io.Out, "No cache to clear.")
+		return nil
+	}
+	cacheDir := filepath.Join(dir, "cache")
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -237,17 +245,6 @@ func pluralEntry(n int) string {
 		return "y"
 	}
 	return "ies"
-}
-
-func configDir() string {
-	if dir := os.Getenv("GC_CONFIG_DIR"); dir != "" {
-		return dir
-	}
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join("~", ".config", "gc")
-	}
-	return filepath.Join(homeDir, ".config", "gc")
 }
 
 func validateValue(key, value string) error {

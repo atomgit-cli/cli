@@ -91,7 +91,7 @@ type config struct {
 	// means no location could be resolved (no GC_CONFIG_DIR, no home
 	// directory): reads then behave as an empty state and writes fail with
 	// guidance instead of creating a "~/.config/gc" tree in the current
-	// directory (issue 675's predecessor wrote auth.json there).
+	// directory (the pre-fix code wrote auth.json there; issue 675).
 	configDir string
 }
 
@@ -129,6 +129,18 @@ func configDirChecked() (string, error) {
 	}
 
 	return filepath.Join(home, ".config", "gc"), nil
+}
+
+// ResolveConfigDir returns the configuration directory with the same
+// fail-closed resolution New() applies: GC_CONFIG_DIR first, then the home
+// directory, error when neither is available. Sibling command code that
+// needs the location (e.g. cache management) must resolve through here
+// instead of re-implementing the lookup: a local copy of the lookup with a
+// literal "~" fallback let `gc config clear-cache` read and delete planted
+// files from a cwd-relative tree in HOME-less environments (found in review
+// of the issue 675 fix).
+func ResolveConfigDir() (string, error) {
+	return configDirChecked()
 }
 
 // Get retrieves a configuration value
