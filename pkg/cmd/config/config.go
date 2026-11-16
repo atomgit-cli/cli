@@ -101,7 +101,7 @@ func newCmdSet(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			if err := cfg.Set(defaultHost, key, value); err != nil {
-				return err
+				return fmt.Errorf("failed to set configuration value: %w", err)
 			}
 			result := configResult{Key: key, Value: value}
 			if jsonOutput {
