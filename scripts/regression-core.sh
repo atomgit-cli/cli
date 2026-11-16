@@ -337,8 +337,8 @@ state = {"version": 1, "default_host": "gitcode.com",
          "hosts": {"gitcode.com": {"active_user": "alice", "users": users}}}
 json.dump(state, open("$LOCKDIR/auth.json", "w"))
 PYSEED
-  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" "$GC_BIN" auth logout alice --yes >/dev/null 2>&1) &
-  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" "$GC_BIN" auth logout bob --yes >/dev/null 2>&1) &
+  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" GC_TOKEN= GITCODE_TOKEN= GC_HOST= "$GC_BIN" auth logout alice --yes >/dev/null 2>&1) &
+  (GC_CONFIG_DIR="$LOCKDIR" HOME="$LOCKDIR" GC_TOKEN= GITCODE_TOKEN= GC_HOST= "$GC_BIN" auth logout bob --yes >/dev/null 2>&1) &
   wait
   LEFT=$(python3 -c "import json; d=json.load(open('$LOCKDIR/auth.json')); print(len(d.get('hosts',{}).get('gitcode.com',{}).get('users',{})))" 2>/dev/null || echo CORRUPT)
   if [[ "$LEFT" != "0" ]]; then
