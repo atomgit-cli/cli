@@ -148,6 +148,46 @@ func TestLogoutNormalizesAndValidatesHostname(t *testing.T) {
 	})
 }
 
+// Issue 676: a logout with no resolvable config location must fail
+// closed — wrapped error, ExitError(1), the sentinel guidance, and no
+// success text on stdout. Pinned at the command layer because a refactor
+// of the wrap or the exit-code mapping would otherwise regress silently
+// while the package-level contract test stays green (found in review of
+// the issue 676 fix).
+func TestLogoutUnresolvableConfigDirFailsClosedAtCommandLayer(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, _ := iostreams.Test()
+	opts := &LogoutOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+		Yes: true,
+	}
+	err := logoutRun(opts)
+	if err == nil {
+		t.Fatal("logoutRun() error = nil with an unresolvable config dir")
+	}
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d", code, cmdutil.ExitError)
+	}
+	if !strings.Contains(err.Error(), "failed to clear stored authentication") {
+		t.Fatalf("error = %q, want the command wrap", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
+	}
+	if strings.Contains(out.String(), "Cleared") {
+		t.Fatalf("stdout must not claim success: %q", out.String())
+	}
+}
+
 func TestLogoutDefaultCustomHostIgnoresTokenEnvironmentVariables(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_HOST", "enterprise.example.com")
