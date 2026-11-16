@@ -209,12 +209,23 @@ func (c *config) FileGet(host, key string) (string, error) {
 	return values[normalizedKey], nil
 }
 
-// Set stores a configuration value
+// Set stores a configuration value. The read-modify-write runs under the
+// config-dir cross-process lock (issue 672).
 func (c *config) Set(host, key, value string) error {
 	normalizedKey, err := normalizeConfigKey(key)
 	if err != nil {
 		return err
 	}
+	if c.configDir == "" {
+		// Fail closed before locking (issue 672 ordering requirement: the
+		// lock file lives in the config dir).
+		return ErrNoConfigDir
+	}
+	release, err := lockConfigDir(c.configDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	state, err := c.readConfigState()
 	if err != nil {
@@ -288,18 +299,19 @@ func (c *config) Authentication() AuthConfig {
 	return &authConfig{config: c}
 }
 
-// Write persists the configuration
+// Write persists the configuration. The read-modify-write runs under the
+// config-dir cross-process lock, which also ensures the directory exists
+// (issue 672 hoisted the per-write MkdirAll/Chmod to lock acquisition).
 func (c *config) Write() error {
 	if c.configDir == "" {
 		return ErrNoConfigDir
 	}
-	// Ensure config directory exists
-	if err := os.MkdirAll(c.configDir, 0o700); err != nil {
+	release, err := lockConfigDir(c.configDir)
+	if err != nil {
 		return err
 	}
-	if err := os.Chmod(c.configDir, 0o700); err != nil {
-		return err
-	}
+	defer release()
+
 	state, err := c.readConfigState()
 	if err != nil {
 		return err
