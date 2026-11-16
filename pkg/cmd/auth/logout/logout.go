@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	"github.com/spf13/cobra"
@@ -36,7 +38,7 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 	}
 
 	cmd := &cobra.Command{
-		Use:   "logout",
+		Use:   "logout [<username>]",
 		Short: "Log out of a GitCode account",
 		Long: heredoc.Doc(`
 			Log out of a GitCode account.
@@ -47,6 +49,12 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			On the default host, token environment variables are not removed.
 			The command prints current-session cleanup guidance on stderr.
 
+			A positional <username> is equivalent to --username: it logs
+			out that stored account, not the active one. Passing both
+			with different values, or an empty username in either form,
+			is a usage error; a username that is not stored exits with
+			the available accounts listed.
+
 				Non-interactive mode: Requires --yes to skip confirmation.
 		`),
 		Example: heredoc.Doc(`
@@ -56,13 +64,36 @@ func NewCmdLogout(f *cmdutil.Factory, runF func(*LogoutOptions) error) *cobra.Co
 			Type the hostname to confirm: gitcode.com
 			✓ Cleared stored authentication for gitcode.com
 
+			# Logout a specific stored account (positional, equals --username)
+			$ gc auth logout second-account --yes
+
 			# Logout from a specific hostname
 			$ gc auth logout --hostname gitcode.com
 
 			# Skip confirmation prompt
 			$ gc auth logout --yes
 		`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// An empty username — positional or via --username — is a
+			// usage error, never a silent fallback to the active account
+			// (issue 658: a script's unset variable must not log out the
+			// active session). The docs promise the two forms are
+			// equivalent; the guard is too.
+			argument := ""
+			if len(args) > 0 {
+				argument = args[0]
+			}
+			flagSet := cmd.Flags().Changed("username")
+			if flagSet && argument != "" && opts.Username != argument {
+				return cmdutil.NewUsageError(fmt.Sprintf("conflicting usernames: %q (flag) and %q (argument); pass one", opts.Username, argument))
+			}
+			if len(args) > 0 {
+				opts.Username = argument
+			}
+			if (flagSet || len(args) > 0) && opts.Username == "" {
+				return cmdutil.NewUsageError("empty username; pass a username or omit the argument")
+			}
 			if runF != nil {
 				return runF(opts)
 			}
@@ -89,26 +120,51 @@ func logoutRun(opts *LogoutOptions) error {
 	}
 	opts.Hostname, err = config.NormalizeTrustedHost(opts.Hostname)
 	if err != nil {
-		return cmdutil.NewUsageError(err.Error())
+		// Exit 1 like the auth family (login/status/token/switch); the
+		// invalid host is a runtime input error, not a usage error
+		// (issue 658).
+		return err
 	}
 
 	cs := opts.IO.ColorScheme()
 
-	// Require confirmation before logout
+	// Require confirmation before logout. When a specific account is
+	// targeted, echo it: the confirmation is the last intent-alignment
+	// checkpoint (issue 658 review — "meant bob, got active" must be
+	// visible here).
+	confirmTarget := opts.Hostname
+	if opts.Username != "" {
+		confirmTarget = opts.Username + " on " + opts.Hostname
+	}
 	if err := cmdutil.ConfirmOrAbort(cmdutil.ConfirmOptions{
 		IO:       opts.IO,
 		Yes:      opts.Yes,
 		Expected: opts.Hostname,
-		Prompt:   fmt.Sprintf("! This will log out of %s\nType the hostname to confirm: ", opts.Hostname),
+		Prompt:   fmt.Sprintf("! This will log out of %s\nType the hostname to confirm: ", confirmTarget),
 	}); err != nil {
 		return err
+	}
+
+	// A named account that is not stored is exit 3 with the available
+	// accounts — the switch family pattern — instead of a silent no-op
+	// success (issue 658 review: a typo must not read as "logged out").
+	if opts.Username != "" {
+		users := authCfg.LoginUsers(opts.Hostname)
+		if !slices.Contains(users, opts.Username) {
+			return cmdutil.NewNotFoundError(
+				fmt.Sprintf("account %q is not stored for %s; available: %s", opts.Username, opts.Hostname, strings.Join(users, ", ")), nil)
+		}
 	}
 
 	if err := authCfg.Logout(opts.Hostname, opts.Username); err != nil {
 		return fmt.Errorf("failed to clear stored authentication: %w", err)
 	}
 
-	fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
+	if opts.Username != "" {
+		fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s on %s\n", cs.Green("✓"), opts.Username, opts.Hostname)
+	} else {
+		fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
+	}
 	if opts.Hostname == "gitcode.com" {
 		envVars := envtoken.SetEnvVars(os.LookupEnv)
 		if len(envVars) > 0 {
