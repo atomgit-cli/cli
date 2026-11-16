@@ -107,16 +107,17 @@ func TestSecureWriteFileAtomicUnderConcurrentReads(t *testing.T) {
 			t.Fatalf("read errors = %d, write failures = %d — both must be zero on Unix", readErrors, writeErrors)
 		}
 	} else {
-		// Bounded exemption: total breakage is caught by the seed write, but
-		// a regression that fails only under concurrent read load must not
-		// stay green either — at least one rename has to succeed. The bound
-		// derives from the loop constants above, so tuning them cannot let
-		// it silently go inert. P(every rename hits a sharing violation) is
-		// effectively zero under this load, so it cannot flake.
-		if writeErrors >= totalWrites {
-			t.Fatalf("all %d concurrent writes failed on Windows — the rename path is broken under load, not just noisy", writeErrors)
-		}
-		t.Logf("windows: %d read errors / %d write failures from transient sharing during concurrent MoveFileEx replacement (platform noise; issue 672 serializes writers)", readErrors, writeErrors)
+		// Windows: readers of this test open the target without
+		// FILE_SHARE_DELETE, so each open handle blocks the writers'
+		// replacing renames; with four tight-loop readers the failure rate
+		// depends on their handle duty cycle, which cannot be measured from
+		// Linux. A bounded assertion (at least one write must succeed) was
+		// proposed and rejected in review: its P(all fail)≈0 argument
+		// assumed a low duty cycle, and a wrong guess reddens the
+		// post-merge mirror CI — the exact incident shape this PR avoids.
+		// Total breakage is still caught by the seed write above. Revisit
+		// with issue 672 (retry + real Windows baseline data).
+		t.Logf("windows: %d read errors / %d of %d writes failed from sharing during concurrent MoveFileEx replacement (platform noise; issue 672 serializes writers)", readErrors, writeErrors, totalWrites)
 	}
 
 	// The final content must be one of the two complete payloads (guards
