@@ -1,10 +1,13 @@
 package larkcli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gitcode.com/gitcode-cli/cli/pkg/config"
 )
 
 // The old behavior under test (issue 675, private): larkcli's configDir fell
@@ -89,12 +92,16 @@ func TestLarkWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 		t.Fatal("SaveDefaultChat() error = nil with an unresolvable config dir")
 	} else if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
 		t.Fatalf("SaveDefaultChat() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
+	} else if !errors.Is(err, config.ErrNoConfigDir) {
+		t.Fatalf("SaveDefaultChat() error = %v, want errors.Is(err, config.ErrNoConfigDir)", err)
 	}
 
 	if err := ClearDefaultChat(); err == nil {
 		t.Fatal("ClearDefaultChat() error = nil with an unresolvable config dir")
 	} else if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
 		t.Fatalf("ClearDefaultChat() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
+	} else if !errors.Is(err, config.ErrNoConfigDir) {
+		t.Fatalf("ClearDefaultChat() error = %v, want errors.Is(err, config.ErrNoConfigDir)", err)
 	}
 
 	entries, err := os.ReadDir(dir)

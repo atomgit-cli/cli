@@ -23,7 +23,9 @@ var allowedConfigKeys = map[string]struct{}{
 type Config interface {
 	// Get retrieves a configuration value
 	Get(host, key string) (string, error)
-	// Set stores a configuration value
+	// Set stores a configuration value. Returns ErrNoConfigDir when the
+	// config directory cannot be resolved (no GC_CONFIG_DIR and no home
+	// directory); the value is never written to a cwd-relative path.
 	Set(host, key, value string) error
 
 	// GitProtocol returns the preferred git protocol
@@ -38,7 +40,8 @@ type Config interface {
 	// Authentication returns authentication configuration
 	Authentication() AuthConfig
 
-	// Write persists the configuration
+	// Write persists the configuration. Returns ErrNoConfigDir when the
+	// config directory cannot be resolved.
 	Write() error
 }
 
@@ -73,11 +76,16 @@ type AuthConfig interface {
 	Hosts() []string
 	// DefaultHost returns the default host
 	DefaultHost() (string, string)
-	// Login creates or updates authentication for a host
+	// Login creates or updates authentication for a host. Returns
+	// ErrNoConfigDir when the config directory cannot be resolved; the
+	// stored state is never silently skipped.
 	Login(hostname, username, token, gitProtocol string, secureStorage bool) (bool, error)
-	// Logout removes authentication for a host
+	// Logout removes authentication for a host. Reads an unresolvable
+	// directory as an empty state, so a logout of a host that is not
+	// stored is a successful no-op.
 	Logout(hostname, username string) error
-	// SwitchUser switches the active user for a host
+	// SwitchUser switches the active user for a host. Returns
+	// ErrNoConfigDir when the config directory cannot be resolved.
 	SwitchUser(hostname, user string) error
 	// LoginUsers returns the sorted usernames that have stored tokens for a
 	// host (empty when the host has no stored accounts). Interactive
@@ -100,8 +108,11 @@ type config struct {
 // never falls back to a cwd-relative path; callers surface this error so a
 // login can never report success without persisting anything. Sibling
 // packages that persist under the same directory (pkg/larkcli) reuse this
-// sentinel instead of duplicating the guidance text.
-var ErrNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME or GC_CONFIG_DIR")
+// sentinel instead of duplicating the guidance text. The message names the
+// home variable per platform: os.UserHomeDir reads HOME on Unix and
+// USERPROFILE on Windows, so the Windows parenthetical keeps the suggested
+// remediation effective on both platforms.
+var ErrNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR")
 
 type configState struct {
 	Version int                          `json:"version"`

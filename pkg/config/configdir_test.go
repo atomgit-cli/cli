@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,6 +128,8 @@ func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 		t.Fatal("Set() error = nil with an unresolvable config dir")
 	} else if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
 		t.Fatalf("Set() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Set() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 
 	// Login reports the would-be change alongside the error; the error is
@@ -136,12 +139,16 @@ func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 		t.Fatal("Login() error = nil with an unresolvable config dir")
 	} else if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
 		t.Fatalf("Login() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Login() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 
 	if err := cfg.Write(); err == nil {
 		t.Fatal("Write() error = nil with an unresolvable config dir")
 	} else if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
 		t.Fatalf("Write() error = %q, want guidance mentioning GC_CONFIG_DIR", err)
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Write() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 
 	entries, err := os.ReadDir(dir)

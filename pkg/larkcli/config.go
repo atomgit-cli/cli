@@ -21,8 +21,12 @@ type larkConfig struct {
 // $GC_CONFIG_DIR/lark.json). It returns an empty string when no config
 // location can be resolved (no GC_CONFIG_DIR and no home directory); callers
 // must treat that as "no configuration" and must never create files for it.
+// Resolution is delegated to pkg/config's ResolveConfigDir so lark.json
+// always lives in the same directory tree as config.json/auth.json — the
+// sibling files share one resolution authority and cannot drift apart
+// (found in review of the issue 675 fix).
 func ConfigPath() string {
-	dir, err := configDirChecked()
+	dir, err := config.ResolveConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -56,23 +60,6 @@ func ClearDefaultChat() error {
 	cfg, _ := readConfig()
 	cfg.DefaultChatID = ""
 	return writeConfig(cfg)
-}
-
-// configDirChecked returns the config directory: GC_CONFIG_DIR first, then
-// the home directory. It fails closed when neither is available: the
-// previous "~" fallback was a relative path (Go does not expand a literal
-// tilde), so writes created the tree in whatever directory the command ran
-// in (issue 675). Mirrors pkg/config's configDirChecked and reuses its
-// ErrNoConfigDir sentinel so the two twins cannot drift apart.
-func configDirChecked() (string, error) {
-	if dir := os.Getenv("GC_CONFIG_DIR"); dir != "" {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "", config.ErrNoConfigDir
-	}
-	return filepath.Join(home, ".config", "gc"), nil
 }
 
 func readConfig() (larkConfig, error) {
