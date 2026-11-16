@@ -188,6 +188,40 @@ func TestLogoutUnresolvableConfigDirFailsClosedAtCommandLayer(t *testing.T) {
 	}
 }
 
+// Named-form contrast (issue 676 acceptance: both forms error in an
+// unresolvable env): the username precheck reads an empty account list,
+// so the named form fails honestly with exit 3 — the recorded asymmetry
+// vs the bare form's exit-1 env error (unification tracked with issue
+// 677's resolution-status exposure).
+func TestLogoutNamedFormUnresolvableEnvIsHonestNotStored(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, _ := iostreams.Test()
+	opts := &LogoutOptions{
+		IO:       io,
+		Username: "alice",
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+		Yes: true,
+	}
+	err := logoutRun(opts)
+	if err == nil {
+		t.Fatal("logoutRun() error = nil for the named form in an unresolvable env")
+	}
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitNotFound {
+		t.Fatalf("ExitCode() = %d, want %d (not-stored, honest for the empty account list)", code, cmdutil.ExitNotFound)
+	}
+	if strings.Contains(out.String(), "Cleared") {
+		t.Fatalf("stdout must not claim success: %q", out.String())
+	}
+}
+
 func TestLogoutDefaultCustomHostIgnoresTokenEnvironmentVariables(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_HOST", "enterprise.example.com")

@@ -11,8 +11,9 @@ import (
 const authStateVersion = 1
 
 // errHostNotFound is the reads-as-empty result of auth state operations
-// that require a stored host (issue 675 semantics: an unresolvable config
-// dir behaves exactly like a fresh installation).
+// that require a stored host (issue 675 semantics: reads on an
+// unresolvable config dir behave exactly like a fresh installation —
+// writes fail closed instead, issue 676).
 var errHostNotFound = errors.New("host not found")
 
 // authConfig implements AuthConfig interface

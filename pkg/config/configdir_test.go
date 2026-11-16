@@ -134,6 +134,20 @@ func TestAuthWriterUnresolvableContracts(t *testing.T) {
 
 // Writes in an unresolvable environment must fail with guidance and must
 // not create anything in the current directory.
+// Contrast case for issue 676's fail-closed contract: an unresolvable
+// dir errors, but a RESOLVABLE dir with a genuinely empty state is still
+// the grounded no-op success (the file was resolved and confirmed absent
+// — nothing was hidden by a broken environment). Pins the host==nil →
+// nil branch that the unresolvable guard now sits in front of.
+func TestLogoutEmptyStateInResolvableDirIsStillNoOpSuccess(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	if err := New().Authentication().Logout("gitcode.com", ""); err != nil {
+		t.Fatalf("Logout() on empty but resolvable state error = %v, want nil no-op", err)
+	}
+}
+
 func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
