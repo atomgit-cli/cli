@@ -116,8 +116,14 @@ func TestAuthWriterUnresolvableContracts(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", "")
 
 	auth := New().Authentication()
-	if err := auth.Logout("gitcode.com", "anyone"); err != nil {
-		t.Fatalf("Logout() on unresolvable dir error = %v, want nil no-op", err)
+	// Issue 676: a logout must never report success without grounds —
+	// with no resolvable config location there is nothing to clear and no
+	// way to know whether anything is stored, so it fails closed like
+	// every other write (mirrors Login's never-silently-skip contract).
+	if err := auth.Logout("gitcode.com", "anyone"); err == nil {
+		t.Fatal("Logout() on unresolvable dir error = nil, want ErrNoConfigDir")
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Logout() on unresolvable dir error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 	if err := auth.SwitchUser("gitcode.com", "anyone"); err == nil || err.Error() != "host not found" {
 		t.Fatalf("SwitchUser() on unresolvable dir error = %v, want host not found", err)
