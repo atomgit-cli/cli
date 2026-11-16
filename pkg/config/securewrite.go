@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // secureWriteFile writes data to path atomically with hardened permission
@@ -73,14 +74,26 @@ func secureWriteFile(path string, data []byte, perm os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("failed to close %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		// The message names only the target: the temp file is already gone
-		// by the time this surfaces (cleaned up below), so naming it would
-		// send anyone following the error on a hunt for a file that no
-		// longer exists.
-		return fmt.Errorf("failed to replace %s: %w", path, err)
+	// Bounded retry: on Windows a reader or external process (antivirus,
+	// indexer) holding the target open fails the replacing rename with a
+	// sharing violation that usually clears within milliseconds; two quick
+	// retries absorb it (issue 672). On Unix rename failures are
+	// deterministic, and retrying only re-fails.
+	const renameAttempts = 3
+	var renameErr error
+	for attempt := 0; attempt < renameAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 25 * time.Millisecond)
+		}
+		renameErr = os.Rename(tmp, path)
+		if renameErr == nil {
+			landed = true
+			return nil
+		}
 	}
-
-	landed = true
-	return nil
+	// The message names only the target: the temp file is already gone
+	// by the time this surfaces (cleaned up below), so naming it would
+	// send anyone following the error on a hunt for a file that no
+	// longer exists.
+	return fmt.Errorf("failed to replace %s after %d attempts: %w", path, renameAttempts, renameErr)
 }

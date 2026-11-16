@@ -47,16 +47,39 @@ func DefaultChatID() string {
 	return strings.TrimSpace(cfg.DefaultChatID)
 }
 
-// SaveDefaultChat persists the default chat id to lark.json.
+// SaveDefaultChat persists the default chat id to lark.json. The
+// read-modify-write runs under the same config-dir cross-process lock as
+// pkg/config's writes (issue 672: one lock guards all three files).
 func SaveDefaultChat(chatID string) error {
 	chatID = strings.TrimSpace(chatID)
+	dir, err := config.ResolveConfigDir()
+	if err != nil {
+		return err
+	}
+	release, err := config.LockConfigDir(dir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	cfg, _ := readConfig()
 	cfg.DefaultChatID = chatID
 	return writeConfig(cfg)
 }
 
-// ClearDefaultChat removes the persisted default chat id.
+// ClearDefaultChat removes the persisted default chat id, under the same
+// cross-process lock (issue 672).
 func ClearDefaultChat() error {
+	dir, err := config.ResolveConfigDir()
+	if err != nil {
+		return err
+	}
+	release, err := config.LockConfigDir(dir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	cfg, _ := readConfig()
 	cfg.DefaultChatID = ""
 	return writeConfig(cfg)

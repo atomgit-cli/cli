@@ -8,7 +8,7 @@ go test -tags=system ./tests/system
 ./tests/system/run.sh --read
 ```
 
-`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`；冒烟矩阵仅接受对既有关键契约的单命令低成本断言，多步骤场景一律进 `tests/system/`。
+`scripts/regression-core.sh` 是历史最小冒烟回归入口。新增、补充或扩展真实命令行系统测试时，优先放入 `tests/system/`；冒烟矩阵仅接受对既有关键契约的单命令低成本断言，多步骤场景一律进 `tests/system/`——**唯一例外**：需要真实多进程并发才能验证的契约（如 issue 672 的跨进程写锁——进程内测试无法区分 `flock` 与进程内互斥锁），在冒烟矩阵以双真实二进制并发场景呈现。
 
 ## 目标
 
@@ -89,7 +89,7 @@ field/type checks whenever a command supports `--json`.
 
 ## 默认回归集
 
-`./scripts/regression-core.sh` 默认执行稳定的读路径、agent-friendly 契约检查和错误路径：
+`./scripts/regression-core.sh` 默认执行稳定的读路径、agent-friendly 契约检查、错误路径，以及一项隔离环境内的并发写锁矩阵：
 
 1. `auth status`
 2. `auth token` 非交互保护（仅使用 fake token）
@@ -112,9 +112,10 @@ field/type checks whenever a command supports `--json`.
 19. `gc api user --jq .login`（断言输出为非空裸字符串登录名——不含引号，并与 `api user` 原始响应静默交叉验证）
 20. `gc api 'repos/<repo>/issues?state=all&per_page=2' --paginate --slurp`（断言输出为单行、以 `[` 开头以 `]` 结尾的单一 JSON 数组形态，含 `"id"` 字段——行数断言可拦逐页未合并的回归）
 21. 临时空 `GC_CONFIG_DIR`（指向空目录）且无环境 token 下 `gc auth git-credential get`（stdin 喂协议请求）——静默契约：stdout 0 字节、stderr 0 字节、退出码 `1`（守护 git credential 协议的静默性，断言为字节级、不依赖错误消息文本）
+22. 并发写锁矩阵（issue 672）：隔离 `mktemp` 目录内双真实二进制并发 `auth logout` 各 10 轮——种子为双用户**假 token** fixture，终态断言两个删除全部生效（丢失任一删除即回归失败退出）。多进程并发是唯一放置此处的例外理由（见上文放置政策）。
 
 说明：
-- 脚本不会读取真实 token，不会执行 `auth login --with-token`，也不会执行 `auth logout`。
+- 脚本不会读取真实 token，不会执行 `auth login --with-token`；**唯一例外**是第 22 项在隔离临时目录内执行 `auth logout`（双用户假 token fixture，与本地长期配置完全隔离、环境变量已中和）。
 - 无认证错误路径会使用临时空 `GC_CONFIG_DIR` 和空环境变量执行单条命令，避免污染本地长期配置。
 - `release delete` 的 dry-run 默认使用 `GC_REGRESSION_RELEASE_TAG`，未显式设置时默认取 `v0.0.1-test`。
 - 真实删除请求当前被平台以 `405 Method Not Allowed` 拒绝，命令错误信息指引到仓库 Release 页面（API 响应含 `html_url` 时附上网页链接）。回归集只覆盖 `--dry-run`，不执行真实删除（平台将来启用删除 API 后也应如此，避免删除 infra-test 资源）。
