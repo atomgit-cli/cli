@@ -138,7 +138,14 @@ func switchRun(opts *SwitchOptions) error {
 	}
 
 	if !slices.Contains(users, username) {
-		return cmdutil.NewNotFoundError(fmt.Sprintf("account %q is not stored for %s; available: %s", username, hostname, strings.Join(users, ", ")), nil)
+		msg := fmt.Sprintf("account %q is not stored for %s; available: %s", username, hostname, strings.Join(users, ", "))
+		if len(users) == 0 {
+			// An empty list would render a dangling "available: "
+			// trailer — every fresh-install named switch hits this
+			// (found in review of the issue 676 fix).
+			msg = fmt.Sprintf("account %q is not stored for %s; no accounts are stored on this host", username, hostname)
+		}
+		return cmdutil.NewNotFoundError(msg, nil)
 	}
 
 	if err := authCfg.SwitchUser(hostname, username); err != nil {
