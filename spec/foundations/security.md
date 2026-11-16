@@ -86,7 +86,7 @@ echo "YOUR_TOKEN" | gc auth login --with-token
 
 ### 凭证文件落盘约束
 
-写入凭证文件（`auth.json`）与配置状态文件（`config.json`）时必须满足：
+写入凭证文件（`auth.json`）与配置状态文件（`config.json`、`lark.json`）时必须满足：
 
 1. **文件权限 0600** - 凭证文件落盘权限必须为 `0600`，不得依赖 `umask`；实现以临时文件（创建即 `0600`）显式 chmod 后原子改名落地，最终文件权限与 umask 及既有文件的历史权限均无关（改名落地的全新 inode 直接携带正确权限）
 2. **目录权限 0700** - 配置目录 `~/.config/gc/` 权限必须为 `0700`，创建后显式 `Chmod` 收紧
