@@ -109,7 +109,8 @@ type config struct {
 // ErrNoConfigDir is returned by every write path when the config directory
 // cannot be resolved (no GC_CONFIG_DIR and no home directory). Resolution
 // never falls back to a cwd-relative path; callers surface this error so a
-// login can never report success without persisting anything. Sibling
+// login can never report success without persisting anything, and a
+// logout can never report success without grounds (issue 676). Sibling
 // packages that persist under the same directory (pkg/larkcli) reuse this
 // sentinel instead of duplicating the guidance text. The message names the
 // home variable per platform: os.UserHomeDir reads HOME on Unix and

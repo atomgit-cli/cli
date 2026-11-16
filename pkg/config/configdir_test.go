@@ -195,6 +195,12 @@ func TestConfigWritesFailClosedWithoutHomeNoCwdWrite(t *testing.T) {
 		t.Fatalf("Write() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
 	}
 
+	if err := auth.Logout("gitcode.com", ""); err == nil {
+		t.Fatal("Logout() error = nil with an unresolvable config dir")
+	} else if !errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("Logout() error = %v, want errors.Is(err, ErrNoConfigDir)", err)
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)

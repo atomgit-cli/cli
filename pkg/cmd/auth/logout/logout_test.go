@@ -217,6 +217,9 @@ func TestLogoutNamedFormUnresolvableEnvIsHonestNotStored(t *testing.T) {
 	if code := cmdutil.ExitCode(err); code != cmdutil.ExitNotFound {
 		t.Fatalf("ExitCode() = %d, want %d (not-stored, honest for the empty account list)", code, cmdutil.ExitNotFound)
 	}
+	if !strings.Contains(err.Error(), "no accounts are stored on this host") {
+		t.Fatalf("error = %q, want the empty-list message (not a dangling \"available: \" trailer)", err.Error())
+	}
 	if strings.Contains(out.String(), "Cleared") {
 		t.Fatalf("stdout must not claim success: %q", out.String())
 	}
