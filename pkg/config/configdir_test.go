@@ -70,6 +70,7 @@ func TestConfigReadsEmptyAndIgnoresLegacyCwdWhenDirUnresolvable(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_BROWSER", "") // Get consults the env override first
 
 	cwd, err := os.Getwd()
 	if err != nil {

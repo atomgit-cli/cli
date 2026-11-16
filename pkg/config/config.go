@@ -95,16 +95,23 @@ type config struct {
 	configDir string
 }
 
-// errNoConfigDir is returned by every write path when the config directory
-// cannot be resolved. Resolution never falls back to a cwd-relative path.
-var errNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME or GC_CONFIG_DIR")
+// ErrNoConfigDir is returned by every write path when the config directory
+// cannot be resolved (no GC_CONFIG_DIR and no home directory). Resolution
+// never falls back to a cwd-relative path; callers surface this error so a
+// login can never report success without persisting anything. Sibling
+// packages that persist under the same directory (pkg/larkcli) reuse this
+// sentinel instead of duplicating the guidance text.
+var ErrNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME or GC_CONFIG_DIR")
 
 type configState struct {
 	Version int                          `json:"version"`
 	Hosts   map[string]map[string]string `json:"hosts,omitempty"`
 }
 
-// New creates a new Config
+// New creates a new Config. When the config directory cannot be resolved
+// (no GC_CONFIG_DIR and no home directory), the returned Config treats
+// reads as an empty state and fails writes with ErrNoConfigDir — it never
+// falls back to a cwd-relative path.
 func New() Config {
 	dir, _ := configDirChecked()
 	return &config{
@@ -125,7 +132,7 @@ func configDirChecked() (string, error) {
 
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return "", errNoConfigDir
+		return "", ErrNoConfigDir
 	}
 
 	return filepath.Join(home, ".config", "gc"), nil
@@ -271,7 +278,7 @@ func (c *config) Authentication() AuthConfig {
 // Write persists the configuration
 func (c *config) Write() error {
 	if c.configDir == "" {
-		return errNoConfigDir
+		return ErrNoConfigDir
 	}
 	// Ensure config directory exists
 	if err := os.MkdirAll(c.configDir, 0o700); err != nil {
@@ -331,7 +338,7 @@ func (c *config) writeConfigState(state *configState) error {
 	if c.configDir == "" {
 		// No resolvable config location: fail closed with guidance instead of
 		// creating a "~/.config/gc" tree in the current directory (issue 675).
-		return errNoConfigDir
+		return ErrNoConfigDir
 	}
 	if state == nil {
 		state = &configState{}

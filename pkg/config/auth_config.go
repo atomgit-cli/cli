@@ -321,7 +321,7 @@ func (c *config) writeAuthState(state *authState) error {
 		// skip would let a login report success without persisting anything,
 		// and the previous behavior wrote auth.json (credentials) into the
 		// current directory (issue 675).
-		return errNoConfigDir
+		return ErrNoConfigDir
 	}
 	if state == nil {
 		state = &authState{

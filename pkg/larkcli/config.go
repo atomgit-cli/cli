@@ -17,11 +17,6 @@ type larkConfig struct {
 	DefaultChatID string `json:"default_chat_id,omitempty"`
 }
 
-// errNoConfigDir is returned when the config directory cannot be resolved.
-// Resolution never falls back to a cwd-relative path (issue 675's twin fix
-// in pkg/config).
-var errNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME or GC_CONFIG_DIR")
-
 // ConfigPath returns the lark config file path (~/.config/gc/lark.json or
 // $GC_CONFIG_DIR/lark.json). It returns an empty string when no config
 // location can be resolved (no GC_CONFIG_DIR and no home directory); callers
@@ -67,14 +62,15 @@ func ClearDefaultChat() error {
 // the home directory. It fails closed when neither is available: the
 // previous "~" fallback was a relative path (Go does not expand a literal
 // tilde), so writes created the tree in whatever directory the command ran
-// in (issue 675). Mirrors pkg/config's configDirChecked.
+// in (issue 675). Mirrors pkg/config's configDirChecked and reuses its
+// ErrNoConfigDir sentinel so the two twins cannot drift apart.
 func configDirChecked() (string, error) {
 	if dir := os.Getenv("GC_CONFIG_DIR"); dir != "" {
 		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return "", errNoConfigDir
+		return "", config.ErrNoConfigDir
 	}
 	return filepath.Join(home, ".config", "gc"), nil
 }
@@ -105,7 +101,7 @@ func writeConfig(cfg larkConfig) error {
 	if path == "" {
 		// No resolvable config location: fail closed with guidance instead of
 		// creating a "~/.config/gc" tree in the current directory (issue 675).
-		return errNoConfigDir
+		return config.ErrNoConfigDir
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

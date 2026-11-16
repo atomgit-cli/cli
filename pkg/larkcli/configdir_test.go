@@ -20,11 +20,30 @@ func TestLarkConfigPathEmptyWhenDirUnresolvable(t *testing.T) {
 	}
 }
 
+// Mirrors pkg/config's TestConfigDirCheckedResolvesUnderHome: the HOME
+// branch of the copy-paste twin needs per-copy coverage so future drift
+// between the two configDirChecked implementations is caught (found in
+// review of the issue 675 fix).
+func TestLarkConfigPathResolvesUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows home directory
+	t.Setenv("GC_CONFIG_DIR", "")
+
+	got := ConfigPath()
+	if want := filepath.Join(home, ".config", "gc", "lark.json"); got != want {
+		t.Fatalf("ConfigPath() = %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("ConfigPath() = %q, want an absolute path", got)
+	}
+}
+
 func TestLarkReadsEmptyAndIgnoresLegacyCwdWhenDirUnresolvable(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("GC_CONFIG_DIR", "")
-	t.Setenv("GC_LARK_DEFAULT_CHAT_ID", "")
+	t.Setenv(EnvDefaultChat, "")
 
 	cwd, err := os.Getwd()
 	if err != nil {
