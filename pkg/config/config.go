@@ -87,8 +87,17 @@ type AuthConfig interface {
 
 // config implements Config interface
 type config struct {
+	// configDir is the resolved configuration directory. The empty string
+	// means no location could be resolved (no GC_CONFIG_DIR, no home
+	// directory): reads then behave as an empty state and writes fail with
+	// guidance instead of creating a "~/.config/gc" tree in the current
+	// directory (issue 675's predecessor wrote auth.json there).
 	configDir string
 }
+
+// errNoConfigDir is returned by every write path when the config directory
+// cannot be resolved. Resolution never falls back to a cwd-relative path.
+var errNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME or GC_CONFIG_DIR")
 
 type configState struct {
 	Version int                          `json:"version"`
@@ -97,23 +106,29 @@ type configState struct {
 
 // New creates a new Config
 func New() Config {
+	dir, _ := configDirChecked()
 	return &config{
-		configDir: configDir(),
+		configDir: dir,
 	}
 }
 
-// configDir returns the configuration directory
-func configDir() string {
+// configDirChecked returns the configuration directory: GC_CONFIG_DIR first,
+// then the home directory. It fails closed when neither is available: the
+// previous "~" fallback produced a RELATIVE path (Go does not expand a
+// literal tilde), so every write created a "~/.config/gc" tree in whatever
+// directory the command ran in, and auth.json landed there with credentials
+// inside (issue 675). The error names both variables that would fix it.
+func configDirChecked() (string, error) {
 	if dir := os.Getenv("GC_CONFIG_DIR"); dir != "" {
-		return dir
+		return dir, nil
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "~"
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", errNoConfigDir
 	}
 
-	return filepath.Join(homeDir, ".config", "gc")
+	return filepath.Join(home, ".config", "gc"), nil
 }
 
 // Get retrieves a configuration value
@@ -243,6 +258,9 @@ func (c *config) Authentication() AuthConfig {
 
 // Write persists the configuration
 func (c *config) Write() error {
+	if c.configDir == "" {
+		return errNoConfigDir
+	}
 	// Ensure config directory exists
 	if err := os.MkdirAll(c.configDir, 0o700); err != nil {
 		return err
@@ -265,6 +283,14 @@ func (c *config) configStatePath() string {
 }
 
 func (c *config) readConfigState() (*configState, error) {
+	if c.configDir == "" {
+		// No resolvable config location: reads see an empty state. They must
+		// not fall back to a cwd-relative path (issue 675).
+		return &configState{
+			Version: configStateVersion,
+			Hosts:   map[string]map[string]string{},
+		}, nil
+	}
 	data, err := os.ReadFile(c.configStatePath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -290,6 +316,11 @@ func (c *config) readConfigState() (*configState, error) {
 }
 
 func (c *config) writeConfigState(state *configState) error {
+	if c.configDir == "" {
+		// No resolvable config location: fail closed with guidance instead of
+		// creating a "~/.config/gc" tree in the current directory (issue 675).
+		return errNoConfigDir
+	}
 	if state == nil {
 		state = &configState{}
 	}

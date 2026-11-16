@@ -275,6 +275,16 @@ func (c *config) authStatePath() string {
 }
 
 func (c *config) readAuthState() (*authState, error) {
+	if c.configDir == "" {
+		// No resolvable config location: reads see an empty state (not
+		// logged in). They must not fall back to a cwd-relative path, not
+		// even to legacy "~" trees the old bug left in the working
+		// directory (issue 675).
+		return &authState{
+			Version: authStateVersion,
+			Hosts:   map[string]*hostState{},
+		}, nil
+	}
 	path := c.authStatePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -306,6 +316,13 @@ func (c *config) readAuthState() (*authState, error) {
 }
 
 func (c *config) writeAuthState(state *authState) error {
+	if c.configDir == "" {
+		// No resolvable config location: fail closed with guidance. A silent
+		// skip would let a login report success without persisting anything,
+		// and the previous behavior wrote auth.json (credentials) into the
+		// current directory (issue 675).
+		return errNoConfigDir
+	}
 	if state == nil {
 		state = &authState{
 			Version: authStateVersion,
