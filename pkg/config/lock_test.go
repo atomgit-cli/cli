@@ -157,8 +157,10 @@ func TestLockSweepsStaleTempFiles(t *testing.T) {
 	if err := os.WriteFile(fresh, []byte("in-flight"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Near-boundary pair pins the age gate itself (a drift of the
-	// tempSweepAge var to either side flips one of these).
+	// Near-boundary pair pins that the sweep cutoff equals tempSweepAge:
+	// a hardcoded or mismatched gate constant would flip one of these
+	// (fixtures and cutoff both derive from the var, so drifting the var
+	// moves them together and flips neither — that is by design).
 	justOld := filepath.Join(dir, ".gc-tmp-justold")
 	if err := os.WriteFile(justOld, []byte("just past the gate"), 0o600); err != nil {
 		t.Fatal(err)
