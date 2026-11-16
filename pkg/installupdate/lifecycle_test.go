@@ -285,8 +285,8 @@ func TestStatePathScopesPerPackageAndChannel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GC_STATE_DIR", "")
 	if runtime.GOOS == "windows" {
-		// stateRoot derives from LOCALAPPDATA only on Windows (mirroring the
-		// JS stateDir precedence); point it at the temp dir.
+		// The state root derives from LOCALAPPDATA only on Windows
+		// (mirroring the JS stateDir precedence); point it at the temp dir.
 		t.Setenv("LOCALAPPDATA", dir)
 	} else {
 		t.Setenv("LOCALAPPDATA", "")

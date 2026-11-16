@@ -147,6 +147,14 @@ func AfterCommand(cfg config.Config, errOut io.Writer, noUpdate, noInteractive b
 }
 
 func mutateStateLocked(path string, mutate func(*updateState)) bool {
+	if path == "" {
+		// No resolvable state location (issue 671); degrade fully
+		// silently — no lock files in the cwd, no state mutation. The
+		// alternative (mutating an in-memory state) would repeat the
+		// first-run notice and the detached-check attempt on every
+		// command, since nothing is ever persisted.
+		return false
+	}
 	lockPath := path + ".lock"
 	lock, err := acquireStateLock(lockPath)
 	if err != nil {
@@ -231,28 +239,49 @@ func acquireStateLock(path string) (*os.File, error) {
 // GC_STATE_DIR keeps the legacy flat file; a legacy manifest without a
 // package name falls back to the flat path too, staying consistent with
 // the old helper copy that writes the same flat file.
+//
+// Returns an empty string when no state location can be resolved (Unix
+// without HOME/XDG_STATE_HOME/GC_STATE_DIR, issue 671); callers must
+// treat that as "no state" and must never create directories for it.
 func StatePath(manifest *Manifest) string {
 	if dir := os.Getenv("GC_STATE_DIR"); dir != "" {
 		return filepath.Join(dir, "update-state.json")
 	}
-	root := stateRoot()
+	root, err := stateRootChecked()
+	if err != nil {
+		// No home directory and no override: there is no usable state
+		// location. Return "" so callers treat this as "no state" and
+		// never create directories relative to the cwd (issue 671).
+		return ""
+	}
 	if manifest != nil && manifest.Package != "" {
 		return filepath.Join(root, manifest.Package, "npm-bootstrap", "update-state.json")
 	}
 	return filepath.Join(root, "update-state.json")
 }
 
-func stateRoot() string {
+// stateRootChecked returns the state directory, failing closed on Unix
+// when the home directory is unavailable and no override is set. The old
+// fallback silently produced a RELATIVE path (.local/state/gitcode-cli),
+// so acquireStateLock's MkdirAll created the tree in whatever directory
+// the command ran in — cron/systemd/container environments without HOME
+// polluted their cwd with state fragments (issue 671). Windows keeps the
+// LOCALAPPDATA/home precedence (matching the JS helper); a Windows
+// machine missing both env vars still yields a relative path — tracked
+// as a follow-up since it matches the helper's own behavior.
+func stateRootChecked() (string, error) {
 	if runtime.GOOS == "windows" {
 		home, _ := os.UserHomeDir()
-		return windowsStateRoot(os.Getenv("LOCALAPPDATA"), home)
+		return windowsStateRoot(os.Getenv("LOCALAPPDATA"), home), nil
 	}
-	home, _ := os.UserHomeDir()
-	root := os.Getenv("XDG_STATE_HOME")
-	if root == "" {
-		root = filepath.Join(home, ".local", "state")
+	if root := os.Getenv("XDG_STATE_HOME"); root != "" {
+		return filepath.Join(root, "gitcode-cli"), nil
 	}
-	return filepath.Join(root, "gitcode-cli")
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", fmt.Errorf("cannot resolve the state directory: HOME is not set; set HOME, XDG_STATE_HOME, or GC_STATE_DIR")
+	}
+	return filepath.Join(home, ".local", "state", "gitcode-cli"), nil
 }
 
 // windowsStateRoot mirrors the JS stateDir precedence: LOCALAPPDATA wins,
