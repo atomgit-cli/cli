@@ -84,8 +84,10 @@ type AuthConfig interface {
 	// directory as an empty state, so a logout of a host that is not
 	// stored is a successful no-op.
 	Logout(hostname, username string) error
-	// SwitchUser switches the active user for a host. Returns
-	// ErrNoConfigDir when the config directory cannot be resolved.
+	// SwitchUser switches the active user for a host. Reads an
+	// unresolvable directory as an empty state, so switching on a host
+	// that is not stored fails with "host not found" before any write is
+	// attempted; this method never returns ErrNoConfigDir.
 	SwitchUser(hostname, user string) error
 	// LoginUsers returns the sorted usernames that have stored tokens for a
 	// host (empty when the host has no stored accounts). Interactive
