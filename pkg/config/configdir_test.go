@@ -104,12 +104,14 @@ func TestConfigReadsEmptyAndIgnoresLegacyCwdWhenDirUnresolvable(t *testing.T) {
 	}
 }
 
-// The unresolvable contracts of the auth writers that do NOT fail with
-// ErrNoConfigDir (issue 675 semantics): Logout is a no-op success and
-// SwitchUser reports the empty-state "host not found" — pinned because
-// the lock refactor moved these checks ahead of the empty reads that
-// used to produce the same outcomes (found in review of the issue 672
-// fix; previously covered only by code equivalence).
+// The unresolvable contracts of the auth writers beyond the plain
+// ErrNoConfigDir shape (issue 675 semantics): Logout fails closed with
+// ErrNoConfigDir — a logout never reports success without grounds
+// (issue 676) — and SwitchUser reports the empty-state "host not
+// found". Pinned because the lock refactor moved these checks ahead of
+// the empty reads that used to produce the same outcomes (found in
+// review of the issue 672 fix; previously covered only by code
+// equivalence).
 func TestAuthWriterUnresolvableContracts(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
