@@ -50,6 +50,8 @@
 
 凭证文件落盘遵循安全约束（见 `spec/foundations/security.md`）：文件权限 `0600`、目录权限 `0700`、写入时拒绝符号链接（防止凭证重定向攻击）。若 `auth.json` 是符号链接（如某些 dotfiles 管理方案），`auth login` 将拒绝写入并报错，请删除符号链接后重试。
 
+在无 HOME 的环境（精简容器、环境被剥离的 systemd/CI）中，读命令按未登录与默认值处理，写命令报错退出 1 并提示设置 HOME（Windows 为 USERPROFILE）或 `GC_CONFIG_DIR`；配置目录解析不会回退到当前目录。
+
 通用偏好配置写入同一配置目录下的：
 
 ```bash
