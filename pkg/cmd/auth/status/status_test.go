@@ -325,6 +325,13 @@ func TestStatusRunNotLoggedInReturnsAuthError(t *testing.T) {
 	if strings.Contains(out.String(), "Not logged in") {
 		t.Fatalf("stdout leaked diagnostic: %q", out.String())
 	}
+	// A resolvable-but-empty state is a genuine fresh install: the
+	// unresolvable-env hint must NOT fire here (issue 677: the hint marks
+	// "invisible", not "empty" — without this negative assertion a
+	// regression to "not logged in ⇒ hint" would pass silently).
+	if strings.Contains(errOut.String(), "not visible in this environment") {
+		t.Fatalf("stderr = %q — the hint must not fire for a resolvable empty state", errOut.String())
+	}
 }
 
 // Issue 677: a not-logged-in status in an unresolvable env gains one
@@ -400,6 +407,62 @@ func TestStatusRunUnresolvableEnvJSONUnchanged(t *testing.T) {
 	want := "{\n  \"hostname\": \"gitcode.com\",\n  \"logged_in\": false,\n  \"token_valid\": false\n}"
 	if got != want {
 		t.Fatalf("JSON output = %q, want the stable field set %q", got, want)
+	}
+}
+
+// The one combination where host resolution and config resolution
+// interact: a custom GC_HOST in an unresolvable env must still print the
+// hint (with the custom hostname) and keep the JSON contract (test
+// review of the issue 677 fix).
+func TestStatusRunUnresolvableEnvCustomHostStillHints(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+	t.Setenv("GC_HOST", "custom.example.com")
+
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	errOut := &strings.Builder{}
+	f.IOStreams.Out = out
+	f.IOStreams.ErrOut = errOut
+
+	opts := &StatusOptions{
+		IO:         f.IOStreams,
+		JSON:       true,
+		HttpClient: func() (*http.Client, error) { return &http.Client{}, nil },
+		Config:     func() (config.Config, error) { return config.New(), nil },
+	}
+
+	err := statusRun(opts)
+	if err == nil {
+		t.Fatal("statusRun() error = nil, want auth error")
+	}
+	if !strings.Contains(out.String(), `"hostname": "custom.example.com"`) {
+		t.Fatalf("JSON output = %q, want the custom hostname", out.String())
+	}
+	if strings.Contains(errOut.String(), "not visible") {
+		t.Fatalf("stderr = %q — the hint must not leak into JSON mode", errOut.String())
+	}
+
+	f2 := cmdutil.TestFactory()
+	out2 := &strings.Builder{}
+	errOut2 := &strings.Builder{}
+	f2.IOStreams.Out = out2
+	f2.IOStreams.ErrOut = errOut2
+	opts2 := &StatusOptions{
+		IO:         f2.IOStreams,
+		HttpClient: func() (*http.Client, error) { return &http.Client{}, nil },
+		Config:     func() (config.Config, error) { return config.New(), nil },
+	}
+	if err := statusRun(opts2); err == nil {
+		t.Fatal("plain statusRun() error = nil, want auth error")
+	}
+	for _, want := range []string{"custom.example.com", "not visible in this environment"} {
+		if !strings.Contains(errOut2.String(), want) {
+			t.Fatalf("plain stderr = %q, want %q mentioned", errOut2.String(), want)
+		}
 	}
 }
 
