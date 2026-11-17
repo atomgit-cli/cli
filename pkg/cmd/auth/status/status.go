@@ -133,7 +133,7 @@ func statusRun(opts *StatusOptions) error {
 		// Plain text only — the JSON field set is byte-stable.
 		if cfg.ResolutionErr() != nil {
 			fmt.Fprintf(opts.IO.ErrOut, "\n")
-			fmt.Fprintf(opts.IO.ErrOut, "  %s Note: the config directory is unresolvable; stored logins are not visible in this environment\n", cs.Yellow("!"))
+			fmt.Fprintf(opts.IO.ErrOut, "  %s Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR\n", cs.Yellow("!"))
 		}
 		fmt.Fprintf(opts.IO.ErrOut, "\n")
 		fmt.Fprintf(opts.IO.ErrOut, "To authenticate, run: gc auth login\n")
