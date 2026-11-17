@@ -115,7 +115,9 @@ type config struct {
 }
 
 // ErrNoConfigDir is returned by every write path when the config directory
-// cannot be resolved (no GC_CONFIG_DIR and no home directory). Resolution
+// cannot be resolved (no GC_CONFIG_DIR and no home directory), and by
+// ResolutionErr — the read-side probe command surfaces use to
+// distinguish a broken environment from an empty one (issue 677). Resolution
 // never falls back to a cwd-relative path; callers surface this error so a
 // login can never report success without persisting anything, and a
 // logout can never report success without grounds (issue 676). Sibling
