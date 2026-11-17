@@ -366,9 +366,9 @@ func TestStatusRunUnresolvableEnvPlainGainsHint(t *testing.T) {
 	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
 		t.Fatalf("ExitCode() = %d, want %d (ExitAuth — the hint changes no exit semantics)", got, cmdutil.ExitAuth)
 	}
-	for _, want := range []string{"Not logged in", "not visible in this environment"} {
+	for _, want := range []string{"Not logged in", "not visible in this environment", "set HOME"} {
 		if !strings.Contains(errOut.String(), want) {
-			t.Fatalf("stderr = %q, want %q mentioned", errOut.String(), want)
+			t.Fatalf("stderr = %q, want %q mentioned (the hint tail carries the remediation)", errOut.String(), want)
 		}
 	}
 }
