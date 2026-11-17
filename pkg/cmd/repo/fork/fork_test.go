@@ -296,6 +296,7 @@ func TestForkRunRejectsInvalidRepository(t *testing.T) {
 
 type fakeConfig struct{}
 
+func (fakeConfig) ResolutionErr() error                 { return nil }
 func (fakeConfig) Get(host, key string) (string, error) { return "", nil }
 
 func (fakeConfig) Set(host, key, value string) error { return nil }

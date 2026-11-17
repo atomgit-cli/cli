@@ -75,6 +75,41 @@ func TestSwitchRunUnknownUserExit3WithAvailableList(t *testing.T) {
 	}
 }
 
+// Issue 677: in an unresolvable env the switch precheck must report the
+// environment error (exit 1, sentinel guidance) instead of "no stored
+// accounts" — the same unification as logout's named form; the
+// not-stored hint steered users whose accounts sat in an unreachable
+// HOME toward a doomed re-login detour.
+func TestSwitchRunUnresolvableEnvIsEnvError(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, _, _ := iostreams.Test()
+	opts := &SwitchOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+	err := switchRun(opts)
+	if err == nil {
+		t.Fatal("switchRun() error = nil in an unresolvable env")
+	}
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d (env error, not not-found)", code, cmdutil.ExitError)
+	}
+	if !strings.Contains(err.Error(), "failed to switch account") {
+		t.Fatalf("error = %q, want the command wrap", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
+	}
+}
+
 func TestSwitchRunNoAccountsExit3WithLoginHint(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	cfg := config.New()

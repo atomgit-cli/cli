@@ -327,6 +327,82 @@ func TestStatusRunNotLoggedInReturnsAuthError(t *testing.T) {
 	}
 }
 
+// Issue 677: a not-logged-in status in an unresolvable env gains one
+// stderr hint line distinguishing the broken environment from a fresh
+// install; the JSON field set stays byte-stable (scripts keep their
+// contract) and a resolvable-but-empty state stays hint-free (the hint
+// marks "invisible", not "empty").
+func TestStatusRunUnresolvableEnvPlainGainsHint(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+	t.Setenv("GC_HOST", "")
+
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	errOut := &strings.Builder{}
+	f.IOStreams.Out = out
+	f.IOStreams.ErrOut = errOut
+
+	opts := &StatusOptions{
+		IO:         f.IOStreams,
+		HttpClient: func() (*http.Client, error) { return &http.Client{}, nil },
+		Config:     func() (config.Config, error) { return config.New(), nil },
+	}
+
+	err := statusRun(opts)
+	if err == nil {
+		t.Fatal("statusRun() error = nil, want auth error")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
+		t.Fatalf("ExitCode() = %d, want %d (ExitAuth — the hint changes no exit semantics)", got, cmdutil.ExitAuth)
+	}
+	for _, want := range []string{"Not logged in", "not visible in this environment"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want %q mentioned", errOut.String(), want)
+		}
+	}
+}
+
+// The JSON contract is byte-stable in an unresolvable env: the hint is
+// plain-text stderr only (issue 677 acceptance: --json 输出与现在完全一致).
+func TestStatusRunUnresolvableEnvJSONUnchanged(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+	t.Setenv("GC_HOST", "")
+
+	f := cmdutil.TestFactory()
+	out := &strings.Builder{}
+	errOut := &strings.Builder{}
+	f.IOStreams.Out = out
+	f.IOStreams.ErrOut = errOut
+
+	opts := &StatusOptions{
+		IO:         f.IOStreams,
+		JSON:       true,
+		HttpClient: func() (*http.Client, error) { return &http.Client{}, nil },
+		Config:     func() (config.Config, error) { return config.New(), nil },
+	}
+
+	err := statusRun(opts)
+	if err == nil {
+		t.Fatal("statusRun() error = nil, want auth error")
+	}
+	if strings.Contains(errOut.String(), "not visible in this environment") {
+		t.Fatalf("stderr = %q — the hint must not leak into JSON mode", errOut.String())
+	}
+	got := strings.TrimSpace(out.String())
+	want := "{\n  \"hostname\": \"gitcode.com\",\n  \"logged_in\": false,\n  \"token_valid\": false\n}"
+	if got != want {
+		t.Fatalf("JSON output = %q, want the stable field set %q", got, want)
+	}
+}
+
 func TestStatusRunInvalidTokenReturnsAuthError(t *testing.T) {
 	t.Setenv("GC_CONFIG_DIR", t.TempDir())
 	t.Setenv("GC_TOKEN", "bad-token")

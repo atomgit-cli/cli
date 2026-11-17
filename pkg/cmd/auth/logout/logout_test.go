@@ -188,12 +188,14 @@ func TestLogoutUnresolvableConfigDirFailsClosedAtCommandLayer(t *testing.T) {
 	}
 }
 
-// Named-form contrast (issue 676 acceptance: both forms error in an
-// unresolvable env): the username precheck reads an empty account list,
-// so the named form fails honestly with exit 3 — the recorded asymmetry
-// vs the bare form's exit-1 env error (unification tracked with issue
-// 677's resolution-status exposure).
-func TestLogoutNamedFormUnresolvableEnvIsHonestNotStored(t *testing.T) {
+// Issue 677 unified contract: in an unresolvable env BOTH logout forms
+// report the environment error (exit 1, sentinel guidance) — the named
+// form no longer falls into the not-stored precheck (which read the
+// empty state and steered the user toward "account not stored" while
+// the real credentials sat in an unreachable HOME). This test flipped
+// from pinning the exit-3 asymmetry (issue 676 era) to the unified
+// exit-1 contract.
+func TestLogoutNamedFormUnresolvableEnvIsEnvError(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("GC_CONFIG_DIR", "")
@@ -214,11 +216,48 @@ func TestLogoutNamedFormUnresolvableEnvIsHonestNotStored(t *testing.T) {
 	if err == nil {
 		t.Fatal("logoutRun() error = nil for the named form in an unresolvable env")
 	}
-	if code := cmdutil.ExitCode(err); code != cmdutil.ExitNotFound {
-		t.Fatalf("ExitCode() = %d, want %d (not-stored, honest for the empty account list)", code, cmdutil.ExitNotFound)
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d (env error, unified with the bare form)", code, cmdutil.ExitError)
 	}
-	if !strings.Contains(err.Error(), "no accounts are stored on this host") {
-		t.Fatalf("error = %q, want the empty-list message (not a dangling \"available: \" trailer)", err.Error())
+	if !strings.Contains(err.Error(), "failed to clear stored authentication") {
+		t.Fatalf("error = %q, want the command wrap", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
+	}
+	if strings.Contains(out.String(), "Cleared") {
+		t.Fatalf("stdout must not claim success: %q", out.String())
+	}
+}
+
+// Issue 677: the env error precedes the confirmation gate — a broken
+// environment must not put the user through (or block on) the ceremony
+// before revealing the real problem. Non-interactive without --yes now
+// fails with the env error, not "confirmation required".
+func TestLogoutUnresolvableEnvPrecheckBeforeConfirm(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, _ := iostreams.Test()
+	opts := &LogoutOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+	err := logoutRun(opts)
+	if err == nil {
+		t.Fatal("logoutRun() error = nil without --yes in an unresolvable env")
+	}
+	if strings.Contains(err.Error(), "confirmation required") {
+		t.Fatalf("error = %q — the env error must precede the confirmation gate", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
 	}
 	if strings.Contains(out.String(), "Cleared") {
 		t.Fatalf("stdout must not claim success: %q", out.String())
