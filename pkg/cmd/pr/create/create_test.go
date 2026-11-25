@@ -824,6 +824,195 @@ func TestNewCmdCreate_LabelsFlag(t *testing.T) {
 	}
 }
 
+func TestNewCmdCreate_IssueFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		wantIssues   []string
+		wantClose    bool
+		wantCloseSet bool
+	}{
+		{
+			name:       "comma separated issue numbers",
+			args:       []string{"--title", "Feature", "--issue", "12,13"},
+			wantIssues: []string{"12", "13"},
+		},
+		{
+			name:       "hash prefixed issue number",
+			args:       []string{"--title", "Feature", "--issue", "#12"},
+			wantIssues: []string{"#12"},
+		},
+		{
+			name:       "repeated issue flags accumulate",
+			args:       []string{"--title", "Feature", "-i", "12", "--issue", "13"},
+			wantIssues: []string{"12", "13"},
+		},
+		{
+			name: "close policy stays unset without the flag",
+			args: []string{"--title", "Feature"},
+		},
+		{
+			name:         "bare close related issue means true",
+			args:         []string{"--title", "Feature", "--close-related-issue"},
+			wantClose:    true,
+			wantCloseSet: true,
+		},
+		{
+			name:         "explicit false close related issue",
+			args:         []string{"--title", "Feature", "--close-related-issue=false"},
+			wantClose:    false,
+			wantCloseSet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := cmdutil.TestFactory()
+			var got *CreateOptions
+			cmd := NewCmdCreate(f, func(opts *CreateOptions) error {
+				got = opts
+				return nil
+			})
+			cmd.SetArgs(append(tt.args, "--repo", "owner/repo"))
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got == nil {
+				t.Fatalf("runF was not called")
+			}
+			if strings.Join(got.Issues, ",") != strings.Join(tt.wantIssues, ",") {
+				t.Fatalf("Issues = %v, want %v", got.Issues, tt.wantIssues)
+			}
+			if got.CloseRelatedIssue != tt.wantClose {
+				t.Fatalf("CloseRelatedIssue = %v, want %v", got.CloseRelatedIssue, tt.wantClose)
+			}
+			if got.CloseRelatedIssueSet != tt.wantCloseSet {
+				t.Fatalf("CloseRelatedIssueSet = %v, want %v", got.CloseRelatedIssueSet, tt.wantCloseSet)
+			}
+		})
+	}
+}
+
+func TestCreateRunPassesLinkedIssuesAndClosePolicy(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	f := cmdutil.TestFactory()
+	var createdOpts *api.CreatePROptions
+
+	opts := &CreateOptions{
+		IO:                   f.IOStreams,
+		HttpClient:           f.HttpClient,
+		Repository:           "owner/repo",
+		Title:                "title",
+		Head:                 "feature-branch",
+		Base:                 "main",
+		Issues:               []string{"12", "#13", "12"},
+		CloseRelatedIssue:    true,
+		CloseRelatedIssueSet: true,
+		JSON:                 true,
+		CreatePR: func(client *api.Client, owner, repo string, createOpts *api.CreatePROptions) (*api.PullRequest, error) {
+			createdOpts = createOpts
+			return &api.PullRequest{Number: 7, Title: createOpts.Title, HTMLURL: "https://gitcode.com/owner/repo/merge_requests/7"}, nil
+		},
+	}
+
+	if err := createRun(opts); err != nil {
+		t.Fatalf("createRun() error = %v", err)
+	}
+	if createdOpts == nil {
+		t.Fatalf("CreatePR() was not called")
+	}
+	if fmt.Sprint(createdOpts.IssueNumbers) != "[12 13]" {
+		t.Fatalf("IssueNumbers = %v, want [12 13]", createdOpts.IssueNumbers)
+	}
+	if createdOpts.CloseRelatedIssue == nil || !*createdOpts.CloseRelatedIssue {
+		t.Fatalf("CloseRelatedIssue = %v, want true", createdOpts.CloseRelatedIssue)
+	}
+}
+
+func TestCreateRunLeavesIssueLinkageUnset(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	f := cmdutil.TestFactory()
+	var createdOpts *api.CreatePROptions
+
+	opts := &CreateOptions{
+		IO:         f.IOStreams,
+		HttpClient: f.HttpClient,
+		Repository: "owner/repo",
+		Title:      "title",
+		Head:       "feature-branch",
+		Base:       "main",
+		JSON:       true,
+		CreatePR: func(client *api.Client, owner, repo string, createOpts *api.CreatePROptions) (*api.PullRequest, error) {
+			createdOpts = createOpts
+			return &api.PullRequest{Number: 7, Title: createOpts.Title, HTMLURL: "https://gitcode.com/owner/repo/merge_requests/7"}, nil
+		},
+	}
+
+	if err := createRun(opts); err != nil {
+		t.Fatalf("createRun() error = %v", err)
+	}
+	if createdOpts == nil {
+		t.Fatalf("CreatePR() was not called")
+	}
+	if len(createdOpts.IssueNumbers) != 0 {
+		t.Fatalf("IssueNumbers = %v, want none", createdOpts.IssueNumbers)
+	}
+	if createdOpts.CloseRelatedIssue != nil {
+		t.Fatalf("CloseRelatedIssue = %v, want nil so the repository setting applies", *createdOpts.CloseRelatedIssue)
+	}
+}
+
+func TestCreateRunRejectsInvalidIssueValues(t *testing.T) {
+	t.Setenv("GC_TOKEN", "test-token")
+
+	tests := []struct {
+		name   string
+		issues []string
+	}{
+		{name: "non numeric", issues: []string{"abc"}},
+		{name: "zero", issues: []string{"0"}},
+		{name: "negative", issues: []string{"-3"}},
+		{name: "decimal", issues: []string{"1.5"}},
+		{name: "double hash", issues: []string{"##12"}},
+		{name: "empty element", issues: []string{"12", ""}},
+		{name: "empty list", issues: []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := cmdutil.TestFactory()
+			created := false
+			opts := &CreateOptions{
+				IO:         f.IOStreams,
+				HttpClient: f.HttpClient,
+				Repository: "owner/repo",
+				Title:      "title",
+				Head:       "feature-branch",
+				Base:       "main",
+				Issues:     tt.issues,
+				CreatePR: func(client *api.Client, owner, repo string, createOpts *api.CreatePROptions) (*api.PullRequest, error) {
+					created = true
+					return &api.PullRequest{Number: 7}, nil
+				},
+			}
+
+			err := createRun(opts)
+			if err == nil {
+				t.Fatalf("createRun() error = nil, want usage error")
+			}
+			if got := cmdutil.ExitCode(err); got != cmdutil.ExitUsage {
+				t.Fatalf("ExitCode() = %d, want %d", got, cmdutil.ExitUsage)
+			}
+			if created {
+				t.Fatalf("CreatePR() was called for an invalid --issue value")
+			}
+		})
+	}
+}
+
 func TestCreateRunBrowserFailureNonTTY(t *testing.T) {
 	t.Setenv("GC_TOKEN", "test-token")
 
