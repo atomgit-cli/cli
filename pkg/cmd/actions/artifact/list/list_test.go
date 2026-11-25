@@ -16,6 +16,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -30,7 +31,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -43,6 +46,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListSortEnum(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error { return nil })
 	flag := cmd.Flags().Lookup("sort")
 	if flag == nil {
@@ -93,6 +97,7 @@ func TestListRunBuildsV8Query(t *testing.T) {
 	}
 	q := parsed.Query()
 	for _, key := range []string{"name", "sort", "direction", "per_page"} {
+		key := key
 		if _, ok := q[key]; !ok {
 			t.Fatalf("query missing %s in %s", key, q.Encode())
 		}
@@ -237,6 +242,7 @@ func TestListRunTable(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"NAME", "ID", "SIZE", "CREATED", "EXPIRES", "build-output", "art-1", "1.0 MiB", "2026-"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("table output missing %q; output=%s", want, got)
 		}
@@ -413,6 +419,7 @@ func TestListRunPaginateWithRunFlag(t *testing.T) {
 	}
 	// Verify all requests hit the run-scoped endpoint (not repo-level).
 	for _, p := range gotPaths {
+		p := p
 		if !strings.HasPrefix(p, "/api/v8/repos/owner/repo/actions/runs/run-1/artifacts") {
 			t.Fatalf("paginate+--run path = %q, want run-scoped prefix", p)
 		}
@@ -459,6 +466,7 @@ func TestListRunTrimsToLimit(t *testing.T) {
 }
 
 func TestResolveOutputFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		jsonFlag bool
@@ -474,7 +482,9 @@ func TestResolveOutputFormat(t *testing.T) {
 		{name: "json incompatible", jsonFlag: true, raw: "table", wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := resolveOutputFormat(tt.jsonFlag, tt.raw)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveOutputFormat() error = %v, wantErr %v", err, tt.wantErr)

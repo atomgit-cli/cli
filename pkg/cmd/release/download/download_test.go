@@ -16,6 +16,7 @@ import (
 )
 
 func TestNewCmdDownloadAllowsLatestReleaseWithoutTag(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdDownload(f, func(opts *DownloadOptions) error {
 		return nil
@@ -230,6 +231,7 @@ func TestDownloadRunUsesConfiguredHostForReleaseAndAssetRequests(t *testing.T) {
 }
 
 func TestDownloadAssetUsesAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -278,6 +280,7 @@ func TestDownloadAssetUsesAuthorizationHeader(t *testing.T) {
 }
 
 func TestDownloadAssetFallsBackToAttachFilesEndpointWithoutBrowserDownloadURL(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -310,6 +313,7 @@ func TestDownloadAssetFallsBackToAttachFilesEndpointWithoutBrowserDownloadURL(t 
 }
 
 func TestDownloadAssetIgnoresNonArchiveBrowserDownloadURL(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -347,6 +351,7 @@ func TestDownloadAssetIgnoresNonArchiveBrowserDownloadURL(t *testing.T) {
 // Security tests for path traversal prevention
 
 func TestSanitizeAssetName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -371,7 +376,9 @@ func TestSanitizeAssetName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := sanitizeAssetName(tt.input)
 			if tt.wantErr {
 				if err == nil {
@@ -393,6 +400,7 @@ func TestSanitizeAssetName(t *testing.T) {
 }
 
 func TestSafeOutputPath(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	// Resolve symlinks for canonical comparison (macOS /var → /private/var)
 	if resolved, err := filepath.EvalSymlinks(tempDir); err == nil {
@@ -419,7 +427,9 @@ func TestSafeOutputPath(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := safeOutputPath(tt.outputDir, tt.assetName)
 			if tt.wantErr {
 				if err == nil {
@@ -448,6 +458,7 @@ func TestSafeOutputPath(t *testing.T) {
 }
 
 func TestDownloadAssetRejectsPathTraversal(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -479,6 +490,7 @@ func TestDownloadAssetRejectsPathTraversal(t *testing.T) {
 }
 
 func TestDownloadAssetRejectsAbsolutePath(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -504,6 +516,7 @@ func TestDownloadAssetRejectsAbsolutePath(t *testing.T) {
 }
 
 func TestDownloadAssetRejectsPathSeparator(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	ioStreams, _, _, _ := iostreams.Test()
 	cs := ioStreams.ColorScheme()
@@ -535,6 +548,7 @@ func TestDownloadAssetRejectsPathSeparator(t *testing.T) {
 }
 
 func TestFilterSourceArchives(t *testing.T) {
+	t.Parallel()
 	// Regression for #285: the previous heuristic skipped any .zip/.tar* asset
 	// whose name contained both "v" and ".", wrongly dropping normal assets.
 	assets := []api.ReleaseAsset{
@@ -584,11 +598,13 @@ func TestFilterSourceArchives(t *testing.T) {
 
 	gotNames := make(map[string]bool, len(got))
 	for _, a := range got {
+		a := a
 		gotNames[a.Name] = true
 	}
 
 	wantKept := []string{"server.tar.gz", "driver.zip", "service.zip", "checksums.txt", "noturl.zip"}
 	for _, name := range wantKept {
+		name := name
 		if !gotNames[name] {
 			t.Errorf("filterSourceArchives() dropped normal asset %q, want it kept", name)
 		}
@@ -596,6 +612,7 @@ func TestFilterSourceArchives(t *testing.T) {
 
 	wantFiltered := []string{"v1.0.0.zip", "v1.0.0.tar.gz", "source"}
 	for _, name := range wantFiltered {
+		name := name
 		if gotNames[name] {
 			t.Errorf("filterSourceArchives() kept source archive %q, want it filtered", name)
 		}

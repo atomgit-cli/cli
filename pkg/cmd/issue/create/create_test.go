@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewCmdCreate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -58,7 +59,9 @@ func TestNewCmdCreate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdCreate(f, func(opts *CreateOptions) error {
 				return nil
@@ -328,6 +331,7 @@ func TestCreateRunFailsWhenAssigneeVerificationReadFails(t *testing.T) {
 }
 
 func TestCreateRunDryRunShowsAdvancedFields(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &CreateOptions{
 		IO:               f.IOStreams,
@@ -361,6 +365,7 @@ func TestCreateRunDryRunShowsAdvancedFields(t *testing.T) {
 }
 
 func TestCreateRunDryRunWithJSONWritesPreview(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &CreateOptions{
 		IO:               f.IOStreams,
@@ -401,6 +406,7 @@ func TestCreateRunDryRunWithJSONWritesPreview(t *testing.T) {
 }
 
 func TestGetCustomFields(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	fieldsPath := filepath.Join(tempDir, "fields.json")
 	if err := os.WriteFile(fieldsPath, []byte(`[{"id":"field","value":"demo"}]`), 0o644); err != nil {
@@ -439,7 +445,9 @@ func TestGetCustomFields(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := getCustomFields(tt.opts)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {

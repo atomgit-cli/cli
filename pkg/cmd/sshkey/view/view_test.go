@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdViewParsesID(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdView(cmdutil.TestFactory(), func(opts *ViewOptions) error {
 		if opts.ID != 42 || !opts.JSON {
 			t.Fatalf("options = %+v", opts)

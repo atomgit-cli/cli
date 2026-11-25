@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdList(f, func(opts *ListOptions) error {
 		return nil
@@ -21,6 +22,7 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListJSONFlag(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	var gotJSON bool
 
@@ -39,6 +41,7 @@ func TestNewCmdListJSONFlag(t *testing.T) {
 }
 
 func TestNewCmdListLimitFlagExists(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdList(f, nil)
 

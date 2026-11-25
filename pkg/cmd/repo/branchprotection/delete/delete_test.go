@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdDelete(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdDelete(cmdutil.TestFactory(), func(opts *DeleteOptions) error { return nil })
 	if cmd.Use != "delete <wildcard>" {
 		t.Fatalf("Use = %q, want delete", cmd.Use)

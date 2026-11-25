@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error { return nil })
 	if cmd.Use != "list" {
 		t.Fatalf("Use = %q, want list", cmd.Use)

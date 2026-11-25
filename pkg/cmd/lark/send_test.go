@@ -39,12 +39,14 @@ func contains(t *testing.T, s, want string, msg string) {
 }
 
 func TestSendRun_NoContentIsUsageError(t *testing.T) {
+	t.Parallel()
 	if err := sendRun(&sendOptions{ChatID: "oc_x"}); !isUsageError(err) {
 		t.Fatalf("err = %v, want usage error", err)
 	}
 }
 
 func TestSendRun_MultipleContentIsUsageError(t *testing.T) {
+	t.Parallel()
 	err := sendRun(&sendOptions{ChatID: "oc_x", Text: "a", Markdown: "b"})
 	if !isUsageError(err) {
 		t.Fatalf("err = %v, want usage error", err)
@@ -73,6 +75,7 @@ func TestSendRun_EnvDefaultChatResolves(t *testing.T) {
 }
 
 func TestSendRun_DryRunJSON(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hello world", DryRun: true, JSON: true,
 		LarkRun: stubRun("", "", 0),
@@ -88,6 +91,7 @@ func TestSendRun_DryRunJSON(t *testing.T) {
 }
 
 func TestSendRun_DryRunTextQuotesSpaces(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hello world", DryRun: true,
 		LarkRun: stubRun("", "", 0),
@@ -99,6 +103,7 @@ func TestSendRun_DryRunTextQuotesSpaces(t *testing.T) {
 }
 
 func TestSendRun_SuccessFriendly(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi",
 		LarkRun: stubRun(`{"ok":true,"identity":"user","data":{"message_id":"om_1"}}`, "", 0),
@@ -110,6 +115,7 @@ func TestSendRun_SuccessFriendly(t *testing.T) {
 }
 
 func TestSendRun_SuccessJSON(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi", JSON: true,
 		LarkRun: stubRun(`{"ok":true,"identity":"user","data":{"message_id":"om_1"}}`, "", 0),
@@ -122,6 +128,7 @@ func TestSendRun_SuccessJSON(t *testing.T) {
 }
 
 func TestSendRun_LarkCLINonZeroExit(t *testing.T) {
+	t.Parallel()
 	_, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi",
 		LarkRun: stubRun("", `{"ok":false,"error":{"message":"chat not found"}}`, 1),
@@ -146,6 +153,7 @@ func TestSendRun_SecretScanBlocksSend(t *testing.T) {
 }
 
 func TestSendRun_BodyFileStdin(t *testing.T) {
+	t.Parallel()
 	io, _, out, _ := iostreams.Test()
 	io.In = strings.NewReader("from stdin body")
 	opts := &sendOptions{
@@ -159,6 +167,7 @@ func TestSendRun_BodyFileStdin(t *testing.T) {
 }
 
 func TestSendRun_MarkdownContent(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Markdown: "## H", DryRun: true, JSON: true,
 		LarkRun: stubRun("", "", 0),
@@ -171,6 +180,7 @@ func TestSendRun_MarkdownContent(t *testing.T) {
 }
 
 func TestShellQuote(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ in, want string }{
 		{"plain", "plain"},
 		{"", `""`},
@@ -179,6 +189,7 @@ func TestShellQuote(t *testing.T) {
 		{`back\slash`, `"back\\slash"`},
 	}
 	for _, tt := range tests {
+		tt := tt
 		if got := shellQuote(tt.in); got != tt.want {
 			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
 		}
@@ -186,6 +197,7 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestSendRun_UserIDTarget(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		UserID: "ou_user1", Text: "hi", DryRun: true,
 		LarkRun: stubRun("", "", 0),
@@ -198,6 +210,7 @@ func TestSendRun_UserIDTarget(t *testing.T) {
 }
 
 func TestSendRun_ToSelfResolvesOpenID(t *testing.T) {
+	t.Parallel()
 	// The LarkRun stub returns an auth-status payload (with openId) for the
 	// auth status call, and a send-success envelope for the send call. Both
 	// are returned regardless of args, which is fine for this unit test.
@@ -214,6 +227,7 @@ func TestSendRun_ToSelfResolvesOpenID(t *testing.T) {
 }
 
 func TestSendRun_ToSelfMissingOpenID(t *testing.T) {
+	t.Parallel()
 	_, _, err := runSend(t, &sendOptions{
 		ToSelf: true, Text: "hi",
 		LarkRun: stubRun(`{"ok":true,"identities":{"user":{}}}`, "", 0),
@@ -225,6 +239,7 @@ func TestSendRun_ToSelfMissingOpenID(t *testing.T) {
 }
 
 func TestResolveSelfOpenID_AltSnakeCase(t *testing.T) {
+	t.Parallel()
 	// Defensive: tolerate open_id if lark-cli ever changes casing.
 	authStatus := `{"ok":true,"identities":{"user":{"open_id":"ou_snake"}}}`
 	out, _, err := runSend(t, &sendOptions{
@@ -238,6 +253,7 @@ func TestResolveSelfOpenID_AltSnakeCase(t *testing.T) {
 }
 
 func TestSendRun_BodyFileRealFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := dir + "/body.txt"
 	if err := os.WriteFile(path, []byte("from a real file body"), 0o600); err != nil {
@@ -254,6 +270,7 @@ func TestSendRun_BodyFileRealFile(t *testing.T) {
 }
 
 func TestSendRun_FileAttachment(t *testing.T) {
+	t.Parallel()
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", File: "./report.pdf", DryRun: true, JSON: true,
 		LarkRun: stubRun("", "", 0),
@@ -266,6 +283,7 @@ func TestSendRun_FileAttachment(t *testing.T) {
 }
 
 func TestSendRun_EnvelopeFallbackChatID(t *testing.T) {
+	t.Parallel()
 	// lark-cli returns data.chat_id; success JSON should surface it verbatim.
 	out, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_target", Text: "hi", JSON: true,
@@ -278,6 +296,7 @@ func TestSendRun_EnvelopeFallbackChatID(t *testing.T) {
 }
 
 func TestSendRun_EmptyResponseExitZero(t *testing.T) {
+	t.Parallel()
 	// stdout empty + exit 0 → "unexpected empty response" error.
 	_, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi",
@@ -290,6 +309,7 @@ func TestSendRun_EmptyResponseExitZero(t *testing.T) {
 }
 
 func TestSendRun_NonJSONStderrExitNonZero(t *testing.T) {
+	t.Parallel()
 	// Non-JSON stderr + exit 1 → falls back to trimmed stderr text, exit 1
 	// (no auth indicator → generic error).
 	_, _, err := runSend(t, &sendOptions{
@@ -303,6 +323,7 @@ func TestSendRun_NonJSONStderrExitNonZero(t *testing.T) {
 }
 
 func TestSendRun_AuthFailureMapsToExit4(t *testing.T) {
+	t.Parallel()
 	// "missing required scope" is an auth/scope failure → exit 4.
 	_, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi",
@@ -321,6 +342,7 @@ func TestSendRun_AuthFailureMapsToExit4(t *testing.T) {
 }
 
 func TestSendRun_MembershipFailureMapsToExit4(t *testing.T) {
+	t.Parallel()
 	// "out of the chat" membership failure → permission → exit 4.
 	_, _, err := runSend(t, &sendOptions{
 		ChatID: "oc_x", Text: "hi",
@@ -336,6 +358,7 @@ func TestSendRun_MembershipFailureMapsToExit4(t *testing.T) {
 }
 
 func TestSendCommand_TargetsMutuallyExclusive(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := newCmdSend(f, nil)
 	cmd.SetArgs([]string{"--to-self", "--chat-id", "oc_x", "--text", "hi"})
@@ -346,6 +369,7 @@ func TestSendCommand_TargetsMutuallyExclusive(t *testing.T) {
 }
 
 func TestClassifyAuthError(t *testing.T) {
+	t.Parallel()
 	authMsgs := []string{
 		"missing required scope(s): im:message.send_as_user",
 		"Bot/User can NOT be out of the chat.",
@@ -353,6 +377,7 @@ func TestClassifyAuthError(t *testing.T) {
 		"no authority to manage",
 	}
 	for _, m := range authMsgs {
+		m := m
 		var ce *cmdutil.CLIError
 		if err := classifyAuthError(m); !errors.As(err, &ce) || ce.Code != cmdutil.ExitAuth {
 			t.Errorf("classifyAuthError(%q) = %v, want exit %d", m, err, cmdutil.ExitAuth)

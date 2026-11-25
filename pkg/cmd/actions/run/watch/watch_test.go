@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdWatch(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -29,7 +30,9 @@ func TestNewCmdWatch(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdWatch(f, func(opts *WatchOptions) error {
 				return nil
@@ -45,6 +48,7 @@ func TestNewCmdWatch(t *testing.T) {
 }
 
 func TestNewCmdWatchEmptyRunID(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdWatch(f, nil)
 	cmd.SetArgs([]string{""})
@@ -56,6 +60,7 @@ func TestNewCmdWatchEmptyRunID(t *testing.T) {
 }
 
 func TestNewCmdWatchInvalidInterval(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdWatch(f, nil)
 	cmd.SetArgs([]string{"--interval", "0", "run-1"})
@@ -67,10 +72,12 @@ func TestNewCmdWatchInvalidInterval(t *testing.T) {
 }
 
 func TestNewCmdWatchFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdWatch(cmdutil.TestFactory(), func(opts *WatchOptions) error {
 		return nil
 	})
 	for _, flag := range []string{"repo", "interval", "compact", "exit-status", "wait", "json"} {
+		flag := flag
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)
@@ -131,6 +138,7 @@ func TestWatchRunNonTTYTerminalSnapshot(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"CI", "COMPLETED", "run id", "build", "compile"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q; output=%s", want, got)
 		}
@@ -276,12 +284,15 @@ func TestWatchRunError(t *testing.T) {
 }
 
 func TestTerminalStatuses(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"COMPLETED", "FAILED", "CANCELED", "IGNORED", "PAUSED", "SUSPEND"} {
+		status := status
 		if !terminalStatuses[status] {
 			t.Errorf("terminalStatuses[%q] = false, want true", status)
 		}
 	}
 	for _, status := range []string{"RUNNING", "", "PENDING"} {
+		status := status
 		if terminalStatuses[status] {
 			t.Errorf("terminalStatuses[%q] = true, want false", status)
 		}
@@ -289,12 +300,15 @@ func TestTerminalStatuses(t *testing.T) {
 }
 
 func TestFailedStatuses(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"FAILED", "CANCELED"} {
+		status := status
 		if !failedStatuses[status] {
 			t.Errorf("failedStatuses[%q] = false, want true", status)
 		}
 	}
 	for _, status := range []string{"COMPLETED", "RUNNING", "PAUSED"} {
+		status := status
 		if failedStatuses[status] {
 			t.Errorf("failedStatuses[%q] = true, want false", status)
 		}
@@ -302,6 +316,7 @@ func TestFailedStatuses(t *testing.T) {
 }
 
 func TestHasFailedJobs(t *testing.T) {
+	t.Parallel()
 	stage := apiStageWithJobs("build", "COMPLETED", []apiJobSpec{
 		{name: "compile", status: "COMPLETED"},
 		{name: "test", status: "FAILED"},
@@ -320,6 +335,7 @@ func TestHasFailedJobs(t *testing.T) {
 }
 
 func TestHasFailedSteps(t *testing.T) {
+	t.Parallel()
 	job := apiWorkflowRunJob("compile", "FAILED", []string{"FAILED", "COMPLETED"})
 	if !hasFailedSteps(job) {
 		t.Error("hasFailedSteps = false, want true when a step is FAILED")
@@ -348,6 +364,7 @@ type apiJobSpec struct {
 func apiStageWithJobs(name, status string, jobs []apiJobSpec) api.WorkflowRunStage {
 	stage := api.WorkflowRunStage{Name: name, Status: status}
 	for _, j := range jobs {
+		j := j
 		stage.Jobs = append(stage.Jobs, api.WorkflowRunJob{Name: j.name, Status: j.status})
 	}
 	return stage
@@ -356,6 +373,7 @@ func apiStageWithJobs(name, status string, jobs []apiJobSpec) api.WorkflowRunSta
 func apiWorkflowRunJob(name, status string, stepStatuses []string) api.WorkflowRunJob {
 	job := api.WorkflowRunJob{Name: name, Status: status}
 	for _, s := range stepStatuses {
+		s := s
 		job.Steps = append(job.Steps, api.WorkflowRunStep{Name: "step", Status: s})
 	}
 	return job

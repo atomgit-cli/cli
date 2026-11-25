@@ -15,6 +15,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -38,7 +39,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -54,6 +57,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestAssetSizeLabel(t *testing.T) {
+	t.Parallel()
 	if got := assetSizeLabel(api.ReleaseAsset{Size: 0}); got != "unknown size" {
 		t.Fatalf("assetSizeLabel() = %q", got)
 	}

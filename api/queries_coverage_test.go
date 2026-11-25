@@ -8,6 +8,7 @@ import (
 )
 
 func TestListRepoLabels(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	labels, err := ListRepoLabels(client, "owner", "test-repo", nil)
 	if err != nil {
@@ -19,6 +20,7 @@ func TestListRepoLabels(t *testing.T) {
 }
 
 func TestCreateIssueComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &CreateCommentOptions{Body: "New comment"}
 	comment, err := CreateIssueComment(client, "owner", "test-repo", 1, opts)
@@ -31,6 +33,7 @@ func TestCreateIssueComment(t *testing.T) {
 }
 
 func TestListRepoMilestones(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	milestones, err := ListRepoMilestones(client, "owner", "test-repo", nil)
 	if err != nil {
@@ -42,6 +45,7 @@ func TestListRepoMilestones(t *testing.T) {
 }
 
 func TestGetIssuePullRequests(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	// The mock handler may not have this endpoint; test that the function runs
 	// and we just check it doesn't panic on the call path.
@@ -49,6 +53,7 @@ func TestGetIssuePullRequests(t *testing.T) {
 }
 
 func TestListPRComments(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	comments, err := ListPRComments(client, "owner", "test-repo", 1)
 	if err != nil {
@@ -60,6 +65,7 @@ func TestListPRComments(t *testing.T) {
 }
 
 func TestGetCommit(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	commit, err := GetCommit(client, "owner", "test-repo", "abc123", false)
 	if err != nil {
@@ -71,6 +77,7 @@ func TestGetCommit(t *testing.T) {
 }
 
 func TestListCommitComments(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	comments, err := ListCommitComments(client, "owner", "test-repo", nil)
 	if err != nil {
@@ -82,6 +89,7 @@ func TestListCommitComments(t *testing.T) {
 }
 
 func TestUpdateIssueComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &UpdateCommentOptions{Body: "updated"}
 	comment, err := UpdateIssueComment(client, "owner", "test-repo", "1", opts)
@@ -94,6 +102,7 @@ func TestUpdateIssueComment(t *testing.T) {
 }
 
 func TestDeleteIssueComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	if err := DeleteIssueComment(client, "owner", "test-repo", 1); err != nil {
 		t.Fatalf("DeleteIssueComment() error = %v", err)
@@ -101,6 +110,7 @@ func TestDeleteIssueComment(t *testing.T) {
 }
 
 func TestCreateMilestone(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &CreateMilestoneOptions{Title: "v1.0"}
 	milestone, err := CreateMilestone(client, "owner", "test-repo", opts)
@@ -113,6 +123,7 @@ func TestCreateMilestone(t *testing.T) {
 }
 
 func TestGetMilestone(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	m, err := GetMilestone(client, "owner", "test-repo", 1)
 	if err != nil {
@@ -124,6 +135,7 @@ func TestGetMilestone(t *testing.T) {
 }
 
 func TestDeleteMilestone(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	if err := DeleteMilestone(client, "owner", "test-repo", 1); err != nil {
 		t.Fatalf("DeleteMilestone() error = %v", err)
@@ -131,6 +143,7 @@ func TestDeleteMilestone(t *testing.T) {
 }
 
 func TestCreateCommitComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	c, err := CreateCommitComment(client, "owner", "test-repo", "abc123", "nice")
 	if err != nil {
@@ -142,6 +155,7 @@ func TestCreateCommitComment(t *testing.T) {
 }
 
 func TestListCommentsForCommit(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	comments, err := ListCommentsForCommit(client, "owner", "test-repo", "abc123", nil)
 	if err != nil {
@@ -152,6 +166,7 @@ func TestListCommentsForCommit(t *testing.T) {
 	}
 }
 func TestUpdateCommitComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	c, err := UpdateCommitComment(client, "owner", "test-repo", "1", "updated body")
 	if err != nil {
@@ -163,6 +178,7 @@ func TestUpdateCommitComment(t *testing.T) {
 }
 
 func TestMergePullRequest(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	pr, err := MergePullRequest(client, "owner", "test-repo", 1, &MergePROptions{SHA: "abc"})
 	if err != nil {
@@ -174,6 +190,7 @@ func TestMergePullRequest(t *testing.T) {
 }
 
 func TestCreatePRComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &CreatePRCommentOptions{Body: "LGTM"}
 	c, err := CreatePRComment(client, "owner", "test-repo", 1, opts)
@@ -186,6 +203,7 @@ func TestCreatePRComment(t *testing.T) {
 }
 
 func TestEditPR(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &UpdatePROptions{Title: "Updated PR"}
 	pr, err := EditPR(client, "owner", "test-repo", 1, opts)
@@ -198,6 +216,7 @@ func TestEditPR(t *testing.T) {
 }
 
 func TestReopenPullRequest(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	pr, err := ReopenPullRequest(client, "owner", "test-repo", 1)
 	if err != nil {
@@ -210,6 +229,7 @@ func TestReopenPullRequest(t *testing.T) {
 	}
 }
 func TestAddIssueLabels(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	labels, err := AddIssueLabels(client, "owner", "test-repo", 1, []string{"bug"})
 	if err != nil {
@@ -221,6 +241,7 @@ func TestAddIssueLabels(t *testing.T) {
 }
 
 func TestTestPR(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	if err := TestPR(client, "owner", "test-repo", 1, nil); err != nil {
 		t.Fatalf("TestPR() error = %v", err)
@@ -228,6 +249,7 @@ func TestTestPR(t *testing.T) {
 }
 
 func TestEditPRComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &EditPRCommentOptions{Body: "edited comment"}
 	c, err := EditPRComment(client, "owner", "test-repo", 1, opts)
@@ -240,6 +262,7 @@ func TestEditPRComment(t *testing.T) {
 }
 
 func TestDeletePRComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	if err := DeletePRComment(client, "owner", "test-repo", 1); err != nil {
 		t.Fatalf("DeletePRComment() error = %v", err)
@@ -247,6 +270,7 @@ func TestDeletePRComment(t *testing.T) {
 }
 
 func TestReplyPRComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &ReplyPRCommentOptions{Body: "reply"}
 	r, err := ReplyPRComment(client, "owner", "test-repo", 1, "d1", opts)
@@ -259,6 +283,7 @@ func TestReplyPRComment(t *testing.T) {
 }
 
 func TestResolvePRComment(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
 	opts := &ResolvePRCommentOptions{Resolved: true}
 	if err := ResolvePRComment(client, "owner", "test-repo", 1, "d1", opts); err != nil {

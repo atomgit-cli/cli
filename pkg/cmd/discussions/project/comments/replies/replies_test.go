@@ -16,6 +16,7 @@ func httpFactory(client *http.Client) func() (*http.Client, error) {
 }
 
 func TestNewCmdReplies(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdReplies(f, func(opts *RepliesOptions) error { return nil })
 	cmd.SetArgs([]string{"42", "c1", "-R", "owner/repo"})

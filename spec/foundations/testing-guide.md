@@ -82,6 +82,7 @@ func TestLabelCmdWithError(t *testing.T) {}
 
 ```go
 func TestXxxCommand(t *testing.T) {
+    t.Parallel()
     tests := []struct {
         name    string
         args    []string
@@ -100,10 +101,71 @@ func TestXxxCommand(t *testing.T) {
     }
 
     for _, tt := range tests {
+        tt := tt
         t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
             // 测试逻辑
         })
     }
+}
+```
+
+### 并行测试
+
+使用 `t.Parallel()` 可减少 CI 执行时间，但**仅在确认无共享可变状态时才允许并行化**。使用 mock HTTP 并不是并行安全的充分条件——必须逐项确认所有可变状态均已隔离。
+
+**前置条件（添加 `t.Parallel()` 前必须逐条确认）：**
+
+- 并行子测试之间**不共享**任何可变状态，包括但不限于：
+  - `IOStreams` 实例（每个子测试必须构造独立的 `iostreams.Test()`）
+  - `Options` 结构体指针（每个子测试必须构造独立的 Options，或使用值类型 + `tt := tt`）
+  - 环境变量（`os.Setenv` / `os.Unsetenv`）
+  - 进程工作目录（`os.Chdir`）
+  - 临时文件 / 目录（每个子测试使用独立的 `t.TempDir()`）
+  - 包级全局变量
+  - 默认 `http.Client` / `http.Transport`
+- 仅**读取**共享对象（如只读字符串、不可变配置）是安全的；**写入**共享对象（包括赋值、`SetXxx`、写入 buffer）是禁止的
+
+**规则：**
+
+- 顶层 `Test*` 函数：在函数体首行调用 `t.Parallel()`
+- 子测试（`t.Run` 回调）：在回调体首行调用 `t.Parallel()`
+- **禁止**在调用 `t.Parallel()` 的测试中使用 `t.Setenv()`：Go 中 `t.Setenv` 会在并行测试中 panic。需要环境变量的测试不应调用 `t.Parallel()`
+- `t.Setenv()` 在父级调用时，子测试仍可调用 `t.Parallel()`（因为父级未并行）
+- 使用 `os.Setenv` / `os.Unsetenv` 的测试**不得**调用 `t.Parallel()`（与 `t.Setenv` 同理）
+- Go 1.22+ 循环变量已按值捕获，`tt := tt` 不再严格必要；保留该写法作为兼容习惯是允许的，但不应将其作为强制规则
+
+**示例：**
+
+```go
+// 可并行化的测试：每个子测试构造独立的 IOStreams 和 Options
+func TestListCmd(t *testing.T) {
+    t.Parallel()
+    tests := []struct{ ... }{ ... }
+
+    for _, tt := range tests {
+        tt := tt
+        t.Run(tt.name, func(t *testing.T) {
+            t.Parallel()
+            io, _, _, _ := iostreams.Test()  // 每个子测试独立 IOStreams
+            f := cmdutil.TestFactory()
+            // 使用 testutil.NewRoundTripFunc 的 mock HTTP
+        })
+    }
+}
+
+// 不可并行化的测试（使用 t.Setenv）
+func TestListRunJSON(t *testing.T) {
+    // 不调用 t.Parallel()
+    t.Setenv("GC_TOKEN", "test-token")
+    f := cmdutil.TestFactory()
+    // ...
+}
+
+// 不可并行化的测试（子测试共享 IOStreams 并修改其字段）
+func TestGetBody(t *testing.T) {
+    io, _, _, _ := iostreams.Test()  // 共享 IOStreams
+    // 子测试会写入 io.In，不可并行
 }
 ```
 
@@ -233,7 +295,7 @@ func TestIssueCreate(t *testing.T) {
 ## 测试工具
 
 ### 表格驱动测试
-推荐使用表格驱动测试：
+推荐使用表格驱动测试，子测试使用 `tt := tt` 闭包捕获并调用 `t.Parallel()`：
 
 ```go
 tests := []struct {
@@ -246,7 +308,9 @@ tests := []struct {
 }
 
 for _, tt := range tests {
+    tt := tt
     t.Run(tt.name, func(t *testing.T) {
+        t.Parallel()
         got := process(tt.input)
         if got != tt.want {
             t.Errorf("got %q, want %q", got, tt.want)
@@ -276,4 +340,4 @@ func (m *MockClient) Do(req *Request) (*Response, error) {
 
 ---
 
-**最后更新**: 2026-03-26
+**最后更新**: 2026-08-25

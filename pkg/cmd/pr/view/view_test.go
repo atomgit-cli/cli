@@ -17,6 +17,7 @@ import (
 )
 
 func TestNewCmdViewTimeFormatEnumAnnotation(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdView(f, nil)
 	flag := cmd.Flags().Lookup("time-format")
@@ -30,6 +31,7 @@ func TestNewCmdViewTimeFormatEnumAnnotation(t *testing.T) {
 }
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -68,7 +70,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdView(f, func(opts *ViewOptions) error {
 				return nil
@@ -84,6 +88,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestParseTimeFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -97,7 +102,9 @@ func TestParseTimeFormat(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parseTimeFormat(tt.input)
 			if tt.wantErr {
 				if err == nil {
@@ -116,6 +123,7 @@ func TestParseTimeFormat(t *testing.T) {
 }
 
 func TestFormatViewTime(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 	ts := api.FlexibleTime{Time: now.Add(-90 * time.Minute)}
 
@@ -131,6 +139,7 @@ func TestFormatViewTime(t *testing.T) {
 }
 
 func TestRenderPRView(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 	pr := &api.PullRequest{
@@ -191,6 +200,7 @@ func TestRenderPRView(t *testing.T) {
 }
 
 func TestRenderPRCommentsEmpty(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	var buf bytes.Buffer
 	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
@@ -205,6 +215,7 @@ func TestRenderPRCommentsEmpty(t *testing.T) {
 }
 
 func TestViewRunRejectsJSONWithWebBeforeAuth(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := testutil.NewTestIOStreams()
 	err := viewRun(&ViewOptions{
 		IO:     io,

@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdLog(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -27,7 +28,9 @@ func TestNewCmdLog(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdLog(f, func(opts *LogOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -40,6 +43,7 @@ func TestNewCmdLog(t *testing.T) {
 }
 
 func TestNewCmdLogOutputFlag(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdLog(cmdutil.TestFactory(), func(opts *LogOptions) error { return nil })
 	if cmd.Flags().Lookup("output") == nil {
 		t.Fatal("output flag missing")

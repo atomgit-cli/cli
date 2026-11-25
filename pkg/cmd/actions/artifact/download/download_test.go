@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewCmdDownload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -25,7 +26,9 @@ func TestNewCmdDownload(t *testing.T) {
 		{name: "too many args", args: []string{"a", "b"}, wantErr: true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdDownload(f, func(opts *DownloadOptions) error { return nil })
 			cmd.SetArgs(tt.args)
@@ -38,6 +41,7 @@ func TestNewCmdDownload(t *testing.T) {
 }
 
 func TestNewCmdDownloadOutputFlag(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdDownload(cmdutil.TestFactory(), func(opts *DownloadOptions) error { return nil })
 	if cmd.Flags().Lookup("output") == nil {
 		t.Fatal("output flag missing")

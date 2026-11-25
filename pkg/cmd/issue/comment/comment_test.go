@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewCmdComment(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -47,7 +48,9 @@ func TestNewCmdComment(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdComment(f, func(opts *CommentOptions) error {
 				return nil
@@ -63,6 +66,7 @@ func TestNewCmdComment(t *testing.T) {
 }
 
 func TestGetBody(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		body       string
@@ -91,7 +95,9 @@ func TestGetBody(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			opts := &CommentOptions{
 				IO:       f.IOStreams,
@@ -126,6 +132,7 @@ func TestGetBody(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		repo      string
 		wantOwner string
@@ -139,7 +146,9 @@ func TestParseRepo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.repo, func(t *testing.T) {
+			t.Parallel()
 			owner, repo, err := parseRepo(tt.repo)
 			if tt.wantErr {
 				if err == nil {

@@ -11,6 +11,7 @@ import (
 )
 
 func TestSSHKeyQueries(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		method    string
@@ -85,7 +86,9 @@ func TestSSHKeyQueries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			client := NewClientFromHTTP(&http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if req.Method != tt.method || req.URL.Path != tt.path {
 					t.Fatalf("request = %s %s", req.Method, req.URL.Path)
@@ -118,6 +121,7 @@ func equalJSON(a, b any) bool {
 }
 
 func TestGetSSHKeyRejectsEmptyArray(t *testing.T) {
+	t.Parallel()
 	client := NewClientFromHTTP(&http.Client{Transport: testutil.NewRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("[]"))}, nil
 	})})
@@ -127,6 +131,7 @@ func TestGetSSHKeyRejectsEmptyArray(t *testing.T) {
 }
 
 func TestSSHKeyQueriesPropagateHTTPError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		method string
@@ -150,7 +155,9 @@ func TestSSHKeyQueriesPropagateHTTPError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			client := NewClientFromHTTP(&http.Client{Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if req.Method != tt.method {
 					t.Fatalf("method = %s, want %s", req.Method, tt.method)

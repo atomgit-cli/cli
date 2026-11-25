@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewCmdCreate(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdCreate(cmdutil.TestFactory(), func(opts *CreateOptions) error { return nil })
 	if cmd.Use != "create" {
 		t.Fatalf("Use = %q, want create", cmd.Use)

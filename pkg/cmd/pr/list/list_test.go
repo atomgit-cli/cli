@@ -16,6 +16,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -64,7 +65,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error {
 				return nil
@@ -257,6 +260,7 @@ func TestListRunFiltersByCommitMessage(t *testing.T) {
 }
 
 func TestNewCmdListStateEnumIncludesMerged(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error {
 		return nil
 	})
@@ -267,6 +271,7 @@ func TestNewCmdListStateEnumIncludesMerged(t *testing.T) {
 	}
 	got := flag.Annotations[cmdutil.FlagEnumAnnotation]
 	for _, want := range []string{"open", "closed", "merged", "all"} {
+		want := want
 		if !slices.Contains(got, want) {
 			t.Fatalf("state enum = %v, missing %q", got, want)
 		}
@@ -354,6 +359,7 @@ func TestListRunUsesBaseRepoAndConfiguredHost(t *testing.T) {
 }
 
 func TestResolveOutputFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		jsonFlag bool
@@ -370,7 +376,9 @@ func TestResolveOutputFormat(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := resolveOutputFormat(tt.jsonFlag, tt.raw)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("resolveOutputFormat() error = %v, wantErr %v", err, tt.wantErr)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -25,7 +26,9 @@ func TestNewCmdList(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdList(cmdutil.TestFactory(), func(opts *ListOptions) error {
 				return nil
 			})
@@ -39,8 +42,10 @@ func TestNewCmdList(t *testing.T) {
 }
 
 func TestNewCmdListFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdList(cmdutil.TestFactory(), nil)
 	for _, flag := range []string{"repo", "limit", "page", "json", "format"} {
+		flag := flag
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("flag %q missing", flag)
 		}

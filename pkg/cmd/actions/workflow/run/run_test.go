@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdRun(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -26,7 +27,9 @@ func TestNewCmdRun(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdRun(cmdutil.TestFactory(), func(opts *RunOptions) error {
 				return nil
 			})

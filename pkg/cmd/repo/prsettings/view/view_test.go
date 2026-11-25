@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdView(cmdutil.TestFactory(), func(opts *ViewOptions) error { return nil })
 	if cmd.Use != "view" {
 		t.Fatalf("Use = %q, want view", cmd.Use)
@@ -61,6 +62,7 @@ func TestViewRunHumanReadable(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"Pipeline required", "Disable self-merge", "Min reviewers"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q; output=%s", want, got)
 		}

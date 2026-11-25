@@ -16,6 +16,7 @@ func httpFactory(client *http.Client) func() (*http.Client, error) {
 }
 
 func TestNewCmdList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -26,7 +27,9 @@ func TestNewCmdList(t *testing.T) {
 		{name: "json", args: []string{"--org", "my-org", "--json"}, wantErr: false},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdList(f, func(opts *ListOptions) error { return nil })
 			cmd.SetArgs(tt.args)

@@ -9,6 +9,7 @@ import (
 )
 
 func TestNewCmdCreate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -37,7 +38,9 @@ func TestNewCmdCreate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdCreate(f, func(opts *CreateOptions) error {
 				return nil

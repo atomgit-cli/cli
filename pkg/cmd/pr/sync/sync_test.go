@@ -15,6 +15,7 @@ import (
 )
 
 func TestParsePRRef(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -74,7 +75,9 @@ func TestParsePRRef(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := ParsePRRef(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParsePRRef(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -94,6 +97,7 @@ func TestParsePRRef(t *testing.T) {
 }
 
 func TestBuildSyncBranch(t *testing.T) {
+	t.Parallel()
 	branch := buildSyncBranch("owner", "repo", 123)
 	// Should match pattern: sync/pr-owner-repo-123-YYYYMMDD
 	if !bytes.HasPrefix([]byte(branch), []byte("sync/pr-owner-repo-123-")) {
@@ -102,6 +106,7 @@ func TestBuildSyncBranch(t *testing.T) {
 }
 
 func TestBuildSyncBody(t *testing.T) {
+	t.Parallel()
 	pr := &api.PullRequest{
 		Title:   "Test PR",
 		Body:    "Original body",
@@ -126,6 +131,7 @@ func TestBuildSyncBody(t *testing.T) {
 }
 
 func TestNewCmdSync(t *testing.T) {
+	t.Parallel()
 	io, _, _, _ := iostreams.Test()
 	f := &cmdutil.Factory{
 		IOStreams: io,
@@ -145,6 +151,7 @@ func TestNewCmdSync(t *testing.T) {
 	// Check required flags
 	requiredFlags := []string{"source-pr", "target-repo"}
 	for _, flag := range requiredFlags {
+		flag := flag
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Errorf("NewCmdSync() missing required flag %q", flag)
 		}
@@ -153,6 +160,7 @@ func TestNewCmdSync(t *testing.T) {
 	// Check optional flags
 	optionalFlags := []string{"base", "title", "body", "draft", "yes", "json"}
 	for _, flag := range optionalFlags {
+		flag := flag
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Errorf("NewCmdSync() missing optional flag %q", flag)
 		}
@@ -160,6 +168,7 @@ func TestNewCmdSync(t *testing.T) {
 }
 
 func TestRepositoryGitURL(t *testing.T) {
+	t.Parallel()
 	url := repositoryGitURL("owner", "repo")
 	expected := "git@gitcode.com:owner/repo.git"
 	if url != expected {
@@ -168,6 +177,7 @@ func TestRepositoryGitURL(t *testing.T) {
 }
 
 func TestPullRequestWebURL(t *testing.T) {
+	t.Parallel()
 	url := pullRequestWebURL("owner", "repo", 123)
 	expected := "https://gitcode.com/owner/repo/merge_requests/123"
 	if url != expected {
@@ -176,6 +186,7 @@ func TestPullRequestWebURL(t *testing.T) {
 }
 
 func TestSyncCommitsPreservesCommitBoundaries(t *testing.T) {
+	t.Parallel()
 	commits := []api.Commit{
 		{SHA: "1111111111111111111111111111111111111111", Message: "first"},
 		{SHA: "2222222222222222222222222222222222222222", Message: "second"},
@@ -209,6 +220,7 @@ func TestSyncCommitsPreservesCommitBoundaries(t *testing.T) {
 }
 
 func TestSyncCommitsReportsActualCountOnConflict(t *testing.T) {
+	t.Parallel()
 	commits := []api.Commit{
 		{SHA: "1111111111111111111111111111111111111111", Message: "first"},
 		{SHA: "2222222222222222222222222222222222222222", Message: "second"},
@@ -243,6 +255,7 @@ func TestSyncCommitsReportsActualCountOnConflict(t *testing.T) {
 }
 
 func TestWriteSyncResultJSONReturnsConflictExitCode(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	out := &strings.Builder{}
 	f.IOStreams.Out = out

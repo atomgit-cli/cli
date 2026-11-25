@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -25,7 +26,9 @@ func TestNewCmdView(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdView(cmdutil.TestFactory(), func(opts *ViewOptions) error {
 				return nil
 			})
@@ -39,6 +42,7 @@ func TestNewCmdView(t *testing.T) {
 }
 
 func TestNewCmdViewFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdView(cmdutil.TestFactory(), nil)
 	if cmd.Flags().Lookup("json") == nil {
 		t.Fatal("json flag missing")
@@ -64,6 +68,7 @@ func TestViewRunCurrentUser(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"dev", "Developer", "Test bio", "Acme"} {
+		want := want
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q; output=%s", want, got)
 		}

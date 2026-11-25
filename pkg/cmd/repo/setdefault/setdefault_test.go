@@ -44,6 +44,7 @@ func TestSetDefaultUnresolvableConfigDirSentinelSurvivesWrap(t *testing.T) {
 }
 
 func TestNewCmdSetDefault(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -57,7 +58,9 @@ func TestNewCmdSetDefault(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdSetDefault(f, func(opts *SetDefaultOptions) error {
 				return nil
@@ -73,10 +76,12 @@ func TestNewCmdSetDefault(t *testing.T) {
 }
 
 func TestNewCmdSetDefaultFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdSetDefault(cmdutil.TestFactory(), func(opts *SetDefaultOptions) error {
 		return nil
 	})
 	for _, flag := range []string{"view", "unset", "json"} {
+		flag := flag
 		f := cmd.Flags().Lookup(flag)
 		if f == nil {
 			t.Fatalf("flag %q missing", flag)

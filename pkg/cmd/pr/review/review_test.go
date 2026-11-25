@@ -250,6 +250,7 @@ func TestReviewRun_MissingTokenReturnsAuthExitCode(t *testing.T) {
 }
 
 func TestNewCmdReview(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -288,7 +289,9 @@ func TestNewCmdReview(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdReview(cmdutil.TestFactory(), func(opts *ReviewOptions) error {
 				return nil
 			})
@@ -657,6 +660,7 @@ func TestReviewRun_CommentAndCommentFileMutuallyExclusive(t *testing.T) {
 }
 
 func TestNewCmdReview_InvalidNumberReturnsUsageExitCode(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdReview(cmdutil.TestFactory(), func(opts *ReviewOptions) error {
 		return nil
 	})

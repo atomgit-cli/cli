@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewCmdComment(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -59,7 +60,9 @@ func TestNewCmdComment(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			cmd := NewCmdComment(f, func(opts *CommentOptions) error {
 				return nil
@@ -75,6 +78,7 @@ func TestNewCmdComment(t *testing.T) {
 }
 
 func TestGetBody(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		body       string
@@ -115,7 +119,9 @@ func TestGetBody(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := cmdutil.TestFactory()
 			opts := &CommentOptions{
 				IO:       f.IOStreams,
@@ -150,6 +156,7 @@ func TestGetBody(t *testing.T) {
 }
 
 func TestGetBodyFromFile(t *testing.T) {
+	t.Parallel()
 	// Create temporary file
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "comment.txt")
@@ -174,6 +181,7 @@ func TestGetBodyFromFile(t *testing.T) {
 }
 
 func TestGetBodyFileNotFound(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &CommentOptions{
 		IO:       f.IOStreams,
@@ -190,6 +198,7 @@ func TestGetBodyFileNotFound(t *testing.T) {
 }
 
 func TestCommentRunEmptyBody(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &CommentOptions{
 		IO:     f.IOStreams,
@@ -207,6 +216,7 @@ func TestCommentRunEmptyBody(t *testing.T) {
 }
 
 func TestCommentRunPathWithoutPosition(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	opts := &CommentOptions{
 		IO:       f.IOStreams,
@@ -260,6 +270,7 @@ func TestCommentRunWithMockHTTP(t *testing.T) {
 }
 
 func TestInlineCommentOptions(t *testing.T) {
+	t.Parallel()
 	// Verify inline comment options are passed correctly to API
 	opts := &CommentOptions{
 		Path:     "api/auth.go",

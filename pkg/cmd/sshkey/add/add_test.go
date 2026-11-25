@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdAddRequiresFlags(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdAdd(cmdutil.TestFactory(), func(*AddOptions) error { return nil })
 	cmd.SetArgs(nil)
 	if err := cmd.Execute(); err == nil {
@@ -73,6 +74,7 @@ func TestAddRunSanitizesTextOutput(t *testing.T) {
 }
 
 func TestValidatePublicKey(t *testing.T) {
+	t.Parallel()
 	privateKeyMarker := strings.Join([]string{"-----BEGIN OPENSSH PRIVATE", "KEY-----"}, " ")
 	tests := []struct {
 		name    string
@@ -86,7 +88,9 @@ func TestValidatePublicKey(t *testing.T) {
 		{name: "arbitrary", key: "not-a-key", wantErr: "single OpenSSH"},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := validatePublicKey(tt.key)
 			if tt.wantErr == "" && err != nil {
 				t.Fatalf("error = %v", err)
@@ -99,6 +103,7 @@ func TestValidatePublicKey(t *testing.T) {
 }
 
 func TestAddRunRejectsEmptyFile(t *testing.T) {
+	t.Parallel()
 	file := t.TempDir() + "/empty.pub"
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -111,6 +116,7 @@ func TestAddRunRejectsEmptyFile(t *testing.T) {
 }
 
 func TestAddRunRejectsPrivateKey(t *testing.T) {
+	t.Parallel()
 	file := t.TempDir() + "/invalid-key"
 	privateKeyMarker := strings.Join([]string{"PRIVATE", "KEY"}, " ") + " material"
 	if err := os.WriteFile(file, []byte(privateKeyMarker), 0o600); err != nil {
@@ -123,6 +129,7 @@ func TestAddRunRejectsPrivateKey(t *testing.T) {
 }
 
 func TestAddRunRejectsMultipleLines(t *testing.T) {
+	t.Parallel()
 	file := t.TempDir() + "/keys.pub"
 	content := "ssh-ed25519 AAAA first\nssh-ed25519 BBBB second"
 	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {

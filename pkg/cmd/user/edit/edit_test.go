@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdEdit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
@@ -24,7 +25,9 @@ func TestNewCmdEdit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := NewCmdEdit(cmdutil.TestFactory(), func(opts *EditOptions) error {
 				return nil
 			})
@@ -38,8 +41,10 @@ func TestNewCmdEdit(t *testing.T) {
 }
 
 func TestNewCmdEditFlagsExist(t *testing.T) {
+	t.Parallel()
 	cmd := NewCmdEdit(cmdutil.TestFactory(), nil)
 	for _, flag := range []string{"name", "bio", "email", "company", "location", "website", "json"} {
+		flag := flag
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("flag %q missing", flag)
 		}

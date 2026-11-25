@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewCmdSync(t *testing.T) {
+	t.Parallel()
 	f := cmdutil.TestFactory()
 	cmd := NewCmdSync(f, func(opts *SyncOptions) error {
 		return nil
@@ -30,6 +31,7 @@ func TestNewCmdSync(t *testing.T) {
 }
 
 func TestBuildSyncBranch(t *testing.T) {
+	t.Parallel()
 	got := buildSyncBranch("owner/repo", "feature/test_branch", "docs/api")
 	want := "sync/owner-repo/feature-test-branch/docs-api"
 	if got != want {
@@ -38,6 +40,7 @@ func TestBuildSyncBranch(t *testing.T) {
 }
 
 func TestValidateTargetDir(t *testing.T) {
+	t.Parallel()
 	if _, err := validateTargetDir("."); err == nil {
 		t.Fatal("expected error for root target dir")
 	}
@@ -57,6 +60,7 @@ func TestValidateTargetDir(t *testing.T) {
 }
 
 func TestResolveSourceDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	source := filepath.Join(root, "docs")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -85,6 +89,7 @@ func TestResolveSourceDir(t *testing.T) {
 }
 
 func TestResolveSourceDirRejectsOutsideRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outside := t.TempDir()
 
@@ -94,6 +99,7 @@ func TestResolveSourceDirRejectsOutsideRoot(t *testing.T) {
 }
 
 func TestReplaceDirContents(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
 	target := filepath.Join(root, "target")
