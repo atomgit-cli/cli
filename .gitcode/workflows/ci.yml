@@ -1,5 +1,8 @@
 name: CI
 
+# 制品保留：upload-artifact 的 retention-days 不是硬性过期（实测制品可存活 34 天），
+# 命名空间配额 1 GiB 被打满会让 Package Job 失败（issue 666）。这里的保留天数必须与
+# .gitcode/workflows/artifact-cleanup.yml 的 RETENTION_DAYS 保持一致，由定时工作流兜底删除。
 on:
   pull_request:
     branches:
@@ -98,7 +101,7 @@ jobs:
         run: npm test --prefix npm
 
       - name: Run Python unit tests
-        run: python3 -m unittest tests.test_wrapper tests.test_verify_remote_facts tests.test_validate_ai_record -v
+        run: python3 -m unittest tests.test_wrapper tests.test_verify_remote_facts tests.test_validate_ai_record tests.test_cleanup_artifacts -v
 
       - name: Resolve coverage artifact name
         id: coverage-artifact
@@ -109,7 +112,7 @@ jobs:
         with:
           name: ${{ steps.coverage-artifact.outputs.name }}
           path: coverage.out
-          retention-days: 7
+          retention-days: 2
 
   build:
     name: Build
@@ -144,7 +147,7 @@ jobs:
         with:
           name: ${{ steps.binary-artifact.outputs.name }}
           path: bin/gc
-          retention-days: 7
+          retention-days: 2
 
   package:
     name: Package
@@ -204,4 +207,4 @@ jobs:
         with:
           name: ${{ steps.wheel-artifact.outputs.name }}
           path: dist/*.whl
-          retention-days: 7
+          retention-days: 2

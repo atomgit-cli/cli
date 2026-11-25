@@ -1,0 +1,56 @@
+name: Artifact Cleanup
+
+# GitCode 不给制品自动过期：upload-artifact 的 retention-days 只是上传元数据，
+# 实测 34 天内仍堆积了 411 个制品（约 1 GiB），把命名空间配额打满后 Package
+# Job 直接失败（issue 666）。因此用定时工作流按创建时间裁剪，作为配额兜底。
+# 清理间隔 6 小时而非每日：清理前那一刻的存量是「窗口 + 间隔」，峰值 43 次/天
+# 下每日清理会到约 1.15 GiB，6 小时可压到约 865 MiB。
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  repository: read
+  action: write
+
+env:
+  # 与 .gitcode/workflows/ci.yml 的上传 retention-days 保持一致。
+  RETENTION_DAYS: "2"
+  # Fall back on any proxy error so hosted runners are not tied to one endpoint.
+  GOPROXY: "https://goproxy.cn|https://mirrors.aliyun.com/goproxy/|direct"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cleanup:
+    name: Prune Expired Artifacts
+    runs-on: [codearts-hosted, ubuntu-latest, x64, small]
+    steps:
+      - name: Checkout
+        uses: checkout
+
+      - name: Set up Go
+        uses: setup-go
+        with:
+          version: "1.26"
+
+      - name: Set up Python
+        uses: setup-python
+        with:
+          python-version: "3.12"
+
+      - name: Build gc
+        run: go build -o ./gc ./cmd/gc
+
+      - name: Prune expired artifacts
+        # ATOMGIT_TOKEN is injected by the runner; gc reads GC_TOKEN, so the
+        # step exports it instead of remapping a secrets context entry (there
+        # is no secrets.ATOMGIT_TOKEN, and mapping one yields an empty token).
+        run: |
+          export GC_TOKEN="$ATOMGIT_TOKEN"
+          python3 scripts/cleanup-artifacts.py \
+            --repo "$ATOMGIT_REPOSITORY" \
+            --retention-days "$RETENTION_DAYS"
