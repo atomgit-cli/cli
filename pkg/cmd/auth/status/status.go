@@ -128,6 +128,13 @@ func statusRun(opts *StatusOptions) error {
 
 		fmt.Fprintf(opts.IO.ErrOut, "%s\n", opts.Hostname)
 		fmt.Fprintf(opts.IO.ErrOut, "  %s Not logged in\n", cs.Red("✗"))
+		// One hint line distinguishes a broken environment from a fresh
+		// install (issue 677): stored logins exist but are invisible here.
+		// Plain text only — the JSON field set is byte-stable.
+		if cfg.ResolutionErr() != nil {
+			fmt.Fprintf(opts.IO.ErrOut, "\n")
+			fmt.Fprintf(opts.IO.ErrOut, "  %s Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR\n", cs.Yellow("!"))
+		}
 		fmt.Fprintf(opts.IO.ErrOut, "\n")
 		fmt.Fprintf(opts.IO.ErrOut, "To authenticate, run: gc auth login\n")
 		return cmdutil.NewAuthError(fmt.Sprintf("not logged in to %s", opts.Hostname))

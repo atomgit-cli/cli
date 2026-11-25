@@ -37,6 +37,14 @@ type Config interface {
 	// Pager returns the preferred pager
 	Pager(host string) ConfigEntry
 
+	// ResolutionErr returns ErrNoConfigDir when the config directory
+	// could not be resolved (no GC_CONFIG_DIR and no home directory),
+	// nil otherwise. Reads treat the unresolvable directory as an empty
+	// state (issue 675), so command surfaces use this to distinguish a
+	// broken environment from a genuinely empty one — status hints and
+	// the unified not-found-vs-env-error exit codes (issue 677).
+	ResolutionErr() error
+
 	// Authentication returns authentication configuration
 	Authentication() AuthConfig
 
@@ -107,7 +115,9 @@ type config struct {
 }
 
 // ErrNoConfigDir is returned by every write path when the config directory
-// cannot be resolved (no GC_CONFIG_DIR and no home directory). Resolution
+// cannot be resolved (no GC_CONFIG_DIR and no home directory), and by
+// ResolutionErr — the read-side probe command surfaces use to
+// distinguish a broken environment from an empty one (issue 677). Resolution
 // never falls back to a cwd-relative path; callers surface this error so a
 // login can never report success without persisting anything, and a
 // logout can never report success without grounds (issue 676). Sibling
@@ -163,6 +173,16 @@ func configDirChecked() (string, error) {
 // of the issue 675 fix).
 func ResolveConfigDir() (string, error) {
 	return configDirChecked()
+}
+
+// ResolutionErr returns ErrNoConfigDir when the config directory could
+// not be resolved at construction, nil otherwise (issue 677: command
+// surfaces distinguish a broken environment from an empty one).
+func (c *config) ResolutionErr() error {
+	if c.configDir == "" {
+		return ErrNoConfigDir
+	}
+	return nil
 }
 
 // Get retrieves a configuration value

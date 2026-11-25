@@ -126,6 +126,14 @@ func logoutRun(opts *LogoutOptions) error {
 		return err
 	}
 
+	// A broken environment is reported before the confirmation gate and
+	// before the not-stored precheck (issue 677): both logout forms share
+	// the env error and exit code, and the user is not put through the
+	// ceremony only to learn the config directory is unresolvable.
+	if err := cfg.ResolutionErr(); err != nil {
+		return fmt.Errorf("failed to clear stored authentication: %w", err)
+	}
+
 	cs := opts.IO.ColorScheme()
 
 	// Require confirmation before logout. When a specific account is

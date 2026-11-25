@@ -470,6 +470,7 @@ type cloneConfig struct {
 	protocol string
 }
 
+func (c cloneConfig) ResolutionErr() error                 { return nil }
 func (c cloneConfig) Get(host, key string) (string, error) { return "", nil }
 func (c cloneConfig) Set(host, key, value string) error    { return nil }
 func (c cloneConfig) GitProtocol(host string) config.ConfigEntry {

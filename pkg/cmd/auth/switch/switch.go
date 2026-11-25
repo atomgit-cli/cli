@@ -112,6 +112,13 @@ func switchRun(opts *SwitchOptions) error {
 		return err
 	}
 
+	// A broken environment is reported before the not-stored precheck
+	// (issue 677): "no stored accounts" steered users whose accounts sat
+	// in an unreachable HOME toward a doomed re-login detour.
+	if err := cfg.ResolutionErr(); err != nil {
+		return fmt.Errorf("failed to switch account: %w", err)
+	}
+
 	users := authCfg.LoginUsers(hostname)
 	if len(users) == 0 {
 		return cmdutil.NewNotFoundError(fmt.Sprintf("no stored accounts for %s; run gc auth login to add one", hostname), nil)

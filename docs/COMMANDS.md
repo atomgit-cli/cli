@@ -302,6 +302,7 @@ gitcode.com
 
 未认证或 token 无效/过期时，诊断信息输出到 stderr，退出码为 `4`（`ExitAuth`）。`--json` 模式下 JSON 仍写入 stdout（`logged_in` 与 `token_valid` 恒输出：未认证时 `logged_in:false`，token 无效/过期时 `token_valid:false`），退出码同样为 `4`，便于 AI 代理仅凭退出码判断认证状态、无需做字段存在性分支。
 
+配置目录不可解析时，未登录的纯文本输出追加一行 stderr 提示（`Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR`，含一行空行分隔）——区分"环境坏"与"全新安装"；`--json` 模式**不输出该提示**，stdout 字段集与输出保持逐字节稳定（脚本契约零变化）。
 token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾，方案 A 的验证在新开终端执行。来源为本地配置时维持 re-login 提示不变。该指引仅在文本输出模式出现；`--json` 模式不输出指引文本，stdout 保持纯 JSON，退出码仍为 `4`。
 
 ### auth token - 显示 Token
@@ -342,7 +343,7 @@ gc auth switch second-account --json
 - 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。切换是作用域内的操作：在非默认主机上切换只改变该主机的活动账号，不改变默认主机（后续裸命令的目标主机不变——与 `auth login` 的"登录即提升默认主机"语义不同）。
 - 未传 `--hostname` 时按默认主机解析（`GC_HOST` > 上次登录主机 > gitcode.com，与 `auth login` 相同）。
 - 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可（序号优先：账号名恰为数字时按序号解析）；非交互环境（无 TTY 或 `--no-interactive`）未传用户名时返回退出码 `2`。
-- 退出码：`0` 切换成功；`1` 非法主机名、登录状态损坏（如账号名含控制字符）、写入失败；`2` 非交互缺用户名、无效选择、超参数；`3` 目标账号未存储（消息列出可用账号）或主机无任何已存储账号（提示 `gc auth login`）——主机无账号时先返回 `3`，与是否传用户名、是否 TTY 无关。
+- 退出码：`0` 切换成功；`1` 非法主机名、登录状态损坏（如账号名含控制字符）、写入失败、**配置目录不可解析（环境检查先于预检——与 logout 同口径）**；`2` 非交互缺用户名、无效选择、超参数；`3` 目标账号未存储（消息列出可用账号）或主机无任何已存储账号（提示 `gc auth login`）——可解析环境下主机无账号时先返回 `3`，与是否传用户名、是否 TTY 无关。
 - `--json` 输出 `{"hostname":..., "active_user":...}`（字段序 hostname → active_user）。
 - 环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）仍优先于已切换账号（该优先级指默认主机 gitcode.com；自定义主机读取本地登录态、不受通用环境变量影响，见 docs/AUTH.md 主机传播语义）——默认主机上切换且环境变量已设置时，stderr 输出一行提示（`--json` 模式不输出该提示，保持纯 JSON）；跨配置目录的并行账号用 `GC_CONFIG_DIR`（见 docs/AUTH.md 一机多账号小节）。
 
@@ -360,7 +361,7 @@ gc auth logout --yes
 
 说明：
 - `auth logout` 会清理本地持久化认证信息；不带用户名时**仅登出当前活跃账号**，同主机其他已存储账号保留（活跃账号自动顺延）；可带 `[<username>]` 位置参数（或 `-u/--username`）登出指定账号——定向登出时确认提示与成功消息回显目标用户名；两者同时传且不同值、任一形态传空串、或超过一个位置参数均返回退出码 `2`（空串拒绝防脚本空变量静默登出活跃账号）；目标账号未存储在该主机时返回退出码 `3` 并列出可用账号（与 `auth switch` 同款）。
-- 目标 hostname 会先校验并归一化；无效 hostname 返回通用错误（退出码 `1`，与 `auth login/status/token/switch` 家族一致——此前 logout 独为参数错误 `2`，已统一）。配置目录不可解析（无 HOME 且无 `GC_CONFIG_DIR`——Windows 为 USERPROFILE）时同样报错退出 `1` 并给出变量指引——登出绝不无据报成功（带用户名形态经预检报退出码 `3`，均为诚实错误；可解析空态下裸形态为有据 no-op 成功，退出码 `0`）。
+- 目标 hostname 会先校验并归一化；无效 hostname 返回通用错误（退出码 `1`，与 `auth login/status/token/switch` 家族一致——此前 logout 独为参数错误 `2`，已统一）。配置目录不可解析（无 HOME 且无 `GC_CONFIG_DIR`——Windows 为 USERPROFILE）时同样报错退出 `1` 并给出变量指引——登出绝不无据报成功，且**环境检查先于确认门与预检**（两形态口径一致）；可解析空态下裸形态为有据 no-op 成功，退出码 `0`。
 - 默认主机下，若任一 `GC_TOKEN` / `GITCODE_TOKEN` 已设置且非空，命令会把提示写入 stderr，并仅列出这些实际生效的变量，按当前平台给出仅作用于当前终端的清理命令（Unix `unset`，Windows `Remove-Item Env:`）；stdout 只保留成功信息。该提示只清理当前终端，若变量还定义在 shell 配置文件中，需另行移除或更新。自定义主机登出不受通用环境变量影响，不输出该提示。
 - 非交互场景中显式传 `--yes`。
 
