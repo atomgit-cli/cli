@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -40,6 +41,12 @@ type CreateOptions struct {
 	JSON     bool
 	Fork     string // 跨仓库 PR：fork 项目路径【owner/repo】
 	Labels   []string
+
+	// Issue 关联：Issues 保存 --issue 的原始值（"12"、"#12"、"12,13"），
+	// 由 createRun 解析为 api.CreatePROptions.IssueNumbers。
+	Issues               []string
+	CloseRelatedIssue    bool
+	CloseRelatedIssueSet bool
 }
 
 // NewCmdCreate creates the create command
@@ -79,6 +86,15 @@ func NewCmdCreate(f *cmdutil.Factory, runF func(*CreateOptions) error) *cobra.Co
 			# Create a PR with labels
 			$ gc pr create -R owner/repo --title "Feature" --labels bug,enhancement
 
+			# Create a PR linked to existing issues
+			$ gc pr create -R owner/repo --title "Feature" --issue 12,13
+
+			# Explicitly close the linked issues when the PR is merged
+			$ gc pr create -R owner/repo --title "Feature" --issue '#12' --close-related-issue
+
+			# Keep the linked issues open on merge
+			$ gc pr create -R owner/repo --title "Feature" --issue 12 --close-related-issue=false
+
 			# Create a cross-repo PR (from fork to upstream)
 			$ gc pr create -R upstream/repo --fork myfork/repo --head feature-branch --title "Feature"
 
@@ -86,6 +102,9 @@ func NewCmdCreate(f *cmdutil.Factory, runF func(*CreateOptions) error) *cobra.Co
 			$ gc pr create -R owner/repo --title "Feature" --json
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --close-related-issue is tri-state: absent keeps the repository
+			// setting, bare means true, =false opts out explicitly.
+			opts.CloseRelatedIssueSet = cmd.Flags().Changed("close-related-issue")
 			if runF != nil {
 				return runF(opts)
 			}
@@ -105,6 +124,10 @@ func NewCmdCreate(f *cmdutil.Factory, runF func(*CreateOptions) error) *cobra.Co
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 	cmd.Flags().StringVarP(&opts.Fork, "fork", "F", "", "Fork repository path for cross-repo PR (owner/repo)")
 	cmd.Flags().StringSliceVarP(&opts.Labels, "labels", "l", nil, "Add labels (comma-separated)")
+	cmd.Flags().StringSliceVarP(&opts.Issues, "issue", "i", nil,
+		"Link existing issues at creation (comma-separated, accepts 12, #12, or 12,13)")
+	cmd.Flags().BoolVar(&opts.CloseRelatedIssue, "close-related-issue", false,
+		"Close linked issues when the PR is merged (default: repository setting); use =false to keep them open")
 
 	return cmd
 }
@@ -114,6 +137,16 @@ func createRun(opts *CreateOptions) error {
 
 	if opts.JSON && opts.Web {
 		return cmdutil.NewUsageError("cannot use --json with --web")
+	}
+
+	// Validate --issue before any request so a bad value never reaches the API.
+	issueNumbers, err := parseIssueNumbers(opts.Issues)
+	if err != nil {
+		return err
+	}
+	var closeRelatedIssue *bool
+	if opts.CloseRelatedIssueSet {
+		closeRelatedIssue = &opts.CloseRelatedIssue
 	}
 
 	httpClient, err := opts.HttpClient()
@@ -180,12 +213,14 @@ func createRun(opts *CreateOptions) error {
 
 	// Create PR
 	pr, err := opts.CreatePR(client, owner, repo, &api.CreatePROptions{
-		Title:  opts.Title,
-		Body:   body,
-		Head:   head,
-		Base:   opts.Base,
-		Draft:  opts.Draft,
-		Labels: opts.Labels,
+		Title:             opts.Title,
+		Body:              body,
+		Head:              head,
+		Base:              opts.Base,
+		Draft:             opts.Draft,
+		Labels:            opts.Labels,
+		IssueNumbers:      issueNumbers,
+		CloseRelatedIssue: closeRelatedIssue,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create PR: %w", err)
@@ -262,6 +297,34 @@ func execGitCommand(name string, args ...string) (string, error) {
 
 func parseRepo(repo string) (string, string, error) {
 	return cmdutil.ParseRepo(repo)
+}
+
+// parseIssueNumbers normalizes --issue values ("12", "#12", "12,13") into
+// positive issue numbers, dropping duplicates while preserving input order.
+// A nil slice means --issue was not used.
+func parseIssueNumbers(values []string) ([]int, error) {
+	if values == nil {
+		return nil, nil
+	}
+	if len(values) == 0 {
+		return nil, cmdutil.NewUsageError("invalid --issue value: expected at least one issue number")
+	}
+	numbers := make([]int, 0, len(values))
+	seen := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), "#"))
+		number, err := strconv.Atoi(trimmed)
+		if err != nil || number <= 0 {
+			return nil, cmdutil.NewUsageError(fmt.Sprintf(
+				"invalid --issue value %q: expected a positive issue number like 12 or #12", value))
+		}
+		if _, ok := seen[number]; ok {
+			continue
+		}
+		seen[number] = struct{}{}
+		numbers = append(numbers, number)
+	}
+	return numbers, nil
 }
 
 // resolveHead expresses a cross-repo PR source for GitCode.

@@ -111,6 +111,97 @@ func TestCreatePullRequestUsesFormEncoding(t *testing.T) {
 	}
 }
 
+func TestCreatePullRequestIncludesLinkedIssuesAndClosePolicy(t *testing.T) {
+	closeRelated := false
+
+	var gotPath string
+	var gotBody string
+
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotPath = req.URL.Path
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		gotBody = string(body)
+		return authTestResponse(http.StatusOK, `{"number":123,"title":"created"}`), nil
+	})
+	client.SetToken("test-token", "test")
+
+	_, err := CreatePullRequest(client, "owner", "repo", &CreatePROptions{
+		Title:             "created",
+		Head:              "feature",
+		Base:              "main",
+		IssueNumbers:      []int{12, 13},
+		CloseRelatedIssue: &closeRelated,
+	})
+	if err != nil {
+		t.Fatalf("CreatePullRequest() error = %v", err)
+	}
+
+	if gotPath != "/api/v5/repos/owner/repo/pulls" {
+		t.Fatalf("request path = %q, want %q", gotPath, "/api/v5/repos/owner/repo/pulls")
+	}
+	expectedPairs := []string{
+		"inner_issue_nums=12%3B13",
+		"close_related_issue=false",
+	}
+	for _, pair := range expectedPairs {
+		if !strings.Contains(gotBody, pair) {
+			t.Fatalf("request body %q does not contain %q", gotBody, pair)
+		}
+	}
+}
+
+func TestBuildPRCreateFormValuesIssueFields(t *testing.T) {
+	closeTrue, closeFalse := true, false
+
+	tests := []struct {
+		name        string
+		opts        *CreatePROptions
+		wantPresent map[string]string
+		wantAbsent  []string
+	}{
+		{
+			name:       "nil options omit issue fields",
+			opts:       nil,
+			wantAbsent: []string{"inner_issue_nums", "close_related_issue"},
+		},
+		{
+			name:       "unset issue fields are omitted",
+			opts:       &CreatePROptions{Title: "t"},
+			wantAbsent: []string{"inner_issue_nums", "close_related_issue"},
+		},
+		{
+			name:        "issue numbers are semicolon separated",
+			opts:        &CreatePROptions{IssueNumbers: []int{12, 13}, CloseRelatedIssue: &closeTrue},
+			wantPresent: map[string]string{"inner_issue_nums": "12;13", "close_related_issue": "true"},
+		},
+		{
+			name:        "explicit false close policy is sent",
+			opts:        &CreatePROptions{CloseRelatedIssue: &closeFalse},
+			wantPresent: map[string]string{"close_related_issue": "false"},
+			wantAbsent:  []string{"inner_issue_nums"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formValues := buildPRCreateFormValues(tt.opts)
+			for key, want := range tt.wantPresent {
+				if got := formValues.Get(key); got != want {
+					t.Fatalf("form value %q = %q, want %q", key, got, want)
+				}
+			}
+			for _, key := range tt.wantAbsent {
+				if formValues.Has(key) {
+					t.Fatalf("form value %q = %q, want absent", key, formValues.Get(key))
+				}
+			}
+		})
+	}
+}
+
 func TestCreatePullRequestHydratesMissingBodyFromView(t *testing.T) {
 	var gotPaths []string
 

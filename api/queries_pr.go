@@ -150,6 +150,12 @@ type CreatePROptions struct {
 	Base   string   `json:"base"`
 	Draft  bool     `json:"draft,omitempty"`
 	Labels []string `json:"labels,omitempty"`
+	// IssueNumbers links existing issues at creation time. It is sent as the
+	// inner_issue_nums form field, a semicolon-separated list of issue numbers.
+	IssueNumbers []int `json:"-"`
+	// CloseRelatedIssue sets the merge-time close policy for the linked
+	// issues. Nil omits the field so the repository setting applies.
+	CloseRelatedIssue *bool `json:"close_related_issue,omitempty"`
 }
 
 // UpdatePROptions represents options for updating a PR
@@ -272,8 +278,24 @@ func buildPRCreateFormValues(opts *CreatePROptions) url.Values {
 			formValues.Add("labels[]", trimmed)
 		}
 	}
+	if len(opts.IssueNumbers) > 0 {
+		formValues.Set("inner_issue_nums", formatIssueNumbers(opts.IssueNumbers))
+	}
+	if opts.CloseRelatedIssue != nil {
+		formValues.Set("close_related_issue", strconv.FormatBool(*opts.CloseRelatedIssue))
+	}
 
 	return formValues
+}
+
+// formatIssueNumbers renders issue numbers as the semicolon-separated list
+// the create-PR API expects in inner_issue_nums.
+func formatIssueNumbers(numbers []int) string {
+	parts := make([]string, 0, len(numbers))
+	for _, number := range numbers {
+		parts = append(parts, strconv.Itoa(number))
+	}
+	return strings.Join(parts, ";")
 }
 
 // UpdatePullRequest updates an existing PR
