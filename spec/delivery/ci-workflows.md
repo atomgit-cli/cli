@@ -104,6 +104,9 @@ GitHub 工作流 `.github/workflows/ci.yml` 保留原有跨平台覆盖：
 | `build` | ubuntu-latest / macos-latest / windows-latest | 跨平台 `go build` + `gc version` |
 | `docker` | ubuntu-latest | Docker 构建 + shell 补全 + wheel 入口冒烟 |
 
+另有独立定时工作流 `.gitcode/workflows/artifact-cleanup.yml`，只负责按保留期清理
+Actions 制品，不属于日常 CI Job，见 §2.4。
+
 macOS 标签使用 `macos-latest`：`macos-14` 镜像已被 GitHub Actions 于 2026-11-02 官方退役
 （GitHub actions/runner-images 仓库 15226 号公告，Intel 与 arm64 均不延期），继续使用会使
 macOS 任务在队列阶段即被取消（2026-11-09 实测确认，迁移记录见 issue 639）。`macos-latest`
@@ -153,6 +156,53 @@ CI **不覆盖**的质量门禁（仍需本地或人工执行）：
 - 文档同步检查
 - 工作区卫生检查
 - 独立执行主体语义审查
+
+### 2.4 制品保留与清理
+
+GitCode Actions 的 `upload-artifact` 接受 `retention-days`，但它不是硬性过期：2026-09-14
+把三个上传步设成 `retention-days: 7` 后，2026-11-13 仍残留 34 天内产出的 411 个制品
+（约 1.07 GiB），直接打满命名空间 1 GiB 配额，`Package` Job 报
+`Namespace artifact quota exceeded: ... currentUsed=1076816552, max=1073741824`
+失败（issue 666）。2026-11-25 复核：API 已会为每个制品返回 `expires_at = created_at + 7 天`，
+但历史制品并未按该窗口被清理，因此配额安全不能建立在平台过期语义上。保留策略由上传侧与兜底侧两段组成：
+
+- **上传侧**：`.gitcode/workflows/ci.yml` 的 coverage / binary / wheel 三件套（实测约 8.9 MiB/次）
+  一律 `retention-days: 2`，不依赖平台兑现过期语义。
+- **兜底侧**：`.gitcode/workflows/artifact-cleanup.yml` 每 6 小时（`0 */6 * * *`）与手动
+  触发时运行 `scripts/cleanup-artifacts.py`，用 `gc actions artifact list --paginate`
+  + `gc actions artifact delete --yes` 删除 `created_at` 早于 `RETENTION_DAYS`
+  （默认 2 天）的制品，删除失败即令 job 失败。清理频率不能退回每日：清理前那一刻的
+  存量是「窗口 + 间隔」，每日清理在峰值流量下会重新逼近配额。
+
+配额换算（2026-11-25 实测单次三件套 8.94 MiB；646 次运行历史：峰值 43 次/天、p90 20 次/天、
+中位数 7 次/天）：峰值日产量约 384 MiB，2 天窗口 + 6 小时间隔 ≈ 2.25 天 ≈ 865 MiB（84% 配额）；
+p90 约 403 MiB（39%），中位数约 141 MiB（14%）。同样峰值下每日清理为 3 天 ≈ 1.15 GiB（超配额），
+7 天窗口约 3 GiB，因此窗口与频率必须成对调整。
+`created_at` 在生产 API 中是 RFC 3339 字符串（`2026-11-25T10:25:46+08:00`），脚本同时兼容
+旧毫秒时间戳，避免格式变化导致全部制品被判为“时间不可用”而永不清理。两处窗口（上传
+`retention-days` 与清理 `RETENTION_DAYS`）以及 6 小时间隔上限由
+`tests/contracts/cleanup_workflow_test.go` 钉住，任一侧漂移即契约失败。
+
+清理工作流只在默认分支生效，触发面固定为 `schedule` + `workflow_dispatch`，权限固定
+`repository: read` + `action: write`。令牌使用 runner 自动注入的 `ATOMGIT_TOKEN`：步骤内
+`export GC_TOKEN="$ATOMGIT_TOKEN"`；**不得**改写 `secrets.ATOMGIT_TOKEN`，该键不存在，
+映射后会以空 token 覆盖注入值。
+
+**重跑同名冲突的处置口径**：`gc actions run rerun` 复用原 run ID，`coverage-linux-<run-id>`、
+`gc-ubuntu-<run-id>`、`gc-wheel-<run-id>` 会与首轮残留同名冲突，因此重跑前先删除该 run 的残留制品：
+
+```bash
+gc actions artifact list -R atomgit-cli/cli --run <run-id> --json
+gc actions artifact delete <artifact-id> -R atomgit-cli/cli --yes
+gc actions run rerun <run-id> -R atomgit-cli/cli --yes
+```
+
+配额已满导致 `Package` 失败时，先手动触发清理再重跑：
+
+```bash
+gc actions workflow run artifact-cleanup.yml -R atomgit-cli/cli --ref main
+gc actions artifact list -R atomgit-cli/cli --paginate --per-page 100 --json
+```
 
 ---
 
@@ -299,6 +349,13 @@ CI 是现有质量门禁的自动化实现，不得引入高于 `spec/foundation
 - coverage、binary、wheel 制品通过运行时 `ATOMGIT_RUN_ID` 和 step output 唯一化
 - 双端 CI 的 `main` 触发面（`pull_request` 与 `push` 均限 `main`）被钉扎，任一侧静默丢失触发器即契约失败（`TestMirrorWorkflowPinsMainTriggers` 对 `.github/workflows/ci.yml` 校验同一触发契约）
 
+`tests/contracts/cleanup_workflow_test.go` 钉住制品清理工作流的不变量：
+
+- 触发面只有 `schedule`（单条五段 cron，且清理间隔不超过 6 小时）与 `workflow_dispatch`，不得挂 `push` / `pull_request`
+- 权限固定 `repository: read` + `action: write`，不得扩权
+- `RETENTION_DAYS` 与 `ci.yml` 三个上传步的 `retention-days` 完全一致（任一侧漂移即失败）
+- 清理步骤必须 `export GC_TOKEN="$ATOMGIT_TOKEN"`，且不得改写不存在的 `secrets.ATOMGIT_TOKEN`
+
 `tests/contracts/mirror_workflow_test.go` 另对 GitHub 镜像工作流钉结构不变量：
 
 - 五 Job 集合（lint/secret-scan/test/build/docker）
@@ -336,4 +393,4 @@ Release CI 规范详见 `spec/delivery/release-process.md`。
 
 ---
 
-**最后更新**: 2026-09-15
+**最后更新**: 2026-11-25
