@@ -157,7 +157,7 @@ gc release create v0.18.0 -R atomgit-cli/cli \
 gc release upload v0.18.0 dist/github-release/* -R atomgit-cli/cli --json
 ```
 
-> **注意**：将示例中的版本号 `0.18.0` 替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
+> **注意**：将示例中的版本号（如 `0.18.0`）替换为实际版本号。正式制品必须携带准确 commit SHA；本地验证包不得上传。
 
 ### Release Notes 要求
 
@@ -308,7 +308,7 @@ npm 发布标签必须与版本类型一致：stable 发布到 `latest`，prerel
 
 #### 注意事项
 
-1. **版本号替换**：将模板中的 `0.18.0` 替换为实际版本号
+1. **版本号替换**：将模板中的版本号（如 `0.18.0`）替换为实际版本号
 2. **避免 `#` 字符问题**：GitCode 会错误渲染代码块内的 `#`
    - Issue 引用使用 `Issue XX` 格式，不使用 `#XX`
    - PR 引用使用 `PR XX` 格式，不使用 `#XX`
