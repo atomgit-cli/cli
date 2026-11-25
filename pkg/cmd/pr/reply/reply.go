@@ -26,6 +26,17 @@ type ReplyOptions struct {
 
 	// Flags
 	Body string
+	JSON bool
+}
+
+// replyJSON is the stable --json output shape for pr reply. Field order is
+// part of the output contract (issue 655): discussion_id, note_id, body —
+// matching the docs/COMMANDS.md example. A struct (not a map) keeps the
+// order from drifting when fields are added.
+type replyJSON struct {
+	DiscussionID string `json:"discussion_id"`
+	NoteID       int64  `json:"note_id"`
+	Body         string `json:"body"`
 }
 
 // NewCmdReply creates the reply command
@@ -43,6 +54,11 @@ func NewCmdReply(f *cmdutil.Factory, runF func(*ReplyOptions) error) *cobra.Comm
 			Reply to a comment discussion on a pull request.
 
 			Use 'gc pr comments <number>' to find the DiscussionID for the comment you want to reply to.
+
+			The output includes the Comment ID (note_id) of the created reply:
+			read it back individually via
+			'gc api repos/<owner>/<repo>/pulls/comments/<note_id>', or find it in
+			the parent comment's reply array in 'gc pr comments'.
 		`),
 		Example: heredoc.Doc(`
 			# Reply to a comment discussion
@@ -51,6 +67,9 @@ func NewCmdReply(f *cmdutil.Factory, runF func(*ReplyOptions) error) *cobra.Comm
 			# Reply with multi-line body
 			$ gc pr reply 123 --discussion abc123 --body "Line 1
 			Line 2" -R owner/repo
+
+			# Machine-readable output with the reply's comment id
+			$ gc pr reply 123 --discussion abc123 --body "ack" --json -R owner/repo
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,6 +97,7 @@ func NewCmdReply(f *cmdutil.Factory, runF func(*ReplyOptions) error) *cobra.Comm
 	cmd.Flags().StringVarP(&opts.Repository, "repo", "R", "", "Repository (owner/repo)")
 	cmd.Flags().StringVarP(&opts.DiscussionID, "discussion", "d", "", "Discussion ID to reply to")
 	cmd.Flags().StringVarP(&opts.Body, "body", "b", "", "Reply body text")
+	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	_ = cmd.MarkFlagRequired("discussion")
 	_ = cmd.MarkFlagRequired("body")
@@ -120,6 +140,14 @@ func replyRun(opts *ReplyOptions) error {
 	result, err := api.ReplyPRComment(client, owner, repo, opts.Number, opts.DiscussionID, replyOpts)
 	if err != nil {
 		return fmt.Errorf("failed to reply to comment: %w", err)
+	}
+
+	if opts.JSON {
+		return cmdutil.WriteJSON(opts.IO.Out, replyJSON{
+			DiscussionID: opts.DiscussionID,
+			NoteID:       result.NoteID,
+			Body:         result.Body,
+		})
 	}
 
 	// Output

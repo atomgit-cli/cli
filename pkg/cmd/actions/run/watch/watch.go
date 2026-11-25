@@ -45,6 +45,7 @@ type WatchOptions struct {
 	Interval    int
 	Compact     bool
 	ExitStatus  bool
+	Wait        bool
 	JSON        bool
 	NonInterval bool
 }
@@ -67,7 +68,9 @@ func NewCmdWatch(f *cmdutil.Factory, runF func(*WatchOptions) error) *cobra.Comm
 
 			In a TTY, the screen is refreshed on each poll. In a non-TTY
 			environment (e.g. piped output or --no-interactive), a single
-			snapshot is printed and the command exits immediately.
+			snapshot is printed and the command exits immediately; pass
+			--wait to keep polling in non-TTY mode until the run reaches a
+			terminal state (--exit-status then works as in a TTY).
 
 			Use --exit-status to exit with a non-zero code when the run fails.
 		`),
@@ -83,6 +86,9 @@ func NewCmdWatch(f *cmdutil.Factory, runF func(*WatchOptions) error) *cobra.Comm
 
 			# Exit non-zero on failure (for CI scripts)
 			$ gc actions run watch <run-id> -R owner/repo --exit-status
+
+			# Wait for completion from a script (non-interactive)
+			$ gc actions run watch <run-id> -R owner/repo --wait --exit-status
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -104,6 +110,7 @@ func NewCmdWatch(f *cmdutil.Factory, runF func(*WatchOptions) error) *cobra.Comm
 	cmd.Flags().IntVarP(&opts.Interval, "interval", "i", 3, "Refresh interval in seconds")
 	cmd.Flags().BoolVar(&opts.Compact, "compact", false, "Show only failed steps")
 	cmd.Flags().BoolVar(&opts.ExitStatus, "exit-status", false, "Exit with non-zero status if run failed")
+	cmd.Flags().BoolVar(&opts.Wait, "wait", false, "In non-interactive mode, keep polling until the run reaches a terminal state")
 	cmdutil.AddJSONFlag(cmd, &opts.JSON)
 
 	return cmd
@@ -145,7 +152,7 @@ func pollLoop(opts *WatchOptions, client *api.Client, owner, repo string) error 
 			renderTTY(opts, detail)
 		} else {
 			renderSnapshot(opts, detail)
-			if !terminalStatuses[detail.Status] {
+			if !terminalStatuses[detail.Status] && !opts.Wait {
 				return nil
 			}
 		}
@@ -154,7 +161,7 @@ func pollLoop(opts *WatchOptions, client *api.Client, owner, repo string) error 
 			return handleExitStatus(opts, detail.Status)
 		}
 
-		if isTTY {
+		if isTTY || opts.Wait {
 			time.Sleep(interval)
 		}
 	}

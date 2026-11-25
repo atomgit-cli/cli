@@ -183,6 +183,47 @@ func TestClearCacheWithFiles(t *testing.T) {
 	}
 }
 
+// The old behavior under test (found in review of the issue 675 fix): with
+// HOME unset and no GC_CONFIG_DIR, clearCache resolved a literal "~" cache
+// path relative to the current directory and deleted planted files from
+// that tree. An unresolvable config location has no cache at all, and a
+// legacy "~" tree in the cwd must never be touched.
+func TestClearCacheUnresolvableDirIgnoresLegacyCwdTree(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	legacy := filepath.Join(dir, "~", ".config", "gc", "cache")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(legacy, "seed.tmp")
+	if err := os.WriteFile(seed, []byte("planted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	io, _, out, _ := iostreams.Test()
+	if err := clearCache(io); err != nil {
+		t.Fatalf("clearCache() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "No cache to clear") {
+		t.Fatalf("output should say no cache; got: %s", out.String())
+	}
+	if _, err := os.Stat(seed); err != nil {
+		t.Fatalf("planted legacy file must not be touched: %v", err)
+	}
+}
+
 func TestResolveConfigValueEnv(t *testing.T) {
 	t.Setenv("GC_BROWSER", "safari")
 	cfg := config.New()
@@ -221,15 +262,6 @@ func TestResolveConfigValueUpdateModeDefault(t *testing.T) {
 	}
 }
 
-func TestConfigDirFromEnv(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GC_CONFIG_DIR", dir)
-	got := configDir()
-	if got != dir {
-		t.Fatalf("configDir() = %q, want %q", got, dir)
-	}
-}
-
 func TestPluralEntry(t *testing.T) {
 	t.Parallel()
 	if got := pluralEntry(1); got != "y" {
@@ -237,5 +269,15 @@ func TestPluralEntry(t *testing.T) {
 	}
 	if got := pluralEntry(2); got != "ies" {
 		t.Errorf("pluralEntry(2) = %q, want %q", got, "ies")
+	}
+}
+
+func TestNewCmdConfigHelpDocumentsConfigDir(t *testing.T) {
+	// gc config operates on the directory that GC_CONFIG_DIR overrides;
+	// it must be discoverable from gc config --help.
+	f := cmdutil.TestFactory()
+	cmd := NewCmdConfig(f)
+	if !strings.Contains(cmd.Long, "GC_CONFIG_DIR") {
+		t.Errorf("config Long does not mention GC_CONFIG_DIR: %q", cmd.Long)
 	}
 }

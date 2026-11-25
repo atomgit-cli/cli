@@ -136,6 +136,7 @@ func TestGitCodeWorkflowContractRejectsRegressions(t *testing.T) {
 		{name: "security redaction zeroed", mutate: zeroGitCodeRedact, want: "--redact"},
 		{name: "unshallow step removed", mutate: removeGitCodeUnshallow, want: "unshallow"},
 		{name: "unshallow failure no longer fails the job", mutate: softenGitCodeUnshallow, want: "fail"},
+		{name: "go version downgraded", mutate: downgradeGitCodeGoVersion, want: "go version"},
 	}
 
 	for _, tt := range tests {
@@ -192,6 +193,7 @@ func validateWorkflow(doc workflowDocument) []string {
 	var problems []string
 	problems = append(problems, validateTriggers(doc)...)
 	problems = append(problems, validateJobs(doc)...)
+	problems = append(problems, validateGoVersion(doc)...)
 	problems = append(problems, validateRace(doc)...)
 	problems = append(problems, validateSecurityRedact(doc)...)
 	problems = append(problems, validateSecurityUnshallow(doc)...)
@@ -199,6 +201,31 @@ func validateWorkflow(doc workflowDocument) []string {
 	problems = append(problems, validatePackage(doc)...)
 	for _, contract := range artifactContracts {
 		problems = append(problems, validateArtifact(doc, contract)...)
+	}
+	return problems
+}
+
+// gitcodeRequiredGoVersion is the toolchain the GitCode workflow pins in
+// every setup-go step (its action uses a "version" input). It matches
+// mirrorRequiredGoVersion on the GitHub side: one supported Go line across
+// both CI systems, so test evidence is not silently split across an EOL
+// toolchain (issue 640).
+const gitcodeRequiredGoVersion = "1.26"
+
+// validateGoVersion pins the GitCode-side toolchain. A silent downgrade
+// would keep the pipeline green while moving all GitCode test evidence onto
+// an unsupported Go line.
+func validateGoVersion(doc workflowDocument) []string {
+	var problems []string
+	for jobID, job := range doc.Jobs {
+		for _, step := range job.Steps {
+			if step.Uses != "setup-go" {
+				continue
+			}
+			if got := stringValue(step.With["version"]); got != gitcodeRequiredGoVersion {
+				problems = append(problems, fmt.Sprintf("job %q setup-go must pin go version %q (got %q)", jobID, gitcodeRequiredGoVersion, got))
+			}
+		}
 	}
 	return problems
 }
@@ -592,6 +619,21 @@ func softenGitCodeUnshallow(doc *workflowDocument) {
 		}
 	}
 	doc.Jobs["security"] = job
+}
+
+// downgradeGitCodeGoVersion regresses one job's toolchain pin back to the
+// EOL 1.22 line the unification in issue 640 retired.
+func downgradeGitCodeGoVersion(doc *workflowDocument) {
+	job := doc.Jobs["test"]
+	for i := range job.Steps {
+		if job.Steps[i].Uses == "setup-go" {
+			if job.Steps[i].With == nil {
+				job.Steps[i].With = map[string]any{}
+			}
+			job.Steps[i].With["version"] = "1.22"
+		}
+	}
+	doc.Jobs["test"] = job
 }
 
 func removePackageJob(doc *workflowDocument) {

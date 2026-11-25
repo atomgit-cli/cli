@@ -17,6 +17,32 @@ func testConfig(t *testing.T) config.Config {
 	return config.New()
 }
 
+// The wrap chain must keep the sentinel matchable: setDefaultRun wraps the
+// write error with "failed to set default repo: %w", so a caller matching
+// errors.Is(err, config.ErrNoConfigDir) must succeed through the wrap
+// (found in review of the issue 675 fix — nothing pinned this).
+func TestSetDefaultUnresolvableConfigDirSentinelSurvivesWrap(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+
+	io, _, _, _ := iostreams.Test()
+	cfg := config.New()
+	opts := &SetDefaultOptions{
+		IO:         io,
+		Config:     func() (config.Config, error) { return cfg, nil },
+		Repository: "owner/repo",
+	}
+
+	err := setDefaultRun(opts)
+	if err == nil {
+		t.Fatal("setDefaultRun() error = nil with an unresolvable config dir")
+	}
+	if !errors.Is(err, config.ErrNoConfigDir) {
+		t.Fatalf("error chain lost the sentinel: %v", err)
+	}
+}
+
 func TestNewCmdSetDefault(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

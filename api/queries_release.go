@@ -66,16 +66,6 @@ type CreateReleaseOptions struct {
 	TargetCommitish string `json:"target_commitish,omitempty"`
 }
 
-// UpdateReleaseOptions represents options for updating a release
-type UpdateReleaseOptions struct {
-	TagName         string `json:"tag_name,omitempty"`
-	TargetCommitish string `json:"target_commitish,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Body            string `json:"body,omitempty"`
-	Draft           *bool  `json:"draft,omitempty"`
-	Prerelease      *bool  `json:"prerelease,omitempty"`
-}
-
 // GitCodeUpdateReleaseOptions represents options for GitCode's tag-based update API
 // Required fields: name, body
 // Optional: release_status (pre/latest)
@@ -116,16 +106,6 @@ func GetRelease(client *Client, owner, repo, tag string) (*Release, error) {
 	return &release, nil
 }
 
-// GetReleaseByID fetches a release by ID
-func GetReleaseByID(client *Client, owner, repo string, id int64) (*Release, error) {
-	var release Release
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(id, 10), &release)
-	if err != nil {
-		return nil, err
-	}
-	return &release, nil
-}
-
 // GetLatestRelease fetches the latest release for a repository
 func GetLatestRelease(client *Client, owner, repo string) (*Release, error) {
 	var release Release
@@ -144,32 +124,6 @@ func CreateRelease(client *Client, owner, repo string, opts *CreateReleaseOption
 		return nil, err
 	}
 	return &release, nil
-}
-
-// UpdateRelease updates an existing release by ID
-func UpdateRelease(client *Client, owner, repo string, id int64, opts *UpdateReleaseOptions) (*Release, error) {
-	var release Release
-	err := client.Patch(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(id, 10), opts, &release)
-	if err != nil {
-		return nil, err
-	}
-	return &release, nil
-}
-
-// UpdateReleaseByTag updates a release by tag name
-func UpdateReleaseByTag(client *Client, owner, repo, tag string, opts *UpdateReleaseOptions) (*Release, error) {
-	// First get the release to find its ID
-	release, err := GetRelease(client, owner, repo, tag)
-	if err != nil {
-		return nil, err
-	}
-
-	id, err := release.GetID()
-	if err != nil {
-		return nil, err
-	}
-
-	return UpdateRelease(client, owner, repo, id, opts)
 }
 
 // UpdateReleaseByTagDirect updates a release using GitCode's tag-based PATCH endpoint
@@ -192,32 +146,6 @@ func DeleteRelease(client *Client, owner, repo string, id int64) error {
 	return client.Delete(escapedRepoPath(owner, repo) + "/releases/" + strconv.FormatInt(id, 10))
 }
 
-// DeleteReleaseByTag deletes a release by tag name.
-// It first tries the tag-based DELETE endpoint; if the API does not support it (404),
-// it falls back to the ID-based flow (get release → extract ID → delete by ID).
-func DeleteReleaseByTag(client *Client, owner, repo, tag string) error {
-	err := DeleteReleaseByTagDirect(client, owner, repo, tag)
-	if err == nil {
-		return nil
-	}
-	// If the tag endpoint isn't available, fall back to ID-based deletion
-	if !isNotFoundError(err) {
-		return err
-	}
-
-	release, err := GetRelease(client, owner, repo, tag)
-	if err != nil {
-		return err
-	}
-
-	id, err := release.GetID()
-	if err != nil {
-		return err
-	}
-
-	return DeleteRelease(client, owner, repo, id)
-}
-
 // DeleteReleaseByTagDirect deletes a release by tag name directly.
 // This bypasses the need for release ID which GitCode API may not return.
 func DeleteReleaseByTagDirect(client *Client, owner, repo, tag string) error {
@@ -225,7 +153,7 @@ func DeleteReleaseByTagDirect(client *Client, owner, repo, tag string) error {
 	return client.Delete(escapedRepoPath(owner, repo) + "/releases/" + escapedTag)
 }
 
-// DeleteReleaseByTagKnown is like DeleteReleaseByTag but uses a previously
+// DeleteReleaseByTagKnown deletes a release by tag using a previously
 // fetched release to avoid an extra GetRelease call in the fallback path.
 // Callers that already have the release (e.g. for pre-confirm) should use
 // this to skip the redundant API round-trip.
@@ -287,31 +215,6 @@ func (r *Release) GetID() (int64, error) {
 	}
 }
 
-// ListReleaseAssets lists assets for a release
-func ListReleaseAssets(client *Client, owner, repo string, releaseID int64) ([]ReleaseAsset, error) {
-	var assets []ReleaseAsset
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(releaseID, 10)+"/assets", &assets)
-	if err != nil {
-		return nil, err
-	}
-	return assets, nil
-}
-
-// GetReleaseAsset fetches a single release asset
-func GetReleaseAsset(client *Client, owner, repo string, assetID int64) (*ReleaseAsset, error) {
-	var asset ReleaseAsset
-	err := client.Get(escapedRepoPath(owner, repo)+"/releases/assets/"+strconv.FormatInt(assetID, 10), &asset)
-	if err != nil {
-		return nil, err
-	}
-	return &asset, nil
-}
-
-// DeleteReleaseAsset deletes a release asset
-func DeleteReleaseAsset(client *Client, owner, repo string, assetID int64) error {
-	return client.Delete(escapedRepoPath(owner, repo) + "/releases/assets/" + strconv.FormatInt(assetID, 10))
-}
-
 // DeleteReleaseAssetByTag deletes a release asset by tag and attach file id.
 //
 // Per api-doc: DELETE /repos/{owner}/{repo}/releases/{tag}/attach_files/{attach_file_id}
@@ -331,14 +234,6 @@ func GetReleaseUploadURL(client *Client, owner, repo, tag, filename string) (*As
 		return nil, err
 	}
 	return &result, nil
-}
-
-// UploadReleaseAsset uploads a file as a release asset
-func UploadReleaseAsset(client *Client, owner, repo string, releaseID int64, filename string, content []byte, contentType string) (*ReleaseAsset, error) {
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	return client.UploadAsset(escapedRepoPath(owner, repo)+"/releases/"+strconv.FormatInt(releaseID, 10)+"/assets", filename, content, contentType)
 }
 
 // UploadReleaseAssetByTag uploads a file to a release by tag name using the

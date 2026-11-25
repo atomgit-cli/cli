@@ -245,6 +245,84 @@ func TestWarning(t *testing.T) {
 	}
 }
 
+func TestShortWarning(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    Options
+		wantSub []string
+		notSub  []string
+	}{
+		{
+			name: "unix uses unset commands",
+			opts: Options{
+				EnvVars: []string{"GC_TOKEN", "GITCODE_TOKEN"},
+				GOOS:    "linux",
+			},
+			wantSub: []string{
+				"Environment token is still active in this terminal",
+				"Clear it for the current session",
+				"unset GC_TOKEN",
+				"unset GITCODE_TOKEN",
+				"remove or update that definition as well",
+			},
+			notSub: []string{"Remove-Item Env:"},
+		},
+		{
+			name: "windows uses PowerShell commands",
+			opts: Options{
+				EnvVars: []string{"GC_TOKEN", "GITCODE_TOKEN"},
+				GOOS:    "windows",
+			},
+			wantSub: []string{
+				"Environment token is still active in this terminal",
+				"Clear it for the current session",
+				"Remove-Item Env:GC_TOKEN",
+				"Remove-Item Env:GITCODE_TOKEN",
+				"remove or update that definition as well",
+			},
+			notSub: []string{"unset GC_TOKEN", "unset GITCODE_TOKEN"},
+		},
+		{
+			name: "unknown variables are filtered",
+			opts: Options{
+				EnvVars: []string{"GC_TOKEN", "USER_CONTROLLED; rm -rf ~"},
+				GOOS:    "linux",
+			},
+			wantSub: []string{"unset GC_TOKEN"},
+			notSub:  []string{"USER_CONTROLLED", "rm -rf"},
+		},
+		{
+			name: "empty known variables return no warning",
+			opts: Options{
+				EnvVars: []string{"HOME"},
+				GOOS:    "linux",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ShortWarning(tt.opts)
+			if len(tt.wantSub) == 0 {
+				if got != "" {
+					t.Fatalf("ShortWarning() = %q, want empty", got)
+				}
+				return
+			}
+			for _, sub := range tt.wantSub {
+				if !strings.Contains(got, sub) {
+					t.Errorf("ShortWarning() missing %q:\n%s", sub, got)
+				}
+			}
+			for _, sub := range tt.notSub {
+				if strings.Contains(got, sub) {
+					t.Errorf("ShortWarning() unexpectedly contains %q:\n%s", sub, got)
+				}
+			}
+		})
+	}
+}
+
 // TestWarningEndsEveryPlanWithStatusVerify is the acceptance anchor that each
 // plan must close the loop with a verifiable end state instead of stopping at
 // an intermediate state such as only unsetting the variable.

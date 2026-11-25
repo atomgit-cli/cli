@@ -39,11 +39,21 @@ import (
 
 const commandNameEnv = "GITCODE_CLI_COMMAND_NAME"
 
+// updateLifecycleSkipped reports whether the command opts out of the root
+// update lifecycle (protocol commands whose stderr a calling program relays
+// to the user, e.g. auth git-credential).
+func updateLifecycleSkipped(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[cmdutil.NoUpdateLifecycleAnnotation] != ""
+}
+
 // Execute runs the root command.
 func Execute(ver, commit, date string) error {
 	f := cmdutil.NewFactory()
 	rootCmd := NewRootCmd(ver, commit, date, f)
-	err := rootCmd.Execute()
+	// ExecuteC returns the command it resolved and ran even when that
+	// command fails, so the error path below can apply the protocol-command
+	// lifecycle skip to the actual leaf command.
+	cmd, err := rootCmd.ExecuteC()
 	// cobra skips PersistentPostRun when RunE returns an error, so a failing
 	// command would skip the update lifecycle entirely (pending summaries,
 	// first-run notice, due background check). The npm wrapper runs its
@@ -51,14 +61,19 @@ func Execute(ver, commit, date string) error {
 	// exits early without an adjacent bootstrap manifest, so this is a
 	// no-op for non-bootstrap channels.
 	if err != nil {
-		runPostCommandLifecycle(rootCmd, f)
+		runPostCommandLifecycle(cmd, f)
 	}
 	return err
 }
 
-// runPostCommandLifecycle mirrors the PersistentPostRun hook for the error
-// path (flag parsing has already happened, so the flag reads are safe).
+// runPostCommandLifecycle runs the update lifecycle for a finished command.
+// Both call sites share it: PersistentPostRun on the success path, and
+// Execute's error path (cobra skips PersistentPostRun when RunE fails).
+// Flag parsing has already happened by either point, so the reads are safe.
 func runPostCommandLifecycle(cmd *cobra.Command, f *cmdutil.Factory) {
+	if updateLifecycleSkipped(cmd) {
+		return
+	}
 	noUpdate, _ := cmd.Flags().GetBool("no-update-check")
 	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	cfg, _ := f.Config()
@@ -82,10 +97,7 @@ func NewRootCmd(ver, commit, date string, f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
-			noUpdate, _ := cmd.Flags().GetBool("no-update-check")
-			noInteractive, _ := cmd.Flags().GetBool("no-interactive")
-			cfg, _ := f.Config()
-			installupdate.AfterCommand(cfg, f.IOStreams.ErrOut, noUpdate, noInteractive)
+			runPostCommandLifecycle(cmd, f)
 		},
 	}
 

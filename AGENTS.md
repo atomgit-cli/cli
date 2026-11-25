@@ -245,7 +245,7 @@ gh run view <run-id> --log --job=<job-id>
 正式规则见 [spec/foundations/security.md](./spec/foundations/security.md)，要点：
 
 - 禁止硬编码 token/密钥；通过环境变量或本地配置管理认证
-- Token 优先级：`GC_TOKEN` > `GITCODE_TOKEN` > 本地配置（`~/.config/gc/auth.json`）；环境变量始终覆盖本地配置
+- Token 优先级：默认主机 `gitcode.com` 下为 `GC_TOKEN` > `GITCODE_TOKEN` > 本地配置（`~/.config/gc/auth.json`）；非默认主机使用该主机本地配置
 - AI 代理不得调用 `gitcode auth token`、`gitcode auth status --show-token`、读取 `~/.config/gc/auth.json` 或打印 `GC_TOKEN` / `GITCODE_TOKEN`；完整 token 只能由人工在交互式 TTY 中输入 hostname 确认后显示
 - 禁止提交：`*.pem`、`*.key`、`*.p12`、`*.pfx`、`id_rsa*`、`id_ed*`、`.env*`、`*.secret`、`credentials.json`、`token.txt`、`*.token`、`secrets.y*ml`
 - 提交前自检：无硬编码凭证、无敏感文件被追踪、测试与文档不含真实凭证

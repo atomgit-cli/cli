@@ -23,6 +23,10 @@ type CLIError struct {
 	Code    int
 	Message string
 	Cause   error
+	// Silent suppresses the stderr error line at the entry point while
+	// keeping the exit code. Protocol commands (credential helpers) use it
+	// to signal "no result" without polluting the protocol stream.
+	Silent bool
 }
 
 func (e *CLIError) Error() string {
@@ -59,6 +63,23 @@ func NewCLIError(code int, message string, cause error) error {
 
 func NewUsageError(message string) error {
 	return NewCLIError(ExitUsage, message, nil)
+}
+
+// NewSilentError creates a CLIError that exits with the given code without
+// printing anything to stderr.
+func NewSilentError(code int, message string) error {
+	return &CLIError{
+		Code:    code,
+		Message: message,
+		Silent:  true,
+	}
+}
+
+// IsSilent reports whether the error chain contains a silent CLIError that
+// should suppress the stderr error line at the entry point.
+func IsSilent(err error) bool {
+	var cliErr *CLIError
+	return errors.As(err, &cliErr) && cliErr != nil && cliErr.Silent
 }
 
 func NewAuthError(message string) error {

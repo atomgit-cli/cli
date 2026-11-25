@@ -44,12 +44,12 @@ gitcode doctor install --json
 
 ```bash
 # DEB (Debian/Ubuntu)
-wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc_0.15.0_amd64.deb
-sudo dpkg -i gc_0.15.0_amd64.deb
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.17.0/gc_0.17.0_amd64.deb
+sudo dpkg -i gc_0.17.0_amd64.deb
 
 # RPM (RHEL/CentOS/Fedora)
-wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gc-0.15.0-1.x86_64.rpm
-sudo rpm -i gc-0.15.0-1.x86_64.rpm
+wget https://gitcode.com/atomgit-cli/cli/releases/download/v0.17.0/gc-0.17.0-1.x86_64.rpm
+sudo rpm -i gc-0.17.0-1.x86_64.rpm
 ```
 
 DEB/RPM packages install both `gc` and `gitcode`; on Linux they are equivalent.
@@ -65,7 +65,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 安装（一行命令）
-pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.15.0/gitcode_cli-0.15.0-py3-none-any.whl
+pip install https://gitcode.com/atomgit-cli/cli/releases/download/v0.17.0/gitcode_cli-0.17.0-py3-none-any.whl
 
 # Windows PowerShell 中推荐使用 gitcode，避免 gc 被内置 Get-Content 别名覆盖
 gitcode version
@@ -89,7 +89,7 @@ source .venv/bin/activate  # Linux/macOS
 # .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
 # 固定版本安装，避免 PyPI 尚未同步时安装旧版本
-python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.15.0
+python -m pip install -i https://pypi.org/simple/ gitcode-cli==0.17.0
 
 # Windows PowerShell 中推荐使用 gitcode
 gitcode version
@@ -228,10 +228,11 @@ gitcode release upload v1.0.0 app.zip -R owner/repo --json
 - 当前默认文本输出仍保留；代理和脚本应优先使用 `--json`。
 - `repo log --json` 适合按文件和分支追踪提交历史；`pr list --paginate` 适合跨页扫描，`--commit-message` 适合从提交信息反查 PR。
 - PR JSON 中的 `merged` 已按 `state` / `merged_at` 归一化；代理可直接用该布尔值判断是否已合并，无需处理 GitCode API 的 `merged: null`。
-- `gitcode api` 输出远端原始响应，适合 typed command 尚未覆盖的 API；使用含 `&` 的查询参数时建议整体加引号。
+- `gitcode api` 输出远端原始响应，适合 typed command 尚未覆盖的 API；使用含 `&` 的查询参数时建议整体加引号。原始 API 侧另有轮询友好能力：`--jq` 在命令侧过滤响应（显著降低 token 消耗，如 `gitcode api user --jq .login`），`--paginate` / `--slurp` 一次取全部分页（后者合并为单数组），`--include` 输出响应头；HTTP 304 以非零退出码结束，可据此做条件请求判"无变化"。
 - 写路径 `--json` 只在操作成功后输出结构化结果；执行失败时不要从 stdout 解析半成品结果。
 - `pr create --json` 会尽量回读新建 PR 以补齐创建响应缺失的正文；如果远端仍未返回 body，会在 stderr 给 warning，并保持 JSON 中的远端事实为空，脚本可再运行 `gitcode pr view <number> -R owner/repo --json` 核验。
 - 当前基础退出码语义：`0` 成功，`1` 通用错误，`2` 参数/用法错误，`3` 资源不存在，`4` 认证/权限错误，`5` 资源冲突。
+- 自动化配仓（API 添加仓库协作者）有一步平台侧断点：`PUT repos/{owner}/{repo}/collaborators/{username}` 可用（需仓库管理权限；`gitcode api -X PUT ...`，可带 `{"permission":"pull"|"push"|"admin"}` 指定权限），但产生的**待接受邀请**的列出与接受两端点（`user/repository_invitations`）当前在 v5 API 中不存在（官方文档已核对，见 issue #656）——被邀请账号对私有仓的读取会 403，直到有人在 gitcode.com 网页上接受邀请。自动化配仓流程应在邀请创建后停一步等人工接受（或在平台端点落地后闭环）。
 
 ## 6. 使用 RTK 优化 Token 消耗（可选）
 

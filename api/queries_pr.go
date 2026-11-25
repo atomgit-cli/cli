@@ -55,27 +55,74 @@ type PRBranch struct {
 	Repo  *Repository `json:"repo"`
 }
 
-// PRComment represents a comment on a PR
-type PRComment struct {
-	ID           interface{}  `json:"id"`
-	DiscussionID string       `json:"discussion_id"`
-	Body         string       `json:"body"`
-	User         *User        `json:"user"`
-	CreatedAt    FlexibleTime `json:"created_at"`
-	UpdatedAt    FlexibleTime `json:"updated_at"`
-	CommentType  string       `json:"comment_type"`
-	Resolved     bool         `json:"resolved"`
-	DiffFile     string       `json:"diff_file"`
-	DiffPosition interface{}  `json:"diff_position"`
+// PRReviewer represents a review-state entry embedded in a PR detail
+// response: an approval reviewer, a tester, or an assignee. Per the
+// official API schema only approval reviewers carry accept_status.
+type PRReviewer struct {
+	ID           string `json:"id"`
+	Login        string `json:"login"`
+	Name         string `json:"name"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
+	HTMLURL      string `json:"html_url"`
+	Assignee     bool   `json:"assignee"`
+	CodeOwner    bool   `json:"code_owner"`
+	Accept       bool   `json:"accept"`
+	AcceptStatus string `json:"accept_status,omitempty"`
 }
 
-// PRReview represents a review on a PR
-type PRReview struct {
-	ID          interface{}  `json:"id"`
-	User        *User        `json:"user"`
-	Body        string       `json:"body"`
-	State       string       `json:"state"`
-	SubmittedAt FlexibleTime `json:"submitted_at"`
+// PRReviewStates carries the review-state groups embedded in a PR detail.
+type PRReviewStates struct {
+	ApprovalReviewers []*PRReviewer `json:"approval_reviewers"`
+	Testers           []*PRReviewer `json:"testers"`
+	Assignees         []*PRReviewer `json:"assignees"`
+}
+
+// GetPRReviewStates reads the review states embedded in a PR detail. The
+// v5 API has no dedicated reviews list endpoint; the detail response
+// carries approval reviewers (with accept_status), testers, and assignees.
+func GetPRReviewStates(client *Client, owner, repo string, number int) (*PRReviewStates, error) {
+	states := &PRReviewStates{}
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number)
+	if err := client.Get(path, states); err != nil {
+		return nil, err
+	}
+	if states.ApprovalReviewers == nil {
+		states.ApprovalReviewers = []*PRReviewer{}
+	}
+	if states.Testers == nil {
+		states.Testers = []*PRReviewer{}
+	}
+	if states.Assignees == nil {
+		states.Assignees = []*PRReviewer{}
+	}
+	return states, nil
+}
+
+// PRComment represents a comment on a PR
+type PRComment struct {
+	ID           interface{}         `json:"id"`
+	DiscussionID string              `json:"discussion_id"`
+	Body         string              `json:"body"`
+	User         *User               `json:"user"`
+	CreatedAt    FlexibleTime        `json:"created_at"`
+	UpdatedAt    FlexibleTime        `json:"updated_at"`
+	CommentType  string              `json:"comment_type"`
+	Resolved     bool                `json:"resolved"`
+	DiffFile     string              `json:"diff_file"`
+	DiffPosition interface{}         `json:"diff_position"`
+	Reply        []PRDiscussionReply `json:"reply"`
+}
+
+// PRDiscussionReply represents a reply nested under a PR comment (the
+// reply array element of the comment listing). Distinct from
+// ReplyPRCommentReply, which is the response of creating a reply. Replies
+// carry no discussion_id of their own: the parent comment owns it.
+type PRDiscussionReply struct {
+	ID        interface{}  `json:"id"`
+	Body      string       `json:"body"`
+	User      *User        `json:"user"`
+	CreatedAt FlexibleTime `json:"created_at"`
+	UpdatedAt FlexibleTime `json:"updated_at"`
 }
 
 // PRListOptions represents options for listing PRs
@@ -127,20 +174,6 @@ type CreatePRCommentOptions struct {
 	// side of the diff), not an offset within the diff hunk. The API resolves it
 	// to the diff_position (new_line) of the comment.
 	Position int `json:"position,omitempty"`
-}
-
-// CreatePRReviewOptions represents options for creating a PR review
-type CreatePRReviewOptions struct {
-	Body     string            `json:"body,omitempty"`
-	Event    string            `json:"event"`
-	Comments []PRReviewComment `json:"comments,omitempty"`
-}
-
-// PRReviewComment represents a comment in a review
-type PRReviewComment struct {
-	Path     string `json:"path"`
-	Position int    `json:"position"`
-	Body     string `json:"body"`
 }
 
 // MergePROptions represents options for merging a PR
@@ -441,16 +474,6 @@ func CreatePRComment(client *Client, owner, repo string, number int, opts *Creat
 	return &comment, nil
 }
 
-// CreatePRReview creates a review on a PR
-func CreatePRReview(client *Client, owner, repo string, number int, opts *CreatePRReviewOptions) (*PRReview, error) {
-	var review PRReview
-	err := client.Post(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/reviews", opts, &review)
-	if err != nil {
-		return nil, err
-	}
-	return &review, nil
-}
-
 // ReviewPROptions represents options for reviewing a PR
 type ReviewPROptions struct {
 	Force bool `json:"force,omitempty"` // Force approval (admin only)
@@ -501,17 +524,20 @@ type ReplyPRCommentOptions struct {
 	Body string `json:"body"`
 }
 
-// ReplyPRCommentReply represents the response from replying to a PR comment
+// ReplyPRCommentReply represents the response from replying to a PR comment.
+// The API returns the created reply's comment id in note_id (snake_case).
 type ReplyPRCommentReply struct {
 	ID     string `json:"id"`
-	NoteID int    `json:"noteId"`
+	NoteID int64  `json:"note_id"`
 	Body   string `json:"body"`
 }
 
 // ReplyPRComment replies to a PR comment discussion
 func ReplyPRComment(client *Client, owner, repo string, number int, discussionID string, opts *ReplyPRCommentOptions) (*ReplyPRCommentReply, error) {
 	var result ReplyPRCommentReply
-	err := client.Post(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/discussions/"+discussionID+"/comments", opts, &result)
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/discussions/" + url.PathEscape(discussionID) + "/comments"
+	err := client.Post(path, opts, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -525,17 +551,9 @@ type ResolvePRCommentOptions struct {
 
 // ResolvePRComment updates the resolution status of a PR comment
 func ResolvePRComment(client *Client, owner, repo string, number int, discussionID string, opts *ResolvePRCommentOptions) error {
-	return client.Put(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/comments/"+discussionID, opts, nil)
-}
-
-// ListPRReviews lists reviews on a PR
-func ListPRReviews(client *Client, owner, repo string, number int) ([]PRReview, error) {
-	var reviews []PRReview
-	err := client.Get(escapedRepoPath(owner, repo)+"/pulls/"+strconv.Itoa(number)+"/reviews", &reviews)
-	if err != nil {
-		return nil, err
-	}
-	return reviews, nil
+	path := escapedRepoPath(owner, repo) + "/pulls/" + strconv.Itoa(number) +
+		"/comments/" + url.PathEscape(discussionID)
+	return client.Put(path, opts, nil)
 }
 
 // ListPRCommits lists commits in a PR

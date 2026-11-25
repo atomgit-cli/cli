@@ -53,17 +53,6 @@ func CreateLabel(client *Client, owner, repo string, opts *CreateLabelOptions) (
 	return &label, nil
 }
 
-// GetLabel fetches a label by name
-func GetLabel(client *Client, owner, repo, name string) (*Label, error) {
-	escapedName := url.PathEscape(name)
-	var label Label
-	err := client.Get(escapedRepoPath(owner, repo)+"/labels/"+escapedName, &label)
-	if err != nil {
-		return nil, err
-	}
-	return &label, nil
-}
-
 // UpdateLabel updates an existing label.
 //
 // Per api-doc/openapi.json, PATCH /repos/{owner}/{repo}/labels/{original_name}
@@ -94,24 +83,6 @@ func UpdateLabel(client *Client, owner, repo, name string, opts *UpdateLabelOpti
 func DeleteLabel(client *Client, owner, repo, name string) error {
 	escapedName := url.PathEscape(name)
 	return client.Delete(escapedRepoPath(owner, repo) + "/labels/" + escapedName)
-}
-
-// AddLabelsToIssue adds labels to an issue
-func AddLabelsToIssue(client *Client, owner, repo string, number int, labels []string) ([]Label, error) {
-	var result []Label
-	err := client.Post(escapedRepoPath(owner, repo)+"/issues/"+strconv.Itoa(number)+"/labels", map[string]interface{}{
-		"labels": labels,
-	}, &result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// RemoveLabelFromIssue removes a label from an issue
-func RemoveLabelFromIssue(client *Client, owner, repo string, number int, label string) error {
-	escapedLabel := url.PathEscape(label)
-	return client.Delete(escapedRepoPath(owner, repo) + "/issues/" + strconv.Itoa(number) + "/labels/" + escapedLabel)
 }
 
 // SetIssueLabels sets (replaces) labels on an issue
@@ -164,14 +135,4 @@ func UpdateMilestone(client *Client, owner, repo string, number int, opts *Updat
 // DeleteMilestone deletes a milestone
 func DeleteMilestone(client *Client, owner, repo string, number int) error {
 	return client.Delete(escapedRepoPath(owner, repo) + "/milestones/" + strconv.Itoa(number))
-}
-
-// CloseMilestone closes a milestone
-func CloseMilestone(client *Client, owner, repo string, number int) (*Milestone, error) {
-	return UpdateMilestone(client, owner, repo, number, &UpdateMilestoneOptions{State: "closed"})
-}
-
-// OpenMilestone reopens a milestone
-func OpenMilestone(client *Client, owner, repo string, number int) (*Milestone, error) {
-	return UpdateMilestone(client, owner, repo, number, &UpdateMilestoneOptions{State: "open"})
 }

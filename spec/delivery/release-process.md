@@ -140,7 +140,7 @@ go build -o ./gc ./cmd/gc
 
 ### 6.5 创建正式 tag、GitHub Release 与 PyPI 包
 
-发布准备改动合入两个远端的 `main` 且 tree hash 一致后，触发标准 workflow（npm 发布 job 在 publish 前对三坐标执行 `scripts/npm-dist-tag-guard.mjs` 防倒退门禁，与恢复路径同款；发布后校验循环以 12×15s 重试吸收 registry 传播延迟，查询失败计入重试而非中断）：
+发布准备改动合入两个远端的 `main` 且 tree hash 一致后，触发标准 workflow（npm 发布 job 在 publish 前对三坐标执行 `scripts/npm-dist-tag-guard.mjs` 防倒退门禁，与恢复路径同款；发布后校验循环以 20×30s 重试吸收 registry 传播延迟（覆盖 v0.16.0 实测约 6 分钟的传播，见 issue 636），查询失败计入重试而非中断）：
 
 ```bash
 gh workflow run release.yml -R atomgit-cli/cli -f version=vX.Y.Z

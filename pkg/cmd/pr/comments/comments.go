@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitcode.com/gitcode-cli/cli/api"
+	"gitcode.com/gitcode-cli/cli/pkg/cmd/pr/render"
 	cmdutil "gitcode.com/gitcode-cli/cli/pkg/cmdutil"
 	"gitcode.com/gitcode-cli/cli/pkg/iostreams"
 )
@@ -178,6 +179,12 @@ func commentsRun(opts *CommentsOptions) error {
 				fmt.Fprintf(opts.IO.Out, "   %s\n", line)
 			}
 		}
+
+		// Print nested replies (the API embeds each discussion's replies in
+		// the parent comment's reply array; replies carry no discussion_id
+		// of their own — the parent owns it). Shared rendering with
+		// `pr view --comments` (issue 652).
+		render.ReplyBlock(opts.IO.Out, cs, comment.Reply, "   ", formatTime)
 
 		fmt.Fprintf(opts.IO.Out, "\n")
 	}

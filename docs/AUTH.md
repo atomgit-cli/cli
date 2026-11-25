@@ -13,8 +13,9 @@
 
 当前版本不支持：
 
-- 多账户切换的完整产品化体验
 - 操作系统 keyring 集成
+
+多账户切换已支持：`gc auth switch` 在同一配置目录内同主机的已存储账号之间切换（见下文"单目录内切换账号"）。
 
 ## 认证来源优先级
 
@@ -26,8 +27,9 @@
 
 也就是说：
 
-- 只要设置了环境变量，环境变量始终覆盖本地存储
+- 默认主机 `gitcode.com` 下，只要设置了环境变量，环境变量始终覆盖本地存储
 - `auth logout` 只会清理本地存储，不会替你取消环境变量
+- 例外：`auth git-credential` 只使用本地已存储的登录态，不受环境变量影响（见下文各命令统一语义），以保证 `GC_CONFIG_DIR` 隔离语义确定
 
 ## 持久化边界
 
@@ -46,7 +48,9 @@
 
 可通过 `GC_CONFIG_DIR` 覆盖配置目录。
 
-凭证文件落盘遵循安全约束（见 `spec/foundations/security.md`）：文件权限 `0600`、目录权限 `0700`、写入时拒绝符号链接（防止凭证重定向攻击）。若 `auth.json` 是符号链接（如某些 dotfiles 管理方案），`auth login` 将拒绝写入并报错，请删除符号链接后重试。
+凭证文件落盘遵循安全约束（见 `spec/foundations/security.md`）：文件权限 `0600`、目录权限 `0700`、写入时拒绝符号链接（防 dotfiles 误用；重定向防护由原子替换结构性保证）。若 `auth.json` 是符号链接（如某些 dotfiles 管理方案），`auth login` 将拒绝写入并报错，请删除符号链接后重试。写入为临时文件+原子替换；并发写由配置目录内的 `.gc-lock` 跨进程锁串行化（进程异常退出自动释放；获取等待上限约 10 秒、超时报错——外层包装脚本的超时须大于此值，否则等待中的 gc 会被静默杀死）。`.gc-lock` 无需手动清理，也不应删除：删除不会释放持有者的锁（新文件是新的 inode），反而使后续写入失去串行化保护。进程异常中断（断电、强杀）可能在配置目录留下 `.gc-tmp-*` 临时文件（`0600`、不参与任何命令读取，可安全手动删除；正常写入时会自动清扫超过约 60 秒时限的遗留条目——只读命令不触发）。
+
+在无 HOME 的环境（精简容器、环境被剥离的 systemd/CI）中，读命令按未登录与默认值处理，写命令报错退出 1 并提示设置 HOME（Windows 为 USERPROFILE）或 `GC_CONFIG_DIR`；配置目录解析不会回退到当前目录。
 
 通用偏好配置写入同一配置目录下的：
 
@@ -57,6 +61,38 @@
 当前通用配置用于保存 `editor`、`browser`、`pager` 等非敏感偏好。认证 token 仍只写入 `auth.json`。
 通用配置会拒绝 `token`、`password`、`secret` 等未列入允许列表的键。
 
+### 单目录内切换账号（auth switch）
+
+同一配置目录、同一主机下可以存储多个账号 token，`gc auth switch` 在它们之间切换活动账号：
+
+```bash
+gc auth login                 # 第一个账号
+gc auth login                 # 第二个账号（token 属于另一账号时新增条目）
+gc auth switch second-account # 切换；交互模式直接 gc auth switch 会列出账号
+gc auth status                # 显示新账号
+```
+
+切换是本地操作（改写 `auth.json` 的 `active_user`，不调用 API；作用域仅限目标主机——不改变默认主机，后续裸命令的目标主机不变）；git HTTPS 操作经 `auth setup-git` 配置的 helper 会随切换使用新账号（`gc auth status` 显示新账号需其 token 在线校验通过）。环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）优先级仍高于已切换账号（该优先级指默认主机 gitcode.com；自定义主机读取本地登录态、不受通用环境变量影响，见下文主机传播语义）；需要并行的两个账号（互不切换）时用下面的目录隔离方案。
+
+### 一机多账号（GC_CONFIG_DIR 隔离）
+
+`GC_CONFIG_DIR` 指向哪个目录，gc 就读写哪个目录的登录态与偏好：指向空目录等于"未登录"，不会回落到默认目录 `~/.config/gc`；设为空字符串则视为未设置，仍读写默认目录。环境变量 token 的优先级（见上文认证来源优先级）不受目录选择影响。
+
+典型用法是给第二个账号包一个 wrapper：
+
+```sh
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/gc-agent <<'WRAP'
+#!/bin/sh
+GC_CONFIG_DIR="$HOME/.config/gc-agent" exec gc "$@"
+WRAP
+chmod +x ~/.local/bin/gc-agent
+gc-agent auth login   # 在隔离目录登录第二个账号，不影响主配置
+gc-agent auth status  # 查看该账号状态；主 gc 命令仍用主账号
+```
+
+排查隔离目录的登录状态时，用同一个 `GC_CONFIG_DIR` 值运行 `gc auth status`。要让 git 操作（HTTPS clone/push 等）也使用该账号，需在运行 git 的环境中导出同一个 `GC_CONFIG_DIR`：wrapper 只覆盖 gc 命令，`auth setup-git` 写入 git 配置的 helper 条目不携带该变量（git 凭据回填由 `gc auth git-credential` 子命令提供）。
+
 ## 主机传播语义
 
 - `GC_HOST` 或登录配置中的默认 host 会决定已接入共享 host-aware 认证入口的业务命令所使用的 GitCode 主机。
@@ -65,6 +101,7 @@
 - 默认 `gitcode.com` 下，环境变量 token 仍优先于本地 token。
 - 非默认 host 下，业务命令只使用该 host 本地登录保存的 token，不会把通用 `GC_TOKEN` / `GITCODE_TOKEN` 转发到自定义 host。
 - 如果需要使用非默认 host，请先使用 `gc auth login --hostname <host>` 为该 host 建立本地认证。
+- 不带 `--hostname` 的 `gc auth login` 按同一主机解析确定登录目标（`GC_HOST` > 上次登录主机 > `gitcode.com`）；设置 `GC_HOST` 后裸登录即为该主机建立本地认证。`--web` 流程固定 `gitcode.com`。
 - 显式支持 `--hostname` 的 auth 子命令仍按该参数读取目标主机认证信息。
 
 ## 各命令统一语义
@@ -73,7 +110,7 @@
 
 - 校验 token 有效性
 - 成功后写入本地配置（主机名、用户名、token、Git protocol）
-- 若同时存在环境变量，后续命令仍优先使用环境变量
+- 默认主机下，若同时存在环境变量，后续命令仍优先使用环境变量；自定义主机登录后，后续命令使用该主机的本地配置
 - 登录目标为默认主机 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时（仅检测变量已设置且非空，与活动 token 解析语义一致；token 值不进入任何输出）：
   - 交互模式：保存前会先提示"本次登录在该环境不会生效"并询问是否仍保存（默认否，直接回车即跳过保存；确认接受后同样输出下述指引）
   - 非交互模式：保存后向 stderr 输出根治指引——两条可直接复制执行的方案（可逆停用配置文件中的旧定义 + 当前终端 unset + 新开终端验证；或更新环境变量的值后验证），命令按 `$SHELL` 推断配置文件路径、按平台适配 `sed`（GNU/BSD）或 PowerShell 语法
@@ -104,10 +141,22 @@
 - 输出 token 前会向 stderr 输出安全警告；不要在日志、截图、脚本管道或 AI 代理上下文中暴露该输出
 - 必须在交互式 TTY 中按提示输入 hostname 确认；非交互环境一律拒绝输出完整 token，没有 `--yes` 绕过
 
+### auth git-credential
+
+- 实现 git credential helper 协议，为 git HTTPS 操作填充已登录账号的凭据（`username=<登录名>`、`password=<访问令牌>`）
+- 与其他命令不同，该子命令**只使用本地已存储的登录态**（`auth.json` 的 active_user 与 token），`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级不适用；因此 `GC_CONFIG_DIR` 的隔离语义在该命令上是完全确定的——指向空目录或设为空字符串（视为无配置，不回落默认配置目录）时均无凭据，也不受环境 token 影响
+- 一机多账号场景：wrapper 脚本通过 `GC_CONFIG_DIR` 绑定各账号的配置目录（每个目录独立 `gc auth login`），git 凭据请求互不串扰；排查隔离目录内的登录状态时，用相同的 `GC_CONFIG_DIR` 值运行 `gc auth status`
+- 带端口的 host 请求（如 `host=gitcode.com:443`）不参与匹配，静默未命中
+- 未命中时静默退出（无输出、exit 1），git 会继续询问后续 helper；凭据值只出现在 stdout 协议输出，绝不进入 stderr、日志或错误信息
+- 人工直接运行该命令会把访问令牌明文打到 stdout（这是协议本职输出）；不要在日志、截图、脚本管道或 AI 代理上下文中暴露该输出
+- 通常由 `auth setup-git` 写入 git 配置后由 git 自动调用，`store` / `erase` 操作为无操作；排查登录状态用 `gc auth status`
+
 ### auth logout
 
 - 清理本地配置中的认证信息
-- 如果当前活动 token 来自环境变量，会明确提示用户手动 `unset`
+- 目标 hostname 会先校验并归一化；无效 hostname 返回通用错误（退出码 `1`，与 `auth login/status/token/switch` 家族一致），不会显示登出成功
+- 可带 `[<username>]` 位置参数或 `-u/--username` 指定登出某个已存储账号（与 `auth switch` 的参数形态一致）：确认提示与成功消息会回显目标用户名；目标账号未存储时返回退出码 `3` 并列出可用账号；两形态同传不同值或传空串均返回退出码 `2`（防止脚本空变量静默登出活跃账号）。
+- 默认主机下，若任一 `GC_TOKEN` / `GITCODE_TOKEN` 已设置且非空，会把提示写入 stderr，并仅列出这些实际生效的变量，按当前平台给出仅作用于当前终端的清理命令（Unix `unset`，Windows `Remove-Item Env:`）；该提示只清理当前终端，若变量还定义在 shell 配置文件中，需另行移除或更新。自定义主机登出不受通用环境变量影响，不输出该提示
 
 ## 代理配置
 

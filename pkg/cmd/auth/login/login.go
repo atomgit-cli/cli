@@ -128,6 +128,30 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 	return cmd
 }
 
+// resolveLoginHostname fills an empty --hostname with the same host
+// resolution authenticated commands use (DefaultHost: GC_HOST, then the
+// last logged-in host, then gitcode.com), so a bare login always targets
+// the host the CLI actually consumes (issue 621). The resolved value is
+// validated like an explicit --hostname. The --web flow is unaffected:
+// it pre-fills gitcode.com in validateWebHostname before reaching here.
+func resolveLoginHostname(opts *LoginOptions) error {
+	if opts.Hostname == "" {
+		cfg, err := opts.Config()
+		if err != nil {
+			return fmt.Errorf("failed to read config: %w", err)
+		}
+		if resolved, _ := cfg.Authentication().DefaultHost(); resolved != "" {
+			opts.Hostname = resolved
+		}
+	}
+	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
+	if err != nil {
+		return err
+	}
+	opts.Hostname = hostname
+	return nil
+}
+
 func loginWithToken(opts *LoginOptions) error {
 	// Read token from stdin
 	reader := newInputReader(opts)
@@ -150,12 +174,9 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 		return cmdutil.NewUsageError("no token provided")
 	}
 
-	// Set default hostname
-	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
-	if err != nil {
+	if err := resolveLoginHostname(opts); err != nil {
 		return err
 	}
-	opts.Hostname = hostname
 
 	// Verify the token
 	httpClient, err := opts.HttpClient()
@@ -173,7 +194,15 @@ func loginWithTokenFlag(opts *LoginOptions) error {
 	envVars := envtoken.SetEnvVars(os.LookupEnv)
 	envOverrides := opts.Hostname == "gitcode.com" && len(envVars) > 0
 	if envOverrides && opts.IO.CanPrompt() {
-		keep, err := confirmSaveUnderEnvOverride(opts, envVars)
+		prompt := fmt.Sprintf(
+			"⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n仍要将本次登录保存到本地配置吗？(y/N): ",
+			strings.Join(envVars, "、"),
+		)
+		keep, err := cmdutil.ConfirmYesNo(cmdutil.ConfirmYesNoOptions{
+			IO:     opts.IO,
+			Reader: newInputReader(opts),
+			Prompt: prompt,
+		})
 		if err != nil {
 			return err
 		}
@@ -214,29 +243,6 @@ func persistLogin(opts *LoginOptions, username string, envVars []string, envOver
 	return nil
 }
 
-// confirmSaveUnderEnvOverride asks whether to still store a verified login
-// when a token environment variable will keep overriding it. It returns false
-// when the user declines or when stdin is exhausted, so the safe default is
-// not to persist a login that would not take effect.
-func confirmSaveUnderEnvOverride(opts *LoginOptions, envVars []string) (bool, error) {
-	fmt.Fprintf(opts.IO.ErrOut, "⚠ 环境变量 %s 已设置，优先级高于本地登录配置；本次登录在该环境不会生效\n", strings.Join(envVars, "、"))
-	fmt.Fprintf(opts.IO.ErrOut, "仍要将本次登录保存到本地配置吗？(y/N): ")
-
-	input, err := newInputReader(opts).ReadString('\n')
-	if err != nil {
-		if err == io.EOF && strings.TrimSpace(input) == "" {
-			return false, nil
-		}
-		return false, cmdutil.NewCLIError(cmdutil.ExitUsage, "failed to read confirmation", err)
-	}
-	switch strings.ToLower(strings.TrimSpace(input)) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
 func loginWithWeb(opts *LoginOptions) error {
 	if err := validateWebHostname(opts); err != nil {
 		return err
@@ -266,18 +272,22 @@ func validateWebHostname(opts *LoginOptions) error {
 }
 
 func loginInteractive(opts *LoginOptions) error {
-	// Set default hostname
-	hostname, err := config.NormalizeTrustedHost(opts.Hostname)
-	if err != nil {
+	if err := resolveLoginHostname(opts); err != nil {
 		return err
 	}
-	opts.Hostname = hostname
 
 	cs := opts.IO.ColorScheme()
 
 	fmt.Fprintf(opts.IO.Out, "\n")
 	fmt.Fprintf(opts.IO.Out, "%s Authenticate with GitCode\n", cs.Bold("Tip:"))
 	fmt.Fprintf(opts.IO.Out, "\n")
+
+	// Surface a non-default target before the token prompt, so a GC_HOST or
+	// stale default host rerouting the login is visible before the user
+	// pastes their credential (issue 621 review).
+	if opts.Hostname != "gitcode.com" {
+		fmt.Fprintf(opts.IO.Out, "Target host: %s\n", opts.Hostname)
+	}
 
 	// Prompt for token
 	fmt.Fprintf(opts.IO.Out, "? Paste your authentication token: ")

@@ -60,6 +60,24 @@ func Warning(opts Options) string {
 	return unixWarning(opts)
 }
 
+// ShortWarning renders the compact auth logout reminder. It includes only the
+// current-session command and leaves persistent configuration changes to the
+// full Warning guidance.
+func ShortWarning(opts Options) string {
+	opts.EnvVars = sanitizeEnvVars(opts.EnvVars)
+	if len(opts.EnvVars) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Environment token is still active in this terminal. Clear it for the current session:\n")
+	for _, envVar := range opts.EnvVars {
+		fmt.Fprintf(&b, "  %s\n", sessionClearCommand(opts.GOOS, envVar))
+	}
+	fmt.Fprintf(&b, "If a variable is also defined in a shell configuration file, remove or update that definition as well.\n")
+	return b.String()
+}
+
 // sanitizeEnvVars keeps only the known token environment variables, in
 // priority order, dropping anything else a caller might pass in.
 func sanitizeEnvVars(envVars []string) []string {
@@ -148,7 +166,7 @@ func writeUnixPlanA(b *strings.Builder, opts Options, profile string) {
 	}
 	fmt.Fprintf(b, "    %d. 当前终端立即生效：\n", step+1)
 	for _, envVar := range opts.EnvVars {
-		fmt.Fprintf(b, "       unset %s\n", envVar)
+		fmt.Fprintf(b, "       %s\n", sessionClearCommand(opts.GOOS, envVar))
 	}
 	// The unset step makes the current terminal pass even when the sed above
 	// matched nothing, so verification must run in a fresh terminal to prove
@@ -213,7 +231,7 @@ func writeWindowsPlanA(b *strings.Builder, opts Options) {
 	}
 	fmt.Fprintf(b, "    %d. 当前终端立即生效（PowerShell）：\n", step+1)
 	for _, envVar := range opts.EnvVars {
-		fmt.Fprintf(b, "       Remove-Item Env:%s\n", envVar)
+		fmt.Fprintf(b, "       %s\n", sessionClearCommand(opts.GOOS, envVar))
 	}
 	fmt.Fprintf(b, "    %d. 验证（新开一个终端执行）：\n       gc auth status\n", step+2)
 	fmt.Fprintf(b, "       （若新终端仍显示环境变量生效，请检查 $PROFILE 与系统级环境变量）\n\n")
@@ -229,4 +247,13 @@ func writeWindowsPlanB(b *strings.Builder, opts Options) {
 	fmt.Fprintf(b, "    2. 当前终端立即生效（PowerShell，输入会回显，请在私密终端执行）：\n")
 	fmt.Fprintf(b, "       $env:%s = Read-Host \"New token\"\n", effective)
 	fmt.Fprintf(b, "    3. 验证：\n       gc auth status\n")
+}
+
+// sessionClearCommand renders the command that removes a token variable from
+// the current terminal session without touching persistent configuration.
+func sessionClearCommand(goos, envVar string) string {
+	if goos == "windows" {
+		return "Remove-Item Env:" + envVar
+	}
+	return "unset " + envVar
 }

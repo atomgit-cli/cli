@@ -60,6 +60,26 @@ filter_system_path() {
 SYSTEM_PATH="$(filter_system_path "$RAW_SYSTEM_PATH")"
 export PATH="$SYSTEM_PATH"
 
+# managed_bin_on_path reports whether the managed bin directory is reachable
+# through the original PATH (directly or via an equivalent directory entry).
+managed_bin_on_path() {
+    local raw="$RAW_SYSTEM_PATH" entry
+    local old_ifs="$IFS"
+    IFS=:
+    for entry in $raw; do
+        if [[ "${entry%/}" == "${MANAGED_BIN%/}" ]]; then
+            IFS="$old_ifs"
+            return 0
+        fi
+        if [[ -d "$entry" && -d "$MANAGED_BIN" && "$entry" -ef "$MANAGED_BIN" ]]; then
+            IFS="$old_ifs"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
 cleanup_smoke_dir() {
     [[ -n "$SMOKE_DIR" ]] || return 0
     chmod -R u+w "$SMOKE_DIR" 2>/dev/null || true
@@ -456,6 +476,11 @@ if (( GO_READY )); then
         ok "module dependencies resolved"
     else
         gap "go mod download failed"
+        printf '  hint: check network reachability and go env GOPROXY.\n'
+        printf '  If proxy.golang.org is unreachable, a public module mirror may help, for example:\n'
+        printf '    go env -w GOPROXY=https://goproxy.cn,direct\n'
+        printf '    go env -w GOPROXY=https://mirrors.aliyun.com/goproxy/,direct\n'
+        printf '  (examples only; pick one per your own network environment.)\n'
     fi
 
     section "Verification tools"
@@ -504,6 +529,12 @@ cleanup_smoke_dir
 SMOKE_DIR=""
 trap - EXIT
 
+# In --check mode an absent managed bin on PATH is a gap: the pre-commit and
+# pre-push hooks resolve gitleaks through PATH and would fail on commit.
+if (( CHECK_ONLY )) && ! managed_bin_on_path; then
+    gap "managed tools on PATH (git hooks depend on it)"
+fi
+
 printf '\n'
 if (( ${#MISSING[@]} )); then
     printf 'incomplete: %d dependency gap(s)\n' "${#MISSING[@]}"
@@ -515,5 +546,14 @@ if (( ${#MISSING[@]} )); then
 fi
 
 printf 'dev environment ready.\nManaged tools: %s\n' "$MANAGED_BIN"
-printf 'No shell profile was changed. To use managed tools in this shell, run:\n'
-printf '  export PATH=%q:"$PATH"\n' "$MANAGED_BIN"
+if managed_bin_on_path; then
+    printf 'No shell profile was changed.\n'
+else
+    printf 'WARNING: managed tools are not on PATH. Git hooks (pre-commit / pre-push)\n'
+    printf 'will fail with "gitleaks: command not found" until it is on PATH.\n'
+    printf 'Fix the current shell:\n'
+    printf '  export PATH=%q:"$PATH"\n' "$MANAGED_BIN"
+    printf 'Persist it (bash/zsh example; pick your own profile file):\n'
+    printf "  echo 'export PATH=%q:\"\$PATH\"' >> ~/.bashrc\n" "$MANAGED_BIN"
+    printf 'No shell profile was changed by this script.\n'
+fi

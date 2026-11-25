@@ -6,28 +6,6 @@ import (
 	"testing"
 )
 
-// TestGetLabel_LabelEscaping tests that GetLabel properly escapes labels with slashes
-func TestGetLabel_LabelEscaping(t *testing.T) {
-	var gotURL string
-
-	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
-		gotURL = req.URL.String()
-		return authTestResponse(http.StatusOK, `{"name":"risk/high","color":"red","description":"High risk"}`), nil
-	})
-	client.SetToken("test-token", "test")
-
-	_, err := GetLabel(client, "owner", "repo", "risk/high")
-	if err != nil {
-		t.Fatalf("GetLabel() error = %v", err)
-	}
-
-	// Verify the slash in the label is escaped to %2F in the full URL
-	expectedEscaped := "risk%2Fhigh"
-	if !strings.Contains(gotURL, expectedEscaped) {
-		t.Errorf("Expected escaped label '%s' in URL, got %s", expectedEscaped, gotURL)
-	}
-}
-
 // TestUpdateLabel_LabelEscaping tests that UpdateLabel properly escapes labels with slashes
 func TestUpdateLabel_LabelEscaping(t *testing.T) {
 	var gotURL string
@@ -73,50 +51,6 @@ func TestDeleteLabel_LabelEscaping(t *testing.T) {
 	}
 }
 
-// TestRemoveLabelFromIssue_LabelEscaping tests that RemoveLabelFromIssue properly escapes labels with slashes
-func TestRemoveLabelFromIssue_LabelEscaping(t *testing.T) {
-	var gotURL string
-
-	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
-		gotURL = req.URL.String()
-		return authTestResponse(http.StatusNoContent, ""), nil
-	})
-	client.SetToken("test-token", "test")
-
-	err := RemoveLabelFromIssue(client, "owner", "repo", 123, "type/bug")
-	if err != nil {
-		t.Fatalf("RemoveLabelFromIssue() error = %v", err)
-	}
-
-	// Verify the slash in the label is escaped to %2F in the full URL
-	expectedEscaped := "type%2Fbug"
-	if !strings.Contains(gotURL, expectedEscaped) {
-		t.Errorf("Expected escaped label '%s' in URL, got %s", expectedEscaped, gotURL)
-	}
-}
-
-// TestGetLabel_NormalLabel tests that GetLabel works with normal labels without slashes
-func TestGetLabel_NormalLabel(t *testing.T) {
-	var gotPath string
-
-	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
-		gotPath = req.URL.Path
-		return authTestResponse(http.StatusOK, `{"name":"bug","color":"red"}`), nil
-	})
-	client.SetToken("test-token", "test")
-
-	_, err := GetLabel(client, "owner", "repo", "bug")
-	if err != nil {
-		t.Fatalf("GetLabel() error = %v", err)
-	}
-
-	// Verify normal label is in the path
-	expectedPath := "/api/v5/repos/owner/repo/labels/bug"
-	if gotPath != expectedPath {
-		t.Errorf("Expected path '%s', got %s", expectedPath, gotPath)
-	}
-}
-
 // TestUpdateLabel_NormalLabel tests that UpdateLabel works with normal labels
 func TestUpdateLabel_NormalLabel(t *testing.T) {
 	var gotPath string
@@ -135,28 +69,6 @@ func TestUpdateLabel_NormalLabel(t *testing.T) {
 
 	// Verify normal label is in the path
 	expectedPath := "/api/v5/repos/owner/repo/labels/bug"
-	if gotPath != expectedPath {
-		t.Errorf("Expected path '%s', got %s", expectedPath, gotPath)
-	}
-}
-
-// TestRemoveLabelFromIssue_NormalLabel tests that RemoveLabelFromIssue works with normal labels
-func TestRemoveLabelFromIssue_NormalLabel(t *testing.T) {
-	var gotPath string
-
-	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
-		gotPath = req.URL.Path
-		return authTestResponse(http.StatusNoContent, ""), nil
-	})
-	client.SetToken("test-token", "test")
-
-	err := RemoveLabelFromIssue(client, "owner", "repo", 123, "bug")
-	if err != nil {
-		t.Fatalf("RemoveLabelFromIssue() error = %v", err)
-	}
-
-	// Verify normal label is in the path
-	expectedPath := "/api/v5/repos/owner/repo/issues/123/labels/bug"
 	if gotPath != expectedPath {
 		t.Errorf("Expected path '%s', got %s", expectedPath, gotPath)
 	}

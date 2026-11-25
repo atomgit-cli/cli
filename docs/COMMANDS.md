@@ -130,6 +130,7 @@ docker compose up gc
 
 当前已支持 `--json` 的写路径命令：
 
+- `auth switch`
 - `issue close`
 - `issue comment`
 - `issue create`
@@ -267,10 +268,11 @@ gc auth login --web
 ```
 
 说明：
-- 认证优先级：交互式登录或 `--web`（私有终端）> `GC_TOKEN` 环境变量（CI 从平台 Secret 注入）> 本地配置。禁止把 token 字面量放命令行（写入 shell history/进程列表）或明文文件；`--with-token` 须从 secret manager 管道读入。
+- 推荐人工使用交互式登录或 `--web`（私有终端）；CI/脚本可从平台 Secret 注入 `GC_TOKEN`。默认主机运行时 token 优先级：`GC_TOKEN` > `GITCODE_TOKEN` > 本地配置。禁止把 token 字面量放命令行（写入 shell history/进程列表）或明文文件；`--with-token` 须从 secret manager 管道读入。
 - `auth login --web` 仅支持默认主机 `gitcode.com`，会打开 `https://gitcode.com/setting/token-classic/create` 新建访问令牌页面，然后继续在终端中读取你粘贴的 Token 完成登录。
 - `--web` 与 `--with-token` 不能同时使用；两者分别代表浏览器辅助交互登录和从标准输入读取 Token。
 - 自定义主机不支持 `--web`；请先核对目标主机，再使用 `auth login --hostname <host>` 在本地交互终端登录。
+- 不带 `--hostname` 时，登录目标与业务命令使用同一主机解析（`GC_HOST` > 上次登录主机 > `gitcode.com`）；设置 `GC_HOST` 后裸登录即为该主机建立本地认证。
 - 登录成功后 token 会写入本地配置（默认 `~/.config/gc/auth.json`，详见[认证模型](./AUTH.md)）。
 - 登录目标为 `gitcode.com` 且设置了 `GC_TOKEN`/`GITCODE_TOKEN` 时：交互模式会在保存前确认是否仍保存（默认否；确认接受后同样输出下述指引）；非交互模式保存后向 stderr 输出可复制的根治指引（按 `$SHELL` 推断配置文件、按平台适配 sed/PowerShell 语法，含可逆（Unix）/删除式（Windows 用户级）停用定义、`unset`、新开终端 `gc auth status` 验证步骤）。CLI 只输出命令，不会自动修改任何 shell 配置文件。
 - 未设置环境变量时，登录成功输出保持安静（不再打印环境变量优先级提示）。
@@ -320,18 +322,46 @@ gc auth token --json
 - token 输出到 stdout，同时向 stderr 输出安全警告提醒不要共享此输出；禁止把该命令作为脚本 piping、日志采集或 AI 代理取 token 入口。
 - `auth token` 和 `auth status --show-token` 必须在交互式 TTY 中按提示输入 hostname 确认；非交互环境一律拒绝输出完整 token，没有 `--yes` 绕过。
 
+### auth switch - 切换账号
+
+```bash
+# 在默认主机上切换到已存储的账号
+gc auth switch second-account
+
+# 交互式选择（列出该主机的已登录账号，当前账号有标记）
+gc auth switch
+
+# 在指定主机上切换
+gc auth switch deploy-bot --hostname gitcode.com
+
+# 输出 JSON
+gc auth switch second-account --json
+```
+
+说明：
+- 每个主机同一时刻只有一个活动账号（`active_user`），所有认证命令使用该账号的 token；`auth switch` 在本地改写 `auth.json` 的 `active_user`，不调用 API。切换后 `gc auth status` 显示新账号。切换是作用域内的操作：在非默认主机上切换只改变该主机的活动账号，不改变默认主机（后续裸命令的目标主机不变——与 `auth login` 的"登录即提升默认主机"语义不同）。
+- 未传 `--hostname` 时按默认主机解析（`GC_HOST` > 上次登录主机 > gitcode.com，与 `auth login` 相同）。
+- 交互模式列出该主机已登录账号（`<序号>. <用户名>`，当前账号带 `(current)` 标记），输入序号或用户名均可（序号优先：账号名恰为数字时按序号解析）；非交互环境（无 TTY 或 `--no-interactive`）未传用户名时返回退出码 `2`。
+- 退出码：`0` 切换成功；`1` 非法主机名、登录状态损坏（如账号名含控制字符）、写入失败；`2` 非交互缺用户名、无效选择、超参数；`3` 目标账号未存储（消息列出可用账号）或主机无任何已存储账号（提示 `gc auth login`）——主机无账号时先返回 `3`，与是否传用户名、是否 TTY 无关。
+- `--json` 输出 `{"hostname":..., "active_user":...}`（字段序 hostname → active_user）。
+- 环境变量 token（`GC_TOKEN` / `GITCODE_TOKEN`）仍优先于已切换账号（该优先级指默认主机 gitcode.com；自定义主机读取本地登录态、不受通用环境变量影响，见 docs/AUTH.md 主机传播语义）——默认主机上切换且环境变量已设置时，stderr 输出一行提示（`--json` 模式不输出该提示，保持纯 JSON）；跨配置目录的并行账号用 `GC_CONFIG_DIR`（见 docs/AUTH.md 一机多账号小节）。
+
 ### auth logout - 登出
 
 ```bash
 gc auth logout
+
+# 登出指定账号（位置参数，等价于 --username）
+gc auth logout second-account --yes
 
 # 非交互执行
 gc auth logout --yes
 ```
 
 说明：
-- `auth logout` 会清理本地持久化认证信息。
-- 若当前认证来自 `GC_TOKEN` 或 `GITCODE_TOKEN`，命令会提示你手动 `unset` 环境变量。
+- `auth logout` 会清理本地持久化认证信息；不带用户名时**仅登出当前活跃账号**，同主机其他已存储账号保留（活跃账号自动顺延）；可带 `[<username>]` 位置参数（或 `-u/--username`）登出指定账号——定向登出时确认提示与成功消息回显目标用户名；两者同时传且不同值、任一形态传空串、或超过一个位置参数均返回退出码 `2`（空串拒绝防脚本空变量静默登出活跃账号）；目标账号未存储在该主机时返回退出码 `3` 并列出可用账号（与 `auth switch` 同款）。
+- 目标 hostname 会先校验并归一化；无效 hostname 返回通用错误（退出码 `1`，与 `auth login/status/token/switch` 家族一致——此前 logout 独为参数错误 `2`，已统一）。配置目录不可解析（无 HOME 且无 `GC_CONFIG_DIR`——Windows 为 USERPROFILE）时同样报错退出 `1` 并给出变量指引——登出绝不无据报成功（带用户名形态经预检报退出码 `3`，均为诚实错误；可解析空态下裸形态为有据 no-op 成功，退出码 `0`）。
+- 默认主机下，若任一 `GC_TOKEN` / `GITCODE_TOKEN` 已设置且非空，命令会把提示写入 stderr，并仅列出这些实际生效的变量，按当前平台给出仅作用于当前终端的清理命令（Unix `unset`，Windows `Remove-Item Env:`）；stdout 只保留成功信息。该提示只清理当前终端，若变量还定义在 shell 配置文件中，需另行移除或更新。自定义主机登出不受通用环境变量影响，不输出该提示。
 - 非交互场景中显式传 `--yes`。
 
 ### auth setup-git - 配置 git credential helper
@@ -348,9 +378,30 @@ gc auth setup-git --hostname gitcode.com
 - `auth setup-git` 将 gc 配置为 git 的 credential helper，使 git 操作（clone/pull/push）自动携带 GitCode 认证。
 - 以 `--add` 追加方式写入 `git config --global credential."https://<host>".helper`，不覆盖已有 credential helper 配置。
 - 幂等：重复运行不产生重复条目，已配置相同 helper 时直接跳过。
-- 配置的 helper 指向 `gc auth git-credential`（credential 协议响应子命令，后续交付）；当前 setup-git 仅完成配置写入。
+- 配置的 helper 指向 `gc auth git-credential` 子命令，由其在 git 请求凭据时填充已登录账号的用户名和访问令牌（见下节）。
 - `--hostname` 支持自定义主机，默认使用配置的默认主机（`gitcode.com`）。
 - 纯客户端命令，不调用 GitCode API，不读取或输出 token。
+
+### auth git-credential - 响应 git credential helper 协议
+
+```bash
+# 查看 git 会得到什么凭据（password 即访问令牌，人工运行会打印令牌明文）
+printf 'protocol=https\nhost=gitcode.com\n\n' | gc auth git-credential
+
+# setup-git 写入 git 配置的 helper 值（不要把下面的 get 一并写进配置，git 会自己追加操作参数）
+!"<gc 路径>" auth git-credential
+
+# git 实际调用的完整命令行（操作参数由 git 追加）
+!"<gc 路径>" auth git-credential get
+```
+
+说明：
+- 实现 git credential helper 协议：从 stdin 读取 `key=value` 请求（`protocol`、`host`、`username`，也支持 `url=` 整体携带），命中已登录账号的 host 时向 stdout 输出 `username=<登录名>` 与 `password=<访问令牌>`。
+- 只服务本地已存储的登录账号（`gc auth login` 写入的 `auth.json`）；`GC_TOKEN` / `GITCODE_TOKEN` 环境变量优先级在此不适用，以保证 `GC_CONFIG_DIR` 隔离语义的确定性（一机多账号场景：wrapper 脚本用 `GC_CONFIG_DIR` 绑定各账号的配置目录，见 `docs/AUTH.md` 认证模型）。`GC_CONFIG_DIR` 设为空字符串时视为无配置（静默无凭据，不回落默认目录）；带端口的 host 请求不参与匹配。
+- 未命中时（该 host 未登录、host 不匹配、请求 `username` 与登录名不一致、请求缺 host、存储的登录名或令牌含控制字符）静默退出：无 stdout / stderr 输出、exit 1，git 会继续询问后续 helper。
+- 凭据值只出现在 stdout 协议输出中，绝不写入 stderr、日志或错误信息。
+- 支持 git 传入的操作参数：`get`（缺省等价于无参调用）、`store` / `erase`（无操作，exit 0）；其他操作名返回 exit 2 用法错误。
+- 该命令通常由 git 经 `auth setup-git` 写入的配置自动调用，无需手工执行；排查登录状态使用 `gc auth status`。
 
 ---
 
@@ -376,13 +427,39 @@ printf '{"title":"New title"}' | gc api repos/infra-test/gctest1/pulls/1 --metho
 
 # 自定义请求头
 gc api repos/infra-test/gctest1 --header 'Accept: application/json'
+
+# 输出响应状态行与响应头（--include），随后是响应体
+gc api repos/infra-test/gctest1 --include
+
+# 用 jq 表达式过滤输出
+gc api user --jq .login
+
+# 自动翻页：跟随 page 参数直到空页（空数组）；--slurp 把所有页合并为单一 JSON 数组
+gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate
+gc api 'repos/infra-test/gctest1/issues?state=all&per_page=100' --paginate --slurp
+
+# 用 -f 重复键值字段构造 JSON 请求体（POST 创建评论等简单场景免临时文件）
+gc api repos/infra-test/gctest1/issues/1/comments -f body='评论内容'
 ```
 
 说明：
 - endpoint 可写成 `repos/owner/repo` 或 `/api/v5/repos/owner/repo`；普通相对路径会自动补齐 `/api/v5/`。
 - 认证沿用当前 `gc` 登录态或 `GC_TOKEN` / `GITCODE_TOKEN` 环境变量。
-- 默认方法为 `GET`；传入 `--input` 但未指定 `--method` 时会自动使用 `POST`。
+- 默认方法为 `GET`；传入 `--input` 或 `-f` 但未指定 `--method` 时会自动使用 `POST`。
 - 输出为远端原始响应 body，便于脚本继续交给 `python -m json.tool`、`jq` 或其他工具处理。
+- `--include`：先输出 `HTTP/1.1 <状态码> <状态文本>` 与响应头（按头名排序，注意 Go 客户端会按规范形式显示如 `Etag`），空行后再输出响应体；响应头可用于读取 `Etag`、限流头等元数据。`--include` 与 `--jq` 可组合（先头块后过滤结果）。
+- HTTP 304（条件请求命中）：`gc api` 一律以非零退出码结束（错误消息含 304），配 `--include` 时先输出响应头再报错；消费方可据此把"非零退出 + 304"判定为"资源未变化"。当前 GitCode v5 多数端点不返回 ETag，该路径在无 ETag 的端点不可达。
+- `--jq`：完整 jq 表达式（gojq 实现）；字符串结果按原文输出，其余结果为紧凑 JSON 逐行输出；表达式非法返回 exit 2 用法错误。
+- `--paginate`：仅限 GET，且不能与 `--input` / `-f` 组合；自动注入 `page=1..N`（未指定时补 `per_page=100`，已有则保留），翻到空页（空数组 `[]`）终止；最多发起 100 次请求且第 100 页必须为空页（即最多 99 个数据页；超限报错 exit 1 并提示收窄查询，`--slurp` 超限时丢弃已合并数据不输出——失败优于静默截断）；要求响应为 JSON 数组——空 body 或 null 响应体同样报错（exit 1、同一报错格式，仅 body 预览不同）而非按空页处理，避免掩盖服务端异常（翻页中途的任一页出现这两种形态也同样报错）。非 `--slurp` 模式逐页原样输出（每页一个 JSON 数组），`--jq` 逐页应用。
+- `--slurp`：仅 `--paginate` 下可用，把全部页的条目合并为单一 JSON 数组输出（空结果输出 `[]`）；不能与 `--jq` 组合（gc 返回 exit 2 用法错误；gh 同样拒绝该组合，但其退出码为 1，gc 按自身退出码契约返回 2）。注意与 gh 同名 flag 的形状差异：gh 把每一页整体包进外层数组，gc 为扁平合并全部条目。
+- `-f, --field`：可重复的 `key=value` 字符串字段，组成 JSON 对象作为请求体（同名键后者覆盖前者）；与 `--input` 互斥；不支持类型化字段（`-F`），复杂结构请用 `--input`。
+
+从 gh 迁移时，还有四处行为差异需要注意（`--slurp` 的形状与退出码差异已在上面条目注明）：
+
+- `--jq` 不加载环境变量：`$ENV` 是空对象，`$ENV.HOME` 等取值为 `null`。这是有意为之的安全设计——jq 表达式读不到 `GC_TOKEN` 等环境变量，CLI 侧的认证凭据在结构上不可能经 `--jq` 输出泄露（`--jq` 会如实输出响应体本身的数据，与 CLI 凭据无关）。gh 的 `--jq` 会加载进程环境变量，从 gh 迁移的表达式若依赖 `$ENV`，需要改用别的方式传值——注意 shell 变量插值进命令行会进入进程列表与 shell history，敏感值不适用。
+- `-f` 字段不会因 GET 请求转为查询参数：字段始终构造 JSON 请求体（服务端对 GET 请求体通常忽略）。gh 在显式指定 GET 时会把 `-f` 字段转为 query string；在 `gc api` 中传查询参数请直接写进 endpoint URL，例如 `gc api 'repos/infra-test/gctest1/commits?path=README.md'`（敏感值不宜放进查询串，会进入服务端与代理的访问日志）。
+- 响应中的超大整数有精度上限：`--jq` 处理前，响应体先按 JSON 通用类型解析（数值走 float64），超过 2^53（约 9×10^15）的整数不再保证精确表示；gh 的实现同样如此。GitCode v5 各类 id 远小于该值，正常使用不受影响，作为已知限制说明于此。
+- `halt` / `halt_error` 以错误结束：`--jq 'halt'` 会报 `--jq filter error: halt error: null` 并以 exit 1 结束；gh 对 `halt` 及空值输入的 `halt_error` 是静默正常退出（exit 0），其余情形 `halt_error` 在两边都以错误结束、数值参数不会作为进程退出码透传。依赖 halt 控制流程的脚本迁移时需要调整。
 
 ---
 
@@ -530,7 +607,7 @@ gc repo pr-settings view -R owner/repo --json
 ```
 
 说明：
-- 显示合并门禁（流水线必过/禁止自合入/强制合入/合并模式/删除源分支）、评审人（最小评审数/批准者/测试人）、Squash 设置、CLA 校验、轻量级 PR 等主要设置。`--json` 输出完整 24 项设置对象。
+- 显示合并门禁（流水线必过/禁止自合入/强制合入/合并模式/删除源分支/合并后关闭 issue）、评审人（最小评审数/批准者/测试人）、Squash 设置、CLA 校验、轻量级 PR 等主要设置。`--json` 输出完整 24 项设置对象。
 - `--json` 输出完整设置对象到 stdout。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 仓库不存在（HTTP 404）；`4` 认证错误。
 
@@ -551,12 +628,15 @@ gc repo pr-settings update --no-self-merge -R owner/repo
 # 设置合并模式为 fast-forward
 gc repo pr-settings update --merge-method ff -R owner/repo
 
+# 合并后关闭 PR 引用的 issue
+gc repo pr-settings update --close-issue-on-merge -R owner/repo
+
 # JSON 输出
 gc repo pr-settings update --pipeline-required -R owner/repo --json
 ```
 
 说明：
-- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--merge-method`（merge/rebase_merge/ff）。
+- 支持 flags：`--reviewers`（最小评审人数，0 禁用）、`--pipeline-required`、`--no-self-merge`、`--force-merge`、`--delete-source-branch`、`--close-issue-on-merge`（可用 `--close-issue-on-merge=false` 关闭）、`--merge-method`（merge/rebase_merge/ff）。
 - 至少提供一个字段。
 - `--json` 输出更新后的完整设置对象。
 - 退出码：`0` 成功；`1` 通用错误；`2` 参数错误；`3` 仓库不存在；`4` 认证错误。
@@ -1635,9 +1715,11 @@ gc pr view 1 -R infra-test/gctest1 --time-format relative
 说明：
 - `pr view` 的文本详情输出会使用更稳定的元信息排布，便于人工和代理阅读。
 - 文本输出包含里程碑信息（如果 PR 关联了里程碑）。
+- 文本详情头部包含 review 状态摘要行（如 `Review: 1 approved, 1 rejected · Testers: 1 accepted`）：仅在有评审人/测试人数据时显示；无数据时整行省略——`pr reviews` 空态会输出提示行 `No review states on PR #N`，view 侧无对应提示行，两者均不报错。摘要失败计入"数据不完整"信号（stderr warning + 非零退出码），与统计补齐失败同规则。详细分组输出仍由 `gc pr reviews` 承担。
+- `--comments` 的评论区嵌套回复渲染与 `gc pr comments` 同口径（`Replies (N)` + `↳ ID: ...` 行 + 缩进正文，回复 id 可用于单条读取；缩进深度随各命令的评论排版不同）；两命令共用同一渲染实现。
 - `--time-format absolute|relative` 只影响文本详情和评论区中的时间展示，不改变 `--json` 结构。
 - 如果 PR 详情 API 返回的 `additions`、`deletions`、`changed_files` 或 `commits` 为 0，CLI 会尝试通过 PR files/commits API 补齐统计；补齐失败时会给出 warning，但不阻断查看。补齐失败时返回非零退出码（按底层 API 错误映射：401→4、404→3、409→5、其他→1），PR 详情仍输出到 stdout。多个补齐源同时失败时，退出码按首个失败 API 的状态码映射。
-- `--json` 路径保持结构化输出，milestone、body、description、merged、merged_at 等字段会自动包含在 JSON 中；其中 `body` 与 `description` 会基于远端返回互相补齐。GitCode API 对已合并 PR 返回 `merged: null` 时，CLI 会根据 `state=merged` 或非空 `merged_at` 将 `merged` 归一化为 `true`。`--comments --json` 在评论获取失败时仍写入 `{"pull_request": ..., "comments": null}` 并返回非零退出码，与文本模式"渲染已有数据 + 信号不完整"的行为一致。
+- `--json` 路径保持结构化输出，milestone、body、description、merged、merged_at 等字段会自动包含在 JSON 中；其中 `body` 与 `description` 会基于远端返回互相补齐。GitCode API 对已合并 PR 返回 `merged: null` 时，CLI 会根据 `state=merged` 或非空 `merged_at` 将 `merged` 归一化为 `true`。`--comments --json` 在评论获取失败时仍写入 `{"pull_request": ..., "comments": null}` 并返回非零退出码，与文本模式"渲染已有数据 + 信号不完整"的行为一致。`--json` 不包含 review 状态字段也不为此发起额外请求——结构化评审状态由专用命令 `gc pr reviews --json` 承载（`--comments --json` 的评论对象自带嵌套 `reply` 数组）。
 
 ### pr issues - 查看 PR 关联的 Issues
 
@@ -1674,6 +1756,7 @@ gc pr comments 1 -R infra-test/gctest1 --json
 `--json` 输出评论对象数组；无评论时输出 `[]`，不会混入文本提示。
 可通过 `gc pr comment resolve` 和 `gc pr comment unresolve` 标记评论讨论的解决状态。
 inline comment 会显示文件路径和所在行号（新版本文件的行号）。
+每条评论对象含 `reply` 数组（该讨论的回复列表，官方 API 嵌套返回；无回复时为 `null`）：文本模式以 "Replies (N)" 在父评论下渲染，每个回复元素含 `id`/`body`/`user`/`created_at`/`updated_at`，回复自身不带 `discussion_id`（由父评论携带）。文本模式回复行格式为 `↳ ID: <回复id>, <作者> at <时间>`，回复 id 可用于 `gc pr comment delete` 或单条读取（`gc api repos/<owner>/<repo>/pulls/comments/<id>`）。
 
 ### pr comment - 添加 PR 评论
 
@@ -1751,7 +1834,15 @@ gc pr reply 1 --discussion <discussion_id> --body "回复内容" -R infra-test/g
 
 # 使用简写
 gc pr reply 1 -d <discussion_id> -b "回复内容" -R owner/repo
+
+# JSON 输出（返回 note_id 可用于回读与幂等校验）
+gc pr reply 1 --discussion <discussion_id> --body "回复内容" -R infra-test/gctest1 --json
 ```
+
+说明：
+- 成功输出包含 Comment ID（即 `note_id`，新回复的评论 id）：凭它可经 `gc api repos/<owner>/<repo>/pulls/comments/<note_id>` 单条读回（含 body 与所属 discussion_id），也可在 `gc pr comments` 的父评论 `reply` 数组中看到该回复。
+- `--json` 输出 `{"discussion_id":..., "note_id":..., "body":...}`。
+- 回复不在评论列表的顶层（列表只含根评论，回复嵌套在父评论的 `reply` 字段内）。
 
 ### pr diff - 查看 PR 差异
 
@@ -1848,6 +1939,23 @@ gc pr ready 1 -R infra-test/gctest1 --json
 
 说明：
 - `pr ready` 会修改 PR 草稿/就绪状态，默认需要确认；非交互场景中显式传 `--yes`。
+
+### pr reviews - 查看 PR 评审状态
+
+```bash
+# 查看 PR 的评审状态（评审人/测试人/审核人）
+gc pr reviews 1 -R infra-test/gctest1
+
+# JSON 输出
+gc pr reviews 1 -R infra-test/gctest1 --json
+```
+
+说明：
+- v5 API 无专门的 reviews 列表端点；评审状态内嵌于 PR 详情响应，本命令读取并输出三组状态：`approval_reviewers`（评审人）、`testers`（测试人）、`assignees`（审核人）。
+- 评审人状态为 `accept_status` 枚举：`true`（已通过 approved）、`reject`（已拒绝 rejected）、`optional`（待处理 pending）；测试人状态为 `accept` 布尔（文本渲染 accepted/pending）。文本模式中：评审人的 code owner 会附加标注；审核人仅显示登录名（其 accept 状态保留在 `--json` 输出中）；图标按状态着色（绿勾/红叉/灰点）。
+- 每个条目的字段形态：`id`/`login`/`name`/`html_url`/`assignee`/`code_owner`/`accept`，另 `avatar_url` 为可选字段（testers 条目无此字段）、`accept_status` 仅评审人条目携带。
+- 无任何评审数据时输出空列表（文本提示 No review states；`--json` 为三个空数组），不报错。
+- 该端点不提供逐评审人的时间字段（时间维度仅 PR 级 `created_at`/`merged_at` 等独立字段）。
 
 ### pr review - 评审 PR
 
@@ -2729,6 +2837,9 @@ gc actions run watch <run-id> -R owner/repo --compact
 # run 失败时返回非零退出码（CI 脚本用）
 gc actions run watch <run-id> -R owner/repo --exit-status
 
+# 非交互环境（脚本/管道）中等待到终态
+gc actions run watch <run-id> -R owner/repo --wait --exit-status
+
 # JSON 输出（单次快照）
 gc actions run watch <run-id> -R owner/repo --json
 ```
@@ -2736,7 +2847,8 @@ gc actions run watch <run-id> -R owner/repo --json
 说明：
 
 - TTY 环境：按 `--interval`（默认 3 秒）定时刷新屏幕，展示 run 概要 + stages/jobs/steps 状态；到达终态后停止。
-- 非 TTY 环境（管道输出、`--no-interactive`）：输出单次快照后立即退出，不阻塞等待（符合 agent-friendly 契约）。
+- 非 TTY 环境（管道输出、`--no-interactive`）：默认输出单次快照后立即退出，不阻塞等待（符合 agent-friendly 契约）。
+- `--wait`：非交互模式下显式要求持续轮询到终态（逐轮输出快照，形成日志流）；配合 `--exit-status` 时与 TTY 行为一致。默认行为不变，脚本按需 opt-in。`--json` 模式仍为单次输出（`--wait` 对 JSON 输出无效）。
 - `--compact`：仅展示包含失败 job 的 stage 和失败 step。
 - `--exit-status`：run 终态为 `FAILED`/`CANCELED` 时返回退出码 `1`，用于 CI 自动化。
 - 支持 `--json`：输出写入 stdout，原样透传 API 响应（同 `run view --json`）。
@@ -3766,6 +3878,7 @@ gc schema "issue view"
 | `GC_TOKEN` | 认证 Token |
 | `GITCODE_TOKEN` | 备用 Token |
 | `GC_HOST` | 默认 GitCode 主机（默认：gitcode.com）；必须是受信 hostname-only 值；已接入共享 host-aware 认证入口的业务命令会映射到对应 API 主机，且非默认 host 只使用该 host 的本地登录 token |
+| `GC_CONFIG_DIR` | 覆盖配置目录（默认 `~/.config/gc`），登录态与偏好随目录切换。指向空目录等于未登录，不会回落默认目录；设为空字符串则视为未设置、仍读写默认目录——例外是 `auth git-credential`：空字符串视为无凭据、不回落，以保证多账号隔离语义确定。环境变量 token 的优先级不受目录切换影响（见上方 `GC_TOKEN` 行）。一机多账号用法与示例见 `docs/AUTH.md` |
 | `GC_TIMEOUT` | API 请求超时时间（默认：30s）；支持 Duration 格式如 `60s`、`2m`，或纯秒数如 `120` |
 | `GC_DEBUG` | 启用 API 调试日志，输出重试、Rate Limit 等信息到 stderr |
 | `GC_API_DEBUG` | 同 `GC_DEBUG`，启用 API 调试日志 |

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"testing"
 
 	"gitcode.com/gitcode-cli/cli/pkg/testutil"
@@ -40,18 +41,6 @@ func TestListRepoMilestones(t *testing.T) {
 	}
 	if len(milestones) != 1 || milestones[0].Title != "v1.0" {
 		t.Fatalf("ListRepoMilestones() = %+v, want [v1.0]", milestones)
-	}
-}
-
-func TestListPRReviews(t *testing.T) {
-	t.Parallel()
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	reviews, err := ListPRReviews(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("ListPRReviews() error = %v", err)
-	}
-	if len(reviews) != 1 || reviews[0].State != "APPROVED" {
-		t.Fatalf("ListPRReviews() = %+v, want [APPROVED]", reviews)
 	}
 }
 
@@ -176,31 +165,6 @@ func TestListCommentsForCommit(t *testing.T) {
 		t.Fatalf("ListCommentsForCommit() = %+v", comments)
 	}
 }
-
-func TestCloseMilestone(t *testing.T) {
-	t.Parallel()
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := CloseMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("CloseMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
-func TestOpenMilestone(t *testing.T) {
-	t.Parallel()
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	m, err := OpenMilestone(client, "owner", "test-repo", 1)
-	if err != nil {
-		t.Fatalf("OpenMilestone() error = %v", err)
-	}
-	if m.State != "closed" {
-		t.Errorf("State = %q, want %q", m.State, "closed")
-	}
-}
-
 func TestUpdateCommitComment(t *testing.T) {
 	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
@@ -238,19 +202,6 @@ func TestCreatePRComment(t *testing.T) {
 	}
 }
 
-func TestCreatePRReview(t *testing.T) {
-	t.Parallel()
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	opts := &CreatePRReviewOptions{Event: "APPROVED", Body: "LGTM"}
-	r, err := CreatePRReview(client, "owner", "test-repo", 1, opts)
-	if err != nil {
-		t.Fatalf("CreatePRReview() error = %v", err)
-	}
-	if r.State != "APPROVED" {
-		t.Errorf("State = %q, want %q", r.State, "APPROVED")
-	}
-}
-
 func TestEditPR(t *testing.T) {
 	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
@@ -277,19 +228,6 @@ func TestReopenPullRequest(t *testing.T) {
 		t.Logf("ReopenPullRequest state = %q", pr.State)
 	}
 }
-
-func TestAddLabelsToIssue(t *testing.T) {
-	t.Parallel()
-	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
-	labels, err := AddLabelsToIssue(client, "owner", "test-repo", 1, []string{"bug", "enhancement"})
-	if err != nil {
-		t.Fatalf("AddLabelsToIssue() error = %v", err)
-	}
-	if len(labels) != 1 || labels[0].Name != "bug" {
-		t.Fatalf("AddLabelsToIssue() = %+v", labels)
-	}
-}
-
 func TestAddIssueLabels(t *testing.T) {
 	t.Parallel()
 	client := NewClientFromHTTP(testutil.NewTestHTTPClient(testutil.MockAPIHandler()))
@@ -350,5 +288,69 @@ func TestResolvePRComment(t *testing.T) {
 	opts := &ResolvePRCommentOptions{Resolved: true}
 	if err := ResolvePRComment(client, "owner", "test-repo", 1, "d1", opts); err != nil {
 		t.Fatalf("ResolvePRComment() error = %v", err)
+	}
+}
+
+func TestReplyPRCommentEscapesDiscussionID(t *testing.T) {
+	// A discussionID with path/query metacharacters must be percent-encoded
+	// into a single path segment so it cannot alter the request path (the
+	// #316 owner/repo escaping applied to the remaining path segment).
+	var gotEscapedPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"d1","body":"reply","note_id":42}`))
+	})))
+	opts := &ReplyPRCommentOptions{Body: "reply"}
+	if _, err := ReplyPRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
+		t.Fatalf("ReplyPRComment() error = %v", err)
+	}
+	want := "/api/v5/repos/owner/test-repo/pulls/1/discussions/a%2Fb%20c%3Fd%23e/comments"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
+func TestResolvePRCommentEscapesDiscussionID(t *testing.T) {
+	var gotEscapedPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	})))
+	opts := &ResolvePRCommentOptions{Resolved: true}
+	if err := ResolvePRComment(client, "owner", "test-repo", 1, "a/b c?d#e", opts); err != nil {
+		t.Fatalf("ResolvePRComment() error = %v", err)
+	}
+	want := "/api/v5/repos/owner/test-repo/pulls/1/comments/a%2Fb%20c%3Fd%23e"
+	if gotEscapedPath != want {
+		t.Fatalf("escaped path = %q, want %q", gotEscapedPath, want)
+	}
+}
+
+func TestGetPRReviewStates(t *testing.T) {
+	var gotPath string
+	client := NewClientFromHTTP(testutil.NewTestHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		// approval_reviewers present, testers and assignees absent (null) to
+		// exercise the nil-to-empty normalization.
+		_, _ = w.Write([]byte(`{"approval_reviewers":[{"id":"7","login":"alice","accept_status":"true"}]}`))
+	})))
+	states, err := GetPRReviewStates(client, "owner", "test-repo", 3)
+	if err != nil {
+		t.Fatalf("GetPRReviewStates() error = %v", err)
+	}
+	wantPath := "/api/v5/repos/owner/test-repo/pulls/3"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if len(states.ApprovalReviewers) != 1 || states.ApprovalReviewers[0].Login != "alice" {
+		t.Fatalf("ApprovalReviewers = %+v, want one alice", states.ApprovalReviewers)
+	}
+	if states.Testers == nil || len(states.Testers) != 0 {
+		t.Fatalf("Testers = %#v, want non-nil empty slice", states.Testers)
+	}
+	if states.Assignees == nil || len(states.Assignees) != 0 {
+		t.Fatalf("Assignees = %#v, want non-nil empty slice", states.Assignees)
 	}
 }

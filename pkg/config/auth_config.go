@@ -10,6 +10,12 @@ import (
 
 const authStateVersion = 1
 
+// errHostNotFound is the reads-as-empty result of auth state operations
+// that require a stored host (issue 675 semantics: reads on an
+// unresolvable config dir behave exactly like a fresh installation —
+// writes fail closed instead, issue 676).
+var errHostNotFound = errors.New("host not found")
+
 // authConfig implements AuthConfig interface
 type authConfig struct {
 	config *config
@@ -54,6 +60,29 @@ func (a *authConfig) StoredToken(hostname string) (string, string) {
 		return "", ""
 	}
 	return user.Token, "config"
+}
+
+// StoredCredential returns the active username and stored token for a host
+// from a single read of the auth state. ActiveUser and StoredToken are two
+// separate reads of the same file that can straddle a concurrent rewrite
+// (login or user switch in another process) and yield a mismatched pair;
+// consumers that need both values require one consistent snapshot (issue
+// 649). The pair is either complete or empty: any incomplete state returns
+// ("", "").
+func (a *authConfig) StoredCredential(hostname string) (string, string) {
+	state, err := a.config.readAuthState()
+	if err != nil {
+		return "", ""
+	}
+	host := state.host(hostname)
+	if host == nil || host.ActiveUser == "" {
+		return "", ""
+	}
+	user := host.Users[host.ActiveUser]
+	if user == nil || user.Token == "" {
+		return "", ""
+	}
+	return host.ActiveUser, user.Token
 }
 
 // HasActiveToken checks if a token exists for a host
@@ -112,7 +141,9 @@ func (a *authConfig) DefaultHost() (string, string) {
 	return "gitcode.com", "default"
 }
 
-// Login creates or updates authentication for a host
+// Login creates or updates authentication for a host. The
+// read-modify-write runs under the config-dir cross-process lock
+// (issue 672) so concurrent writers cannot lose each other's updates.
 func (a *authConfig) Login(hostname, username, token, gitProtocol string, secureStorage bool) (bool, error) {
 	if hostname == "" {
 		hostname = "gitcode.com"
@@ -126,6 +157,17 @@ func (a *authConfig) Login(hostname, username, token, gitProtocol string, secure
 	if gitProtocol == "" {
 		gitProtocol = "https"
 	}
+	if a.config.configDir == "" {
+		// Fail closed before locking: the lock file lives in the config
+		// dir, so acquiring it first would mask ErrNoConfigDir with a
+		// lock-creation error (issue 672 ordering requirement).
+		return false, ErrNoConfigDir
+	}
+	release, err := lockConfigDir(a.config.configDir)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 
 	state, err := a.config.readAuthState()
 	if err != nil {
@@ -156,11 +198,25 @@ func (a *authConfig) Login(hostname, username, token, gitProtocol string, secure
 	return true, a.config.writeAuthState(state)
 }
 
-// Logout removes authentication for a host
+// Logout removes authentication for a host. The read-modify-write runs
+// under the config-dir cross-process lock (issue 672), and a logout of a
+// user that is not stored skips the rewrite entirely.
 func (a *authConfig) Logout(hostname, username string) error {
 	if hostname == "" {
 		hostname = "gitcode.com"
 	}
+	if a.config.configDir == "" {
+		// Fail closed: with no resolvable config location there is nothing
+		// to clear and no way to know whether anything is stored — a
+		// logout must never report success without grounds (issue 676,
+		// mirroring Login's never-silently-skip contract).
+		return ErrNoConfigDir
+	}
+	release, err := lockConfigDir(a.config.configDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	state, err := a.config.readAuthState()
 	if err != nil {
@@ -176,6 +232,16 @@ func (a *authConfig) Logout(hostname, username string) error {
 		username = host.ActiveUser
 	}
 	if username == "" {
+		return nil
+	}
+	if _, ok := host.Users[username]; !ok {
+		// Nothing to remove: skip the rewrite entirely — the unconditional
+		// no-op rewrite both widened the concurrent-race window and churned
+		// the file for nothing (issue 672). Trade-off: the old rewrite
+		// incidentally re-normalized externally corrupted state (a dangling
+		// active_user or an empty host); our own locked writers maintain
+		// those invariants, and every reader already treats a dangling
+		// active user as empty, so the skip is safe.
 		return nil
 	}
 
@@ -195,11 +261,21 @@ func (a *authConfig) Logout(hostname, username string) error {
 	return a.config.writeAuthState(state)
 }
 
-// SwitchUser switches the active user for a host
+// SwitchUser switches the active user for a host. The read-modify-write
+// runs under the config-dir cross-process lock (issue 672).
 func (a *authConfig) SwitchUser(hostname, user string) error {
 	if hostname == "" {
 		hostname = "gitcode.com"
 	}
+	if a.config.configDir == "" {
+		// Reads-as-empty: the host cannot be found (issue 675 semantics).
+		return errHostNotFound
+	}
+	release, err := lockConfigDir(a.config.configDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	state, err := a.config.readAuthState()
 	if err != nil {
@@ -208,15 +284,43 @@ func (a *authConfig) SwitchUser(hostname, user string) error {
 
 	host := state.host(hostname)
 	if host == nil {
-		return errors.New("host not found")
+		return errHostNotFound
 	}
 	if _, ok := host.Users[user]; !ok {
 		return errors.New("user not found")
 	}
 
 	host.ActiveUser = user
-	state.DefaultHost = hostname
+	// Deliberately not touching state.DefaultHost: switching re-selects an
+	// account on one host and must not move the default host that bare
+	// commands target (unlike Login, whose intent is "make this my primary
+	// host"). SwitchUser had no production callers before auth switch, so
+	// this pins the scoped semantics as the method's contract.
 	return a.config.writeAuthState(state)
+}
+
+// LoginUsers returns the sorted usernames that have stored tokens for a
+// host. The interactive account switch and the not-found hints need the
+// list (issue 646); SwitchUser itself only validates membership.
+// Read errors are swallowed (nil) like the sibling StoredToken/Hosts
+// readers: an unreadable auth.json surfaces to the caller as "no stored
+// accounts", which keeps the command usable at the exit-code level; the
+// tradeoff is recorded here deliberately.
+func (a *authConfig) LoginUsers(hostname string) []string {
+	state, err := a.config.readAuthState()
+	if err != nil {
+		return nil
+	}
+	host := state.host(hostname)
+	if host == nil {
+		return nil
+	}
+	users := make([]string, 0, len(host.Users))
+	for name := range host.Users {
+		users = append(users, name)
+	}
+	sort.Strings(users)
+	return users
 }
 
 func (c *config) authStatePath() string {
@@ -224,6 +328,16 @@ func (c *config) authStatePath() string {
 }
 
 func (c *config) readAuthState() (*authState, error) {
+	if c.configDir == "" {
+		// No resolvable config location: reads see an empty state (not
+		// logged in). They must not fall back to a cwd-relative path, not
+		// even to legacy "~" trees the old bug left in the working
+		// directory (issue 675).
+		return &authState{
+			Version: authStateVersion,
+			Hosts:   map[string]*hostState{},
+		}, nil
+	}
 	path := c.authStatePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -255,6 +369,13 @@ func (c *config) readAuthState() (*authState, error) {
 }
 
 func (c *config) writeAuthState(state *authState) error {
+	if c.configDir == "" {
+		// No resolvable config location: fail closed with guidance. A silent
+		// skip would let a login report success without persisting anything,
+		// and the previous behavior wrote auth.json (credentials) into the
+		// current directory (issue 675).
+		return ErrNoConfigDir
+	}
 	if state == nil {
 		state = &authState{
 			Version: authStateVersion,

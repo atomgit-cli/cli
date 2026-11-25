@@ -469,49 +469,6 @@ func (c *Client) UploadToURL(uploadURL, filename string, content io.Reader, cont
 	return nil
 }
 
-// UploadAsset uploads a file to a release
-func (c *Client) UploadAsset(path, filename string, content []byte, contentType string) (*ReleaseAsset, error) {
-	reqURL := fmt.Sprintf("https://%s/api/%s%s?name=%s", c.host, DefaultAPIVersion, path, url.QueryEscape(filename))
-	req, err := http.NewRequest("POST", reqURL, bytes.NewReader(content))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", contentType)
-
-	// Add authentication
-	if c.token != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.token))
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Check for errors
-	if resp.StatusCode >= 400 {
-		return nil, decodeAPIError(respBody, resp.StatusCode, resp.Status)
-	}
-
-	// Parse response
-	var asset ReleaseAsset
-	if err := json.Unmarshal(respBody, &asset); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return &asset, nil
-}
-
 // APIError represents an API error
 type APIError struct {
 	StatusCode    int    `json:"-"`
@@ -568,17 +525,4 @@ func decodeAPIError(respBody []byte, statusCode int, status string) error {
 		return &apiErr
 	}
 	return &APIError{StatusCode: statusCode, Message: status}
-}
-
-// BuildURL builds a URL with path parameters
-func BuildURL(base string, params map[string]string) string {
-	for k, v := range params {
-		base = replacePath(base, k, v)
-	}
-	return base
-}
-
-func replacePath(urlStr, key, value string) string {
-	placeholder := "{" + key + "}"
-	return strings.ReplaceAll(urlStr, placeholder, url.PathEscape(value))
 }
