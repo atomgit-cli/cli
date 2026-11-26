@@ -161,7 +161,7 @@ func (a *authConfig) Login(hostname, username, token, gitProtocol string, secure
 		// Fail closed before locking: the lock file lives in the config
 		// dir, so acquiring it first would mask ErrNoConfigDir with a
 		// lock-creation error (issue 672 ordering requirement).
-		return false, ErrNoConfigDir
+		return false, a.config.resolutionErr
 	}
 	release, err := lockConfigDir(a.config.configDir)
 	if err != nil {
@@ -210,7 +210,7 @@ func (a *authConfig) Logout(hostname, username string) error {
 		// to clear and no way to know whether anything is stored — a
 		// logout must never report success without grounds (issue 676,
 		// mirroring Login's never-silently-skip contract).
-		return ErrNoConfigDir
+		return a.config.resolutionErr
 	}
 	release, err := lockConfigDir(a.config.configDir)
 	if err != nil {
@@ -323,6 +323,31 @@ func (a *authConfig) LoginUsers(hostname string) []string {
 	return users
 }
 
+// AuthStateReadError returns the error from reading the auth state file,
+// distinguishing a missing file (nil) from an unreadable or unparseable
+// file (non-nil). Unlike LoginUsers — which deliberately swallows the read
+// error so the empty-list surface stays usable — this probe lets callers
+// tell "genuinely no accounts" (nil) from "accounts are present but
+// unreadable" (non-nil) and steer users toward inspecting auth.json
+// instead of a doomed re-login (issue 668).
+func (a *authConfig) AuthStateReadError() error {
+	if a.config.configDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(a.config.authStatePath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var state authState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *config) authStatePath() string {
 	return filepath.Join(c.configDir, "auth.json")
 }
@@ -374,7 +399,7 @@ func (c *config) writeAuthState(state *authState) error {
 		// skip would let a login report success without persisting anything,
 		// and the previous behavior wrote auth.json (credentials) into the
 		// current directory (issue 675).
-		return ErrNoConfigDir
+		return c.resolutionErr
 	}
 	if state == nil {
 		state = &authState{
