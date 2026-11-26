@@ -845,3 +845,96 @@ func TestLoginBareHostnameRejectsInvalidGCHost(t *testing.T) {
 		t.Fatalf("error = %v, want invalid host rejection for a malformed GC_HOST value", err)
 	}
 }
+
+// --- issue 680: fail closed before any token input / browser / API call ---
+
+// TestCheckLoginEnvFailsClosedBeforeTokenInput pins the unresolvable-env
+// precheck: a login whose config directory cannot be resolved must fail
+// before any token is read, any browser is opened, or any API call is made
+// (the flow can only fail at the final write).
+func TestCheckLoginEnvFailsClosedBeforeTokenInput(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, _, _ := iostreams.Test()
+	opts := &LoginOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+		HttpClient: func() (*http.Client, error) {
+			t.Fatal("unexpected HTTP client creation before the env check")
+			return nil, nil
+		},
+	}
+
+	err := checkLoginEnv(opts)
+	if err == nil {
+		t.Fatal("checkLoginEnv() error = nil, want the unresolvable-env error")
+	}
+	if !strings.Contains(err.Error(), "failed to store authentication") {
+		t.Fatalf("error = %q, want the command wrap", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
+	}
+}
+
+// TestCheckLoginEnvRejectsRelativeConfigDir pins the issue 684 refinement
+// flowing through the login precheck: a relative GC_CONFIG_DIR fails closed
+// with the "not absolute" reason, not the generic "set HOME" text.
+func TestCheckLoginEnvRejectsRelativeConfigDir(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "relative/gc")
+
+	io, _, _, _ := iostreams.Test()
+	opts := &LoginOptions{
+		IO: io,
+		Config: func() (config.Config, error) {
+			return config.New(), nil
+		},
+	}
+
+	err := checkLoginEnv(opts)
+	if err == nil {
+		t.Fatal("checkLoginEnv() error = nil for a relative GC_CONFIG_DIR")
+	}
+	if !strings.Contains(err.Error(), "failed to store authentication") {
+		t.Fatalf("error = %q, want the command wrap", err.Error())
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("error = %q, want the 'not absolute' guidance", err.Error())
+	}
+}
+
+// TestLoginWithTokenFailsBeforeReadingStdinOnUnresolvableEnv pins the
+// ordering at the command layer: with --with-token in an unresolvable env,
+// the env check must abort before stdin is read (a broken stdin must not be
+// the surfaced error).
+func TestLoginWithTokenFailsBeforeReadingStdinOnUnresolvableEnv(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	f := cmdutil.TestFactory()
+	f.IOStreams.In = erroringReader{}
+
+	cmd := NewCmdLogin(f, nil)
+	cmd.SetArgs([]string{"--with-token"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want the unresolvable-env error")
+	}
+	if strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error = %q — stdin was read before the env check", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC_CONFIG_DIR") {
+		t.Fatalf("error = %q, want the sentinel guidance", err.Error())
+	}
+}
