@@ -101,6 +101,14 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 				return runF(opts)
 			}
 
+			// A broken environment is reported before any token is read,
+			// any browser is opened, or any API call is made (issue 680):
+			// login must not walk the user through a flow that can only
+			// fail at the final write.
+			if err := checkLoginEnv(opts); err != nil {
+				return err
+			}
+
 			// Handle --with-token
 			if opts.WithToken {
 				return loginWithToken(opts)
@@ -149,6 +157,21 @@ func resolveLoginHostname(opts *LoginOptions) error {
 		return err
 	}
 	opts.Hostname = hostname
+	return nil
+}
+
+// checkLoginEnv fails closed before any token input, browser open, or API
+// call when the config directory cannot be resolved (issue 680). A login
+// whose directory is unresolvable would otherwise walk the user through
+// token entry and verification only to fail at the final write.
+func checkLoginEnv(opts *LoginOptions) error {
+	cfg, err := opts.Config()
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+	if err := cfg.ResolutionErr(); err != nil {
+		return fmt.Errorf("failed to store authentication: %w", err)
+	}
 	return nil
 }
 
