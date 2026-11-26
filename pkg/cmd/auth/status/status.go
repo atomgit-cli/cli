@@ -42,6 +42,13 @@ type AuthStatus struct {
 	TokenValid  bool   `json:"token_valid"`
 	GitProtocol string `json:"git_protocol,omitempty"`
 	Token       string `json:"token,omitempty"`
+	// ConfigDirUnresolvable is true only when the config directory could not
+	// be resolved and no token was found — the JSON-mode mirror of the
+	// plain-text "environment is broken" hint (issue 677). It lets scripts
+	// and AI agents tell a broken environment from a genuinely fresh install
+	// without parsing stderr. omitempty keeps the resolvable and
+	// logged-in payloads byte-stable (issue 682).
+	ConfigDirUnresolvable bool `json:"config_dir_unresolvable,omitempty"`
 }
 
 // NewCmdStatus creates the status command
@@ -118,6 +125,15 @@ func statusRun(opts *StatusOptions) error {
 
 	if token == "" {
 		status.LoggedIn = false
+		// JSON-mode consumers get the same "broken environment vs fresh
+		// install" signal the plain-text hint provides on stderr (issue 677),
+		// without the hint leaking into stdout (issue 682). The field stays
+		// omitted in the resolvable and logged-in cases, so the field set is
+		// unchanged for every existing payload except the one that previously
+		// could not be told apart from "not logged in".
+		if cfg.ResolutionErr() != nil {
+			status.ConfigDirUnresolvable = true
+		}
 
 		if opts.JSON {
 			if err := cmdutil.WriteJSON(opts.IO.Out, status); err != nil {
@@ -152,6 +168,14 @@ func statusRun(opts *StatusOptions) error {
 	user, err := api.VerifyToken(httpClient, opts.Hostname, token)
 	if err != nil {
 		status.TokenValid = false
+		// An unresolvable config dir is environment state, not token state: it
+		// stays true even when a token exists but failed verification, so the
+		// JSON-mode consumers can tell a broken environment from a plain
+		// expired/invalid token without parsing stderr (issue 681 — the JSON
+		// mirror of the plain-text hint added in the env-source branch below).
+		if cfg.ResolutionErr() != nil {
+			status.ConfigDirUnresolvable = true
+		}
 
 		var apiErr *api.APIError
 		isAuthError := false
@@ -188,6 +212,14 @@ func statusRun(opts *StatusOptions) error {
 					GOOS:       runtime.GOOS,
 					LoginSaved: false,
 				}))
+				// Clearing the env token alone won't reveal any stored login if
+				// the config directory is also unresolvable; name that trap
+				// explicitly (issue 681) so the user doesn't chase the env token
+				// only to land on a silent "not logged in".
+				if cfg.ResolutionErr() != nil {
+					fmt.Fprintf(opts.IO.ErrOut, "\n")
+					fmt.Fprintf(opts.IO.ErrOut, "  %s Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR\n", cs.Yellow("!"))
+				}
 			} else {
 				fmt.Fprintf(opts.IO.ErrOut, "To re-authenticate, run: gc auth login\n")
 			}
