@@ -36,10 +36,10 @@ gc = "gc_cli.wrapper:main"
 gitcode = "gc_cli.wrapper:main"
 
 [project.urls]
-Homepage = "https://gitcode.com/gitcode-cli/cli"
-Documentation = "https://gitcode.com/gitcode-cli/cli"
-Repository = "https://gitcode.com/gitcode-cli/cli"
-Issues = "https://gitcode.com/gitcode-cli/cli/issues"
+Homepage = "https://gitcode.com/atomgit-cli/cli"
+Documentation = "https://gitcode.com/atomgit-cli/cli"
+Repository = "https://gitcode.com/atomgit-cli/cli"
+Issues = "https://gitcode.com/atomgit-cli/cli/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
