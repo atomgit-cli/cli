@@ -121,6 +121,15 @@ func switchRun(opts *SwitchOptions) error {
 
 	users := authCfg.LoginUsers(hostname)
 	if len(users) == 0 {
+		// An empty list is ambiguous: it is either a genuinely fresh install
+		// or accounts that are present but unreadable. LoginUsers deliberately
+		// swallows the read error so the command stays usable, so probe the
+		// auth state directly here — a corrupted or unreadable auth.json must
+		// not steer the user toward a doomed re-login with a "no stored
+		// accounts" hint (issue 668).
+		if readErr := authCfg.AuthStateReadError(); readErr != nil {
+			return fmt.Errorf("failed to switch account: cannot read stored accounts for %s (auth.json is unreadable or corrupted): %w", hostname, readErr)
+		}
 		return cmdutil.NewNotFoundError(fmt.Sprintf("no stored accounts for %s; run gc auth login to add one", hostname), nil)
 	}
 	// Stored account names are echoed in listings, prompts, and error
