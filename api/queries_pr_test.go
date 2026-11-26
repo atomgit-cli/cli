@@ -796,3 +796,236 @@ func TestSetPRMergersAPIError(t *testing.T) {
 		t.Fatalf("SetPRMergers() expected error for 404 response")
 	}
 }
+
+// --- issue 660: zero-coverage PR endpoints (files/issues/assignees/reviewers/testers) ---
+
+func TestGetPRFilesBuildsRequestAndParsesResponse(t *testing.T) {
+	var gotMethod, gotPath string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		return authTestResponse(http.StatusOK, `{"added_lines":12,"remove_lines":3,"count":1,"diff_refs":{"base_sha":"base","start_sha":"start","head_sha":"head"},"diffs":[{"new_blob_id":"blob1","statistic":{"additions":12,"deletions":3},"type":"modified","path":"cmd/gc/main.go","old_path":"cmd/gc/main.go","new_path":"cmd/gc/main.go","view":1}]}`), nil
+	})
+
+	resp, err := GetPRFiles(client, "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("GetPRFiles() error = %v", err)
+	}
+	assertNoAccessTokenQuery(t, gotPath)
+	if gotMethod != http.MethodGet {
+		t.Fatalf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/files.json" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/files.json", gotPath)
+	}
+	if resp.AddedLines != 12 || resp.RemoveLines != 3 || resp.Count != 1 {
+		t.Fatalf("resp counts = %d/%d/%d, want 12/3/1", resp.AddedLines, resp.RemoveLines, resp.Count)
+	}
+	if resp.DiffRefs == nil || resp.DiffRefs.HeadSHA != "head" {
+		t.Fatalf("diff_refs = %+v, want head_sha=head", resp.DiffRefs)
+	}
+	if len(resp.Diffs) != 1 {
+		t.Fatalf("len(diffs) = %d, want 1", len(resp.Diffs))
+	}
+	if resp.Diffs[0].Path != "cmd/gc/main.go" {
+		t.Fatalf("diffs[0].path = %q, want cmd/gc/main.go", resp.Diffs[0].Path)
+	}
+	if resp.Diffs[0].Statistic == nil || resp.Diffs[0].Statistic.Additions != 12 {
+		t.Fatalf("diffs[0].statistic = %+v, want additions=12", resp.Diffs[0].Statistic)
+	}
+}
+
+func TestGetPRFilesPropagatesAPIError(t *testing.T) {
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		return authTestResponse(http.StatusNotFound, `{"message":"Not Found"}`), nil
+	})
+
+	if _, err := GetPRFiles(client, "owner", "repo", 999); err == nil {
+		t.Fatalf("GetPRFiles() expected error for 404 response")
+	}
+}
+
+func TestListPRIssuesBuildsRequestAndParsesResponse(t *testing.T) {
+	var gotMethod, gotPath string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		return authTestResponse(http.StatusOK, `[{"number":1,"title":"linked issue","state":"open"},{"number":2,"title":"second","state":"closed"}]`), nil
+	})
+
+	issues, err := ListPRIssues(client, "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("ListPRIssues() error = %v", err)
+	}
+	assertNoAccessTokenQuery(t, gotPath)
+	if gotMethod != http.MethodGet {
+		t.Fatalf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/issues" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/issues", gotPath)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("len(issues) = %d, want 2", len(issues))
+	}
+	if issues[0].Title != "linked issue" || issues[0].State != "open" {
+		t.Fatalf("issues[0] = %+v, want title 'linked issue' state 'open'", issues[0])
+	}
+	if issues[0].Number.String() != "1" {
+		t.Fatalf("issues[0].number = %q, want 1", issues[0].Number.String())
+	}
+	if issues[1].Number.String() != "2" || issues[1].State != "closed" {
+		t.Fatalf("issues[1] = %+v, want number 2 state closed", issues[1])
+	}
+}
+
+func TestListPRIssuesPropagatesAPIError(t *testing.T) {
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		return authTestResponse(http.StatusNotFound, `{"message":"Not Found"}`), nil
+	})
+
+	if _, err := ListPRIssues(client, "owner", "repo", 999); err == nil {
+		t.Fatalf("ListPRIssues() expected error for 404 response")
+	}
+}
+
+func TestAddPRAssigneesBuildsPostRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotBody = readAuthTestRequestBody(t, req)
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := AddPRAssignees(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("AddPRAssignees() error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/assignees" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/assignees", gotPath)
+	}
+	if !strings.Contains(gotBody, `"assignees":"alice,bob"`) {
+		t.Fatalf("body = %q, want assignees field with comma-separated users", gotBody)
+	}
+}
+
+func TestRemovePRAssigneesBuildsDeleteRequestWithQuery(t *testing.T) {
+	var gotMethod, gotPath string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		if req.URL.RawQuery != "" {
+			gotPath += "?" + req.URL.RawQuery
+		}
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := RemovePRAssignees(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("RemovePRAssignees() error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	assertPRListRequest(t, gotPath, "/api/v5/repos/owner/repo/pulls/7/assignees", map[string]string{"assignees": "alice,bob"})
+}
+
+func TestAddPRReviewersBuildsPostRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotBody = readAuthTestRequestBody(t, req)
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := AddPRReviewers(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("AddPRReviewers() error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/reviewers" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/reviewers", gotPath)
+	}
+	if !strings.Contains(gotBody, `"reviewers":"alice,bob"`) || !strings.Contains(gotBody, `"add":true`) {
+		t.Fatalf("body = %q, want reviewers field and add:true", gotBody)
+	}
+}
+
+func TestRemovePRReviewersBuildsDeleteRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotBody = readAuthTestRequestBody(t, req)
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := RemovePRReviewers(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("RemovePRReviewers() error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/reviewers" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/reviewers", gotPath)
+	}
+	if !strings.Contains(gotBody, `"reviewers":"alice,bob"`) {
+		t.Fatalf("body = %q, want reviewers field with comma-separated users", gotBody)
+	}
+	// The add flag is omitempty: a remove request must not send add:true.
+	if strings.Contains(gotBody, `"add"`) {
+		t.Fatalf("body = %q, must not carry the add flag", gotBody)
+	}
+}
+
+func TestAddPRTestersBuildsPostRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotBody = readAuthTestRequestBody(t, req)
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := AddPRTesters(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("AddPRTesters() error = %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/testers" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/testers", gotPath)
+	}
+	if !strings.Contains(gotBody, `"testers":"alice,bob"`) || !strings.Contains(gotBody, `"add":true`) {
+		t.Fatalf("body = %q, want testers field and add:true", gotBody)
+	}
+}
+
+func TestRemovePRTestersBuildsDeleteRequest(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	client := newAuthTestClient(func(req *http.Request) (*http.Response, error) {
+		gotMethod = req.Method
+		gotPath = req.URL.Path
+		gotBody = readAuthTestRequestBody(t, req)
+		return authTestResponse(http.StatusOK, `{}`), nil
+	})
+
+	if err := RemovePRTesters(client, "owner", "repo", 7, []string{"alice", "bob"}); err != nil {
+		t.Fatalf("RemovePRTesters() error = %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v5/repos/owner/repo/pulls/7/testers" {
+		t.Fatalf("path = %q, want /api/v5/repos/owner/repo/pulls/7/testers", gotPath)
+	}
+	if !strings.Contains(gotBody, `"testers":"alice,bob"`) {
+		t.Fatalf("body = %q, want testers field with comma-separated users", gotBody)
+	}
+	if strings.Contains(gotBody, `"add"`) {
+		t.Fatalf("body = %q, must not carry the add flag", gotBody)
+	}
+}
