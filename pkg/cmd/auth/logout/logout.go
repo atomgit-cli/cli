@@ -170,12 +170,23 @@ func logoutRun(opts *LogoutOptions) error {
 		}
 	}
 
+	// Resolve the account a bare logout actually removes, so the success
+	// message reports exactly what was cleared instead of over-claiming
+	// the whole host (issue 678). With no active account the bare logout
+	// is a grounded no-op and keeps the host-only message.
+	resolvedUsername := opts.Username
+	if resolvedUsername == "" {
+		if active, _ := authCfg.ActiveUser(opts.Hostname); active != "" {
+			resolvedUsername = active
+		}
+	}
+
 	if err := authCfg.Logout(opts.Hostname, opts.Username); err != nil {
 		return fmt.Errorf("failed to clear stored authentication: %w", err)
 	}
 
-	if opts.Username != "" {
-		fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s on %s\n", cs.Green("✓"), opts.Username, opts.Hostname)
+	if resolvedUsername != "" {
+		fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s on %s\n", cs.Green("✓"), resolvedUsername, opts.Hostname)
 	} else {
 		fmt.Fprintf(opts.IO.Out, "%s Cleared stored authentication for %s\n", cs.Green("✓"), opts.Hostname)
 	}
