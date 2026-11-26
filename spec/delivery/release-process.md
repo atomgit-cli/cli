@@ -184,7 +184,7 @@ cd ../..
 
 ```bash
 gc release create vX.Y.Z -R atomgit-cli/cli \
-  --title "GitCode CLI vX.Y.Z" \
+  --title "AtomGit CLI vX.Y.Z" \
   --notes-file docs/releases/vX.Y.Z.md \
   --target main \
   --json
