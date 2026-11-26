@@ -260,19 +260,25 @@ func StatePath(manifest *Manifest) string {
 	return filepath.Join(root, "update-state.json")
 }
 
-// stateRootChecked returns the state directory, failing closed on Unix
-// when the home directory is unavailable and no override is set. The old
-// fallback silently produced a RELATIVE path (.local/state/gitcode-cli),
-// so acquireStateLock's MkdirAll created the tree in whatever directory
-// the command ran in — cron/systemd/container environments without HOME
-// polluted their cwd with state fragments (issue 671). Windows keeps the
-// LOCALAPPDATA/home precedence (matching the JS helper); a Windows
-// machine missing both env vars still yields a relative path — tracked
-// as a follow-up since it matches the helper's own behavior.
+// stateRootChecked returns the state directory, failing closed when the
+// home directory is unavailable and no override is set. The old fallback
+// silently produced a RELATIVE path (.local/state/gitcode-cli on Unix,
+// AppData\Local\gitcode-cli on Windows), so acquireStateLock's MkdirAll
+// created the tree in whatever directory the command ran in —
+// cron/systemd/container environments without HOME polluted their cwd
+// with state fragments (issue 671). The Windows branch ignored the home
+// error and returned a relative path when both LOCALAPPDATA and
+// USERPROFILE were missing; it now fails closed the same way (issue 683).
 func stateRootChecked() (string, error) {
 	if runtime.GOOS == "windows" {
-		home, _ := os.UserHomeDir()
-		return windowsStateRoot(os.Getenv("LOCALAPPDATA"), home), nil
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			return windowsStateRoot(localAppData, ""), nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", fmt.Errorf("cannot resolve the state directory: LOCALAPPDATA and USERPROFILE are not set; set LOCALAPPDATA, USERPROFILE, or GC_STATE_DIR")
+		}
+		return windowsStateRoot("", home), nil
 	}
 	if root := os.Getenv("XDG_STATE_HOME"); root != "" {
 		return filepath.Join(root, "gitcode-cli"), nil
