@@ -354,13 +354,13 @@ jobs:
               sha256sum -c "gc_${VERSION_NUM}_checksums.txt"
             )
             gh release edit "${VERSION_TAG}" \
-              --title "GitCode CLI ${VERSION_TAG}" \
+              --title "AtomGit CLI ${VERSION_TAG}" \
               --notes-file "docs/releases/${VERSION_TAG}.md"
           else
             release_args=(
               "${VERSION_TAG}"
               --verify-tag
-              --title "GitCode CLI ${VERSION_TAG}"
+              --title "AtomGit CLI ${VERSION_TAG}"
               --notes-file "docs/releases/${VERSION_TAG}.md"
             )
             if [[ "${VERSION_NUM}" == *-* ]]; then
