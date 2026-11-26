@@ -148,7 +148,7 @@ cd ../..
 
 # 6. 使用受跟踪的同一份说明创建 GitCode Release
 gc release create v0.18.0 -R atomgit-cli/cli \
-  --title "GitCode CLI v0.18.0" \
+  --title "AtomGit CLI v0.18.0" \
   --notes-file docs/releases/v0.18.0.md \
   --target main \
   --json
