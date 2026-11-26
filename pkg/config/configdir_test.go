@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,67 @@ func TestConfigDirCheckedEnvOverrideWinsWithoutHome(t *testing.T) {
 	}
 	if got != dir {
 		t.Fatalf("configDirChecked() = %q, want the GC_CONFIG_DIR value %q", got, dir)
+	}
+}
+
+// Issue 684: a non-absolute GC_CONFIG_DIR (relative, or a literal "~" that
+// Go does not expand) must fail closed rather than resolve against the
+// current directory at write time — the same cwd-pollution bug class the
+// issue 675 "~" fallback fixed, reached through an explicit override.
+func TestConfigDirCheckedRejectsRelativePath(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "relative/gc")
+
+	dir, err := configDirChecked()
+	if err == nil {
+		t.Fatalf("configDirChecked() error = nil for a relative GC_CONFIG_DIR; dir = %q", dir)
+	}
+	if dir != "" {
+		t.Fatalf("configDirChecked() dir = %q, want empty on failure", dir)
+	}
+	if !errors.Is(err, ErrConfigDirNotAbsolute) {
+		t.Fatalf("configDirChecked() error = %v, want errors.Is(err, ErrConfigDirNotAbsolute)", err)
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("configDirChecked() error = %q, want guidance naming 'absolute'", err.Error())
+	}
+}
+
+func TestConfigDirCheckedRejectsLiteralTilde(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "~/.config/gc")
+
+	_, err := configDirChecked()
+	if err == nil {
+		t.Fatal("configDirChecked() error = nil for a literal ~ value")
+	}
+	if !errors.Is(err, ErrConfigDirNotAbsolute) {
+		t.Fatalf("configDirChecked() error = %v, want errors.Is(err, ErrConfigDirNotAbsolute)", err)
+	}
+	if !strings.Contains(err.Error(), "~") {
+		t.Fatalf("configDirChecked() error = %q, want guidance naming the literal ~", err.Error())
+	}
+}
+
+func TestConfigDirCheckedRejectsRelativeHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserHomeDir on Windows reads USERPROFILE; the relative-HOME case is Unix-only")
+	}
+	t.Setenv("HOME", "relative-home")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+
+	dir, err := configDirChecked()
+	if err == nil {
+		t.Fatalf("configDirChecked() error = nil for a relative HOME; dir = %q", dir)
+	}
+	if !errors.Is(err, ErrConfigDirNotAbsolute) {
+		t.Fatalf("configDirChecked() error = %v, want ErrConfigDirNotAbsolute", err)
+	}
+	if dir != "" {
+		t.Fatalf("configDirChecked() dir = %q, want empty on failure", dir)
 	}
 }
 
