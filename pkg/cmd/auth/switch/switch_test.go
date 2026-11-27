@@ -379,3 +379,35 @@ func TestSwitchRunNoEnvWarningOnCustomHost(t *testing.T) {
 		t.Fatalf("warning must not fire for a custom-host switch: %q", errOut.String())
 	}
 }
+
+// Issue 668: when auth.json is present but unparseable, LoginUsers swallows
+// the read error and returns empty — the switch command must detect that
+// with AuthStateReadError and report a corrupted-state error (exit 1)
+// instead of the "no stored accounts" not-found hint (exit 3) that would
+// steer the user toward a doomed re-login.
+func TestSwitchRunCorruptedAuthStateIsError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GC_CONFIG_DIR", dir)
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "")
+	t.Setenv("GITCODE_TOKEN", "")
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"version":1,`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.New()
+	io, _, _, _ := iostreams.Test()
+	err := switchRun(&SwitchOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com"})
+	if err == nil {
+		t.Fatal("switchRun() error = nil, want corrupted-state error")
+	}
+	if code := cmdutil.ExitCode(err); code != cmdutil.ExitError {
+		t.Fatalf("ExitCode() = %d, want %d (ExitError, not not-found)", code, cmdutil.ExitError)
+	}
+	if !strings.Contains(err.Error(), "auth.json") {
+		t.Fatalf("error = %q, want the auth.json mention", err.Error())
+	}
+	if strings.Contains(err.Error(), "no stored accounts") {
+		t.Fatalf("error = %q, must not report 'no stored accounts' for a corrupted state", err.Error())
+	}
+}

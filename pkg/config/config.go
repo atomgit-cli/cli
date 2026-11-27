@@ -102,6 +102,12 @@ type AuthConfig interface {
 	// host (empty when the host has no stored accounts). Interactive
 	// account switching and not-found hints need the list (issue 646).
 	LoginUsers(hostname string) []string
+	// AuthStateReadError returns the error from reading the auth state file,
+	// distinguishing a missing file (nil) from an unreadable or unparseable
+	// file (non-nil). Command surfaces use it to steer users toward "inspect
+	// auth.json" instead of a doomed re-login when the stored state is
+	// present but corrupted (issue 668).
+	AuthStateReadError() error
 }
 
 // config implements Config interface
@@ -112,6 +118,11 @@ type config struct {
 	// guidance instead of creating a "~/.config/gc" tree in the current
 	// directory (the pre-fix code wrote auth.json there; issue 675).
 	configDir string
+	// resolutionErr records why the config directory could not be resolved
+	// (nil when it resolved). ResolutionErr returns it so command surfaces
+	// can distinguish a missing home (ErrNoConfigDir) from a relative or
+	// literal-"~" value (ErrConfigDirNotAbsolute, issue 684).
+	resolutionErr error
 }
 
 // ErrNoConfigDir is returned by every write path when the config directory
@@ -128,6 +139,13 @@ type config struct {
 // remediation effective on both platforms.
 var ErrNoConfigDir = errors.New("cannot resolve the config directory: HOME is not set; set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR")
 
+// ErrConfigDirNotAbsolute is returned when GC_CONFIG_DIR or the home
+// directory resolves to a non-absolute path (including a literal "~",
+// which Go does not expand). A relative config directory would place
+// auth.json (credentials) in whatever directory the command runs in, so
+// resolution fails closed instead of trusting the value (issue 684).
+var ErrConfigDirNotAbsolute = errors.New("config directory is not an absolute path: GC_CONFIG_DIR and HOME (USERPROFILE on Windows) must resolve to an absolute path, not a relative path or a literal \"~\"")
+
 type configState struct {
 	Version int                          `json:"version"`
 	Hosts   map[string]map[string]string `json:"hosts,omitempty"`
@@ -138,9 +156,10 @@ type configState struct {
 // reads as an empty state and fails writes with ErrNoConfigDir — it never
 // falls back to a cwd-relative path.
 func New() Config {
-	dir, _ := configDirChecked()
+	dir, err := configDirChecked()
 	return &config{
-		configDir: dir,
+		configDir:     dir,
+		resolutionErr: err,
 	}
 }
 
@@ -150,9 +169,12 @@ func New() Config {
 // literal tilde), so every write created a "~/.config/gc" tree in whatever
 // directory the command ran in, and auth.json landed there with credentials
 // inside (issue 675). The error names both variables that would fix it.
+// A value that resolves to a non-absolute path is also rejected
+// (ErrConfigDirNotAbsolute): a relative or literal-"~" value would land
+// credentials in the current directory too (issue 684).
 func configDirChecked() (string, error) {
 	if dir := os.Getenv("GC_CONFIG_DIR"); dir != "" {
-		return dir, nil
+		return checkedConfigDir(dir)
 	}
 
 	home, err := os.UserHomeDir()
@@ -160,7 +182,18 @@ func configDirChecked() (string, error) {
 		return "", ErrNoConfigDir
 	}
 
-	return filepath.Join(home, ".config", "gc"), nil
+	return checkedConfigDir(filepath.Join(home, ".config", "gc"))
+}
+
+// checkedConfigDir rejects a non-absolute directory. Go does not expand a
+// literal "~", so a home directory of "~" (or ".", or any other relative
+// value) yields a relative path that would resolve against the current
+// directory at write time (issue 684).
+func checkedConfigDir(dir string) (string, error) {
+	if !filepath.IsAbs(dir) {
+		return "", ErrConfigDirNotAbsolute
+	}
+	return dir, nil
 }
 
 // ResolveConfigDir returns the configuration directory with the same
@@ -177,12 +210,11 @@ func ResolveConfigDir() (string, error) {
 
 // ResolutionErr returns ErrNoConfigDir when the config directory could
 // not be resolved at construction, nil otherwise (issue 677: command
-// surfaces distinguish a broken environment from an empty one).
+// surfaces distinguish a broken environment from an empty one). A
+// non-absolute value resolves to ErrConfigDirNotAbsolute instead
+// (issue 684).
 func (c *config) ResolutionErr() error {
-	if c.configDir == "" {
-		return ErrNoConfigDir
-	}
-	return nil
+	return c.resolutionErr
 }
 
 // Get retrieves a configuration value
@@ -241,7 +273,7 @@ func (c *config) Set(host, key, value string) error {
 	if c.configDir == "" {
 		// Fail closed before locking (issue 672 ordering requirement: the
 		// lock file lives in the config dir).
-		return ErrNoConfigDir
+		return c.resolutionErr
 	}
 	release, err := lockConfigDir(c.configDir)
 	if err != nil {
@@ -326,7 +358,7 @@ func (c *config) Authentication() AuthConfig {
 // (issue 672 hoisted the per-write MkdirAll/Chmod to lock acquisition).
 func (c *config) Write() error {
 	if c.configDir == "" {
-		return ErrNoConfigDir
+		return c.resolutionErr
 	}
 	release, err := lockConfigDir(c.configDir)
 	if err != nil {
@@ -385,7 +417,7 @@ func (c *config) writeConfigState(state *configState) error {
 	if c.configDir == "" {
 		// No resolvable config location: fail closed with guidance instead of
 		// creating a "~/.config/gc" tree in the current directory (issue 675).
-		return ErrNoConfigDir
+		return c.resolutionErr
 	}
 	if state == nil {
 		state = &configState{}

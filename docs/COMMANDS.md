@@ -302,8 +302,8 @@ gitcode.com
 
 未认证或 token 无效/过期时，诊断信息输出到 stderr，退出码为 `4`（`ExitAuth`）。`--json` 模式下 JSON 仍写入 stdout（`logged_in` 与 `token_valid` 恒输出：未认证时 `logged_in:false`，token 无效/过期时 `token_valid:false`），退出码同样为 `4`，便于 AI 代理仅凭退出码判断认证状态、无需做字段存在性分支。
 
-配置目录不可解析时，未登录的纯文本输出追加一行 stderr 提示（`Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR`，含一行空行分隔）——区分"环境坏"与"全新安装"；`--json` 模式**不输出该提示**，stdout 字段集与输出保持逐字节稳定（脚本契约零变化）。
-token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾，方案 A 的验证在新开终端执行。来源为本地配置时维持 re-login 提示不变。该指引仅在文本输出模式出现；`--json` 模式不输出指引文本，stdout 保持纯 JSON，退出码仍为 `4`。
+配置目录不可解析时，未登录的纯文本输出追加一行 stderr 提示（`Note: the config directory is unresolvable; stored logins are not visible in this environment — set HOME (USERPROFILE on Windows) or GC_CONFIG_DIR`，含一行空行分隔）——区分"环境坏"与"全新安装"；`--json` 模式**不输出该提示**，但配置目录不可解析且处于失败态（未登录，或 token 无效/过期）时在 stdout 新增 `config_dir_unresolvable:true` 字段（`omitempty`：可解析或登录成功时不输出），使脚本仅凭 stdout 也能区分"环境坏"与"全新安装"；其余场景 stdout 字段集与输出保持逐字节稳定（脚本契约零变化）。
+token 无效/过期且来源为环境变量（`GC_TOKEN`/`GITCODE_TOKEN`）时，不再建议单纯重新登录（环境变量会继续覆盖新登录），改为输出两套可复制的处理方案：方案 A 含完整 `gc auth login` 步骤并停用配置文件中的环境变量定义，方案 B 更新环境变量的值；两条方案均以 `gc auth status` 验证收尾，方案 A 的验证在新开终端执行。来源为本地配置时维持 re-login 提示不变。环境令牌无效且配置目录不可解析时，该指引之后还会追加一行配置目录不可解析提示（与未登录场景同文案），避免用户清掉环境变量后仍落入静默的"未登录"。该指引仅在文本输出模式出现；`--json` 模式不输出指引文本，stdout 保持纯 JSON，退出码仍为 `4`。
 
 ### auth token - 显示 Token
 

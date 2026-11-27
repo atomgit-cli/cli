@@ -409,3 +409,54 @@ func TestStoredCredentialIncompleteStates(t *testing.T) {
 		})
 	}
 }
+
+// Issue 668: AuthStateReadError distinguishes a missing auth.json (nil)
+// from a present-but-unreadable or unparseable one (non-nil), so command
+// surfaces can steer users toward "inspect auth.json" instead of a doomed
+// re-login. Unlike LoginUsers, which deliberately swallows the read error.
+func TestAuthStateReadError(t *testing.T) {
+	t.Run("missing file is nil", func(t *testing.T) {
+		t.Setenv("GC_CONFIG_DIR", t.TempDir())
+		if err := New().Authentication().AuthStateReadError(); err != nil {
+			t.Fatalf("AuthStateReadError() = %v, want nil for a missing auth.json", err)
+		}
+	})
+	t.Run("valid file is nil", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GC_CONFIG_DIR", dir)
+		if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"version":1,"hosts":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := New().Authentication().AuthStateReadError(); err != nil {
+			t.Fatalf("AuthStateReadError() = %v, want nil for a valid auth.json", err)
+		}
+	})
+	t.Run("unparseable file is non-nil", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GC_CONFIG_DIR", dir)
+		if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"version":1,`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := New().Authentication().AuthStateReadError(); err == nil {
+			t.Fatal("AuthStateReadError() = nil, want a parse error for a corrupted auth.json")
+		}
+	})
+	t.Run("directory at auth.json path is non-nil", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GC_CONFIG_DIR", dir)
+		if err := os.Mkdir(filepath.Join(dir, "auth.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := New().Authentication().AuthStateReadError(); err == nil {
+			t.Fatal("AuthStateReadError() = nil, want a read error when auth.json is a directory")
+		}
+	})
+	t.Run("unresolvable config dir is nil", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		t.Setenv("GC_CONFIG_DIR", "")
+		if err := New().Authentication().AuthStateReadError(); err != nil {
+			t.Fatalf("AuthStateReadError() = %v, want nil when the config dir is unresolvable (no file to read)", err)
+		}
+	})
+}

@@ -374,9 +374,13 @@ func TestStatusRunUnresolvableEnvPlainGainsHint(t *testing.T) {
 	}
 }
 
-// The JSON contract is byte-stable in an unresolvable env: the hint is
-// plain-text stderr only (issue 677 acceptance: --json 输出与现在完全一致).
-func TestStatusRunUnresolvableEnvJSONUnchanged(t *testing.T) {
+// Issue 682: in an unresolvable env the JSON output gains one
+// config_dir_unresolvable:true field (the JSON-mode mirror of the
+// plain-text hint), so scripts can tell "environment broken" from "fresh
+// install" without parsing stderr. The field is omitempty, so the hint
+// still never leaks into stderr and the resolvable/logged-in payloads stay
+// byte-stable.
+func TestStatusRunUnresolvableEnvJSONGainsField(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("GC_CONFIG_DIR", "")
@@ -405,9 +409,9 @@ func TestStatusRunUnresolvableEnvJSONUnchanged(t *testing.T) {
 		t.Fatalf("stderr = %q — the hint must not leak into JSON mode", errOut.String())
 	}
 	got := strings.TrimSpace(out.String())
-	want := "{\n  \"hostname\": \"gitcode.com\",\n  \"logged_in\": false,\n  \"token_valid\": false\n}"
+	want := "{\n  \"hostname\": \"gitcode.com\",\n  \"logged_in\": false,\n  \"token_valid\": false,\n  \"config_dir_unresolvable\": true\n}"
 	if got != want {
-		t.Fatalf("JSON output = %q, want the stable field set %q", got, want)
+		t.Fatalf("JSON output = %q, want %q", got, want)
 	}
 }
 
@@ -659,6 +663,12 @@ func TestStatusRunNotLoggedInJSONReturnsAuthError(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"token_valid": false`) {
 		t.Fatalf("stdout = %q, want token_valid: false JSON (state fields must serialize false)", out.String())
+	}
+	// A resolvable-but-empty state is a genuine fresh install: the
+	// config_dir_unresolvable field must stay omitted (issue 682 — it marks
+	// "invisible", not "empty").
+	if strings.Contains(out.String(), "config_dir_unresolvable") {
+		t.Fatalf("stdout = %q, config_dir_unresolvable must not fire for a resolvable empty state", out.String())
 	}
 }
 
@@ -929,6 +939,112 @@ func TestStatusAuthFailureWithHostnameUsesStoredTokenGuidanceUnchanged(t *testin
 	}
 	if !strings.Contains(errOut.String(), "To re-authenticate, run: gc auth login") {
 		t.Fatalf("explicit hostname reads stored token; guidance must stay unchanged, stderr:\n%s", errOut.String())
+	}
+}
+
+// Issue 681: an invalid environment token combined with an unresolvable
+// config dir must name the config-dir trap in addition to the env-token
+// guidance, so the user doesn't clear the env token only to land on a silent
+// "not logged in" that hides stored logins behind a broken HOME.
+func TestStatusRunInvalidEnvTokenUnresolvableConfigHintsPlain(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "bad-token")
+	t.Setenv("GITCODE_TOKEN", "")
+	t.Setenv("SHELL", "/bin/bash")
+
+	io, _, out, errOut := iostreams.Test()
+	opts := &StatusOptions{
+		IO: io,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusUnauthorized,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"message":"invalid token"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) { return config.New(), nil },
+	}
+
+	err := statusRun(opts)
+	if err == nil {
+		t.Fatal("statusRun() error = nil, want auth error")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
+		t.Fatalf("ExitCode() = %d, want %d (ExitAuth)", got, cmdutil.ExitAuth)
+	}
+	for _, want := range []string{
+		"Token is invalid or expired",
+		"仅重新登录不会生效",
+		"not visible in this environment",
+		"set HOME",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want %q mentioned", errOut.String(), want)
+		}
+	}
+	if strings.Contains(errOut.String(), "bad-token") {
+		t.Fatalf("stderr must not leak the token value: %q", errOut.String())
+	}
+	if out.String() != "" {
+		t.Fatalf("failure diagnostics must stay off stdout: %q", out.String())
+	}
+}
+
+// Issue 681 JSON mirror: the same environment gains config_dir_unresolvable
+// in the token-invalid payload so scripts can tell a broken environment from
+// a plain expired token without parsing stderr.
+func TestStatusRunInvalidEnvTokenUnresolvableConfigJSON(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "")
+	t.Setenv("GC_HOST", "")
+	t.Setenv("GC_TOKEN", "bad-token")
+	t.Setenv("GITCODE_TOKEN", "")
+
+	io, _, out, errOut := iostreams.Test()
+	opts := &StatusOptions{
+		IO:   io,
+		JSON: true,
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{
+				Transport: testutil.NewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusUnauthorized,
+						Header:     make(http.Header),
+						Body:       ioNopCloser(`{"message":"invalid token"}`),
+					}, nil
+				}),
+			}, nil
+		},
+		Config: func() (config.Config, error) { return config.New(), nil },
+	}
+
+	err := statusRun(opts)
+	if err == nil {
+		t.Fatal("statusRun() error = nil, want auth error")
+	}
+	if got := cmdutil.ExitCode(err); got != cmdutil.ExitAuth {
+		t.Fatalf("ExitCode() = %d, want %d (ExitAuth)", got, cmdutil.ExitAuth)
+	}
+	want := `{
+  "hostname": "gitcode.com",
+  "logged_in": true,
+  "token_source": "GC_TOKEN",
+  "token_valid": false,
+  "config_dir_unresolvable": true
+}`
+	if got := strings.TrimSpace(out.String()); got != want {
+		t.Fatalf("stdout JSON = %q, want %q", got, want)
+	}
+	if errOut.String() != "" {
+		t.Fatalf("JSON mode must not print text guidance to stderr, got %q", errOut.String())
 	}
 }
 

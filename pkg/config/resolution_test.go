@@ -43,3 +43,24 @@ func TestConfigResolutionErr(t *testing.T) {
 		}
 	})
 }
+
+// Issue 684: a non-absolute value is not the plain ErrNoConfigDir sentinel —
+// it carries the ErrConfigDirNotAbsolute reason, so command surfaces can
+// render the more precise "not absolute" guidance instead of the generic
+// "set HOME/GC_CONFIG_DIR" text.
+func TestConfigResolutionErrRelativeDir(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("GC_CONFIG_DIR", "relative")
+
+	err := New().ResolutionErr()
+	if err == nil {
+		t.Fatal("ResolutionErr() = nil for a relative GC_CONFIG_DIR, want ErrConfigDirNotAbsolute")
+	}
+	if !errors.Is(err, ErrConfigDirNotAbsolute) {
+		t.Fatalf("ResolutionErr() = %v, want errors.Is(err, ErrConfigDirNotAbsolute)", err)
+	}
+	if errors.Is(err, ErrNoConfigDir) {
+		t.Fatalf("ResolutionErr() = %v, must NOT be ErrNoConfigDir for a relative path", err)
+	}
+}

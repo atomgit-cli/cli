@@ -114,3 +114,19 @@ func TestStateRootCheckedNormalHomeBranch(t *testing.T) {
 		t.Fatalf("stateRootChecked() = %q, want absolute", root)
 	}
 }
+
+// windowsStateRoot is a pure helper that mirrors the JS stateDir precedence
+// independent of the host OS, so its precedence contract is pinned on every
+// platform (issue 683: the Windows branch must prefer LOCALAPPDATA, then
+// <home>\AppData\Local, exactly as the JS helper does).
+func TestWindowsStateRootPrecedence(t *testing.T) {
+	localAppData := filepath.Join("C:", "Users", "x", "AppData", "Local")
+	home := filepath.Join("C:", "Users", "x")
+
+	if got := windowsStateRoot(localAppData, ""); got != filepath.Join(localAppData, "gitcode-cli") {
+		t.Fatalf("windowsStateRoot(LOCALAPPDATA, \"\") = %q, want %q", got, filepath.Join(localAppData, "gitcode-cli"))
+	}
+	if got := windowsStateRoot("", home); got != filepath.Join(home, "AppData", "Local", "gitcode-cli") {
+		t.Fatalf("windowsStateRoot(\"\", home) = %q, want %q", got, filepath.Join(home, "AppData", "Local", "gitcode-cli"))
+	}
+}

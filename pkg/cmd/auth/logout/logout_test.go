@@ -41,8 +41,40 @@ func TestLogoutRunRemovesStoredToken(t *testing.T) {
 	if token != "" || source != "" {
 		t.Fatalf("ActiveToken() after logout = %q, %q", token, source)
 	}
-	if !strings.Contains(out.String(), "Cleared stored authentication for gitcode.com") {
+	// A bare logout removes the active account, so the message names that
+	// account (issue 678) instead of over-claiming the whole host.
+	if !strings.Contains(out.String(), "Cleared stored authentication for tester on gitcode.com") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// Issue 678: a bare logout reports exactly the account it removed (the
+// active one) rather than over-claiming the whole host — "meant alice, got
+// the host" must be visible in the success message.
+func TestLogoutBareResolvesActiveUserInMessage(t *testing.T) {
+	t.Setenv("GC_CONFIG_DIR", t.TempDir())
+	cfg := config.New()
+	auth := cfg.Authentication()
+	if _, err := auth.Login("gitcode.com", "alice", "tokenA", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Login("gitcode.com", "bob", "tokenB", "https", false); err != nil {
+		t.Fatal(err)
+	}
+	io, _, out, _ := iostreams.Test()
+	err := logoutRun(&LogoutOptions{IO: io, Config: func() (config.Config, error) { return cfg, nil }, Hostname: "gitcode.com", Yes: true})
+	if err != nil {
+		t.Fatalf("logoutRun() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "for bob on gitcode.com") {
+		t.Fatalf("success message must name the removed active account: %q", out.String())
+	}
+	if strings.Contains(out.String(), "for gitcode.com\n") {
+		t.Fatalf("success message must not over-claim the host: %q", out.String())
+	}
+	// The active account was removed; the other stays.
+	if users := auth.LoginUsers("gitcode.com"); len(users) != 1 || users[0] != "alice" {
+		t.Fatalf("users after bare logout = %v, want [alice]", users)
 	}
 }
 
